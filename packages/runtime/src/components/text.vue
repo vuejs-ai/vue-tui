@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, getCurrentInstance, inject, provide, useAttrs } from "vue";
+import { getCurrentInstance, inject, provide, useAttrs } from "vue";
 import { TextContextKey } from "../context.ts";
 import { textProps } from "./text-props.ts";
 import { assertTextValid } from "./text-validate.ts";
@@ -22,22 +22,51 @@ const componentInstance = instance;
 // provides true yet reads false here; descendants then see true and render inline.
 provide(TextContextKey, true);
 const insideText = inject(TextContextKey, false);
-const hasContent = computed(() => slots.default != null);
+
+// A childless Text intentionally renders no host so it cannot introduce a flex
+// gap. Do not cache this check: render functions may add or remove the default
+// slot on the same component instance, and Vue forwards component directives to
+// that render's current root.
+function hasContent(): boolean {
+  return slots.default != null;
+}
 
 function hostProps(): Record<string, unknown> {
   return explicitHostProps(props, componentInstance.vnode.props, textProps);
 }
+
+// Keep the template as one comment-free conditional root chain. A root-level
+// template comment makes the SFC compiler emit a development-root Fragment:
+// Vue unwraps that Fragment for component directives in development, but
+// production `v-show` never reaches the concrete Text host.
+function topLevelHostProps(): Record<string, unknown> {
+  // Match Ink's <Text> defaults: text nodes shrink when they overflow a
+  // no-wrap flex row.
+  return { ...hostProps(), flexShrink: 1 };
+}
 </script>
 
 <template>
-  <template v-if="assertNoUnsupportedAttrs('Text', attrs) && assertTextValid(props) && hasContent">
-    <tui-virtual-text v-if="insideText" v-bind="hostProps()">
-      <slot />
-    </tui-virtual-text>
-    <!-- Match Ink's <Text> defaults: flexShrink=1 so text nodes shrink when they
-         overflow their container (e.g. in no-wrap flex rows). -->
-    <tui-text v-else v-bind="{ ...hostProps(), flexShrink: 1 }">
-      <slot />
-    </tui-text>
-  </template>
+  <tui-virtual-text
+    v-if="
+      insideText &&
+      assertNoUnsupportedAttrs('Text', attrs) &&
+      assertTextValid(props) &&
+      hasContent()
+    "
+    v-bind="hostProps()"
+  >
+    <slot />
+  </tui-virtual-text>
+  <tui-text
+    v-else-if="
+      !insideText &&
+      assertNoUnsupportedAttrs('Text', attrs) &&
+      assertTextValid(props) &&
+      hasContent()
+    "
+    v-bind="topLevelHostProps()"
+  >
+    <slot />
+  </tui-text>
 </template>

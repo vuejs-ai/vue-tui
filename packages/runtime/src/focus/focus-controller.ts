@@ -37,6 +37,8 @@ interface CreateInternalFocusControllerOptions {
 }
 
 function isDisplayNone(node: TuiNode): boolean {
+  const style = (node as { style?: { display?: unknown } }).style;
+  if (style?.display === "none") return true;
   const yoga = (node as { yoga?: { getDisplay?: () => number } }).yoga;
   return yoga?.getDisplay?.() === Yoga.DISPLAY_NONE;
 }

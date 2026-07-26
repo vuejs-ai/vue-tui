@@ -14,6 +14,7 @@ import {
   type TuiRoot,
   type TuiStatic,
   type TuiText,
+  type TuiVirtualText,
 } from "./nodes.ts";
 import { getRenderedTargetController } from "../rendered-target.ts";
 import {
@@ -212,7 +213,12 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     dispose(): void;
   }
 
+  interface TextDisplayController {
+    dispose(): void;
+  }
+
   const boxDisplayControllers = new WeakMap<TuiBox, BoxDisplayController>();
+  const textDisplayControllers = new WeakMap<TuiText | TuiVirtualText, TextDisplayController>();
   const disposedYogaHosts = new WeakSet<TuiNode>();
 
   function disposeHostYoga(node: TuiNode): void {
@@ -223,6 +229,9 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       // A retained host ref may outlive Vue's unmount. Make later
       // style.display writes inert before freeing its Yoga allocation.
       boxDisplayControllers.get(node)?.dispose();
+    }
+    if (node.type === "tui-text") {
+      textDisplayControllers.get(node)?.dispose();
     }
     if (node.type === "tui-box" || node.type === "tui-text" || node.type === "tui-static") {
       detachYoga(node);
@@ -291,6 +300,48 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     });
   }
 
+  /**
+   * Install Vue's `v-show` display surface on both Text host forms. A top-level
+   * Text owns a Yoga node, while a nested Text is composed inline by its nearest
+   * top-level Text owner and therefore invalidates that owner's measurement.
+   */
+  function installTextStyle(node: TuiText | TuiVirtualText): void {
+    let directiveHidden = false;
+    let disposed = false;
+
+    const style = {} as TuiText["style"];
+    Object.defineProperty(style, "display", {
+      enumerable: true,
+      get: () => (directiveHidden ? "none" : ""),
+      set: (value: string) => {
+        const nextHidden = value === "none";
+        if (directiveHidden === nextHidden) return;
+        directiveHidden = nextHidden;
+        if (disposed) return;
+
+        if (node.type === "tui-text") {
+          applyYogaProp(node, "display", nextHidden ? "none" : "flex");
+        } else {
+          const owner = findMeasureOwner(node);
+          if (owner?.type === "tui-text") markTextDirty(owner);
+        }
+        onCommit();
+      },
+    });
+    Object.defineProperty(node, "style", {
+      configurable: true,
+      enumerable: false,
+      writable: true,
+      value: style,
+    });
+
+    textDisplayControllers.set(node, {
+      dispose(): void {
+        disposed = true;
+      },
+    });
+  }
+
   function createElement(type: string): TuiNode {
     switch (type) {
       case "tui-box": {
@@ -303,10 +354,14 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
         const n = createText();
         attachHostYoga(n);
         bindTextMeasure(n);
+        installTextStyle(n);
         return n;
       }
-      case "tui-virtual-text":
-        return createVirtualText();
+      case "tui-virtual-text": {
+        const n = createVirtualText();
+        installTextStyle(n);
+        return n;
+      }
       case "tui-static": {
         const n = createStatic();
         attachHostYoga(n);
@@ -456,12 +511,15 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     onCommit();
   }
 
-  /** Recursively free yoga nodes for all yoga-carrying descendants, then the node itself. */
+  /** Recursively retire host display bridges and free each Yoga-carrying descendant. */
   function freeSubtreeYoga(node: TuiNode): void {
     if (isContainer(node)) {
       for (const child of (node as { children: TuiNode[] }).children) {
         freeSubtreeYoga(child);
       }
+    }
+    if (node.type === "tui-virtual-text") {
+      textDisplayControllers.get(node)?.dispose();
     }
     if (node.type === "tui-box" || node.type === "tui-text" || node.type === "tui-static") {
       disposeHostYoga(node);

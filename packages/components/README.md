@@ -2,7 +2,7 @@
 
 High-level Vue components for [vue-tui](https://github.com/vuejs-ai/vue-tui), composed from `@vue-tui/runtime` primitives.
 
-> Early days — the component set is small and growing. Currently: `ScrollBox`, `Spinner`.
+> Early days — the component set is small and growing. Currently: `Newline`, `Spacer`, `Spinner`, and `ScrollBox`.
 
 ## Install
 
@@ -10,6 +10,10 @@ High-level Vue components for [vue-tui](https://github.com/vuejs-ai/vue-tui), co
 npm install @vue-tui/components
 # peer deps: @vue-tui/runtime, vue ^3.4
 ```
+
+## Visibility
+
+All current components resolve to one `Box` or `Text` root and therefore inherit Vue's built-in `v-show` automatically. This is the same current-root rule as an application-defined single-root component, not dedicated behavior in each component. Hidden components remain mounted: for example, a hidden `Spinner` keeps advancing its timer and a hidden `ScrollBox` retains its scroll state. Use `v-if` when the component should unmount or its work should stop.
 
 ## Spinner
 

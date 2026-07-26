@@ -50,6 +50,7 @@ export interface TuiText extends NodeBase {
   type: "tui-text";
   children: TuiInlineNode[];
   yoga: YogaNodeRef;
+  style: TuiHostStyle;
   props: TextProps;
   /** Increments whenever cached text composition or measurement can become stale. */
   textRevision: number;
@@ -59,6 +60,7 @@ export interface TuiVirtualText extends NodeBase {
   type: "tui-virtual-text";
   parent: TuiText | TuiVirtualText | null;
   children: TuiInlineNode[];
+  style: TuiHostStyle;
   props: TextProps;
 }
 
@@ -146,23 +148,29 @@ export function createBox(): TuiBox {
 }
 
 export function createText(): TuiText {
-  return trackTuiNode({
+  const node = {
     type: "tui-text",
     parent: null,
     children: [],
     yoga: UNATTACHED_YOGA,
+    style: { display: "" },
     props: {},
     textRevision: 0,
-  });
+  } satisfies TuiText;
+  Object.defineProperty(node, "style", { enumerable: false });
+  return trackTuiNode(node);
 }
 
 export function createVirtualText(): TuiVirtualText {
-  return trackTuiNode({
+  const node = {
     type: "tui-virtual-text",
     parent: null,
     children: [],
+    style: { display: "" },
     props: {},
-  });
+  } satisfies TuiVirtualText;
+  Object.defineProperty(node, "style", { enumerable: false });
+  return trackTuiNode(node);
 }
 
 export function createTextLeaf(value: string): TuiTextLeaf {

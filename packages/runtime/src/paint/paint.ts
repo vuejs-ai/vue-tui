@@ -567,6 +567,7 @@ function renderTextWithInlineStyles(
   node: TuiText | TuiVirtualText,
   inheritedBg?: unknown,
 ): InlineText {
+  if (node.style.display === "none") return [];
   if (!node.children || node.children.length === 0) return [];
   // Only this Text receives the surrounding Box background as its base. Nested
   // Text nodes receive no second Box fallback: omission then inherits this

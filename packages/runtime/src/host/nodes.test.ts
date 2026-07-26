@@ -1,6 +1,6 @@
 import { expect, test } from "vite-plus/test";
 import Yoga from "yoga-layout";
-import { createBox, createText, createTextLeaf, isContainer } from "./nodes.ts";
+import { createBox, createText, createTextLeaf, createVirtualText, isContainer } from "./nodes.ts";
 import { buildNodeOps } from "./node-ops.ts";
 
 test("createBox returns shape with empty children", () => {
@@ -73,6 +73,63 @@ test("Box style.display becomes inert before its Yoga node is freed", () => {
     child.style.display = "none";
   }).not.toThrow();
   expect(commits).toBe(commitsAfterRemoval);
+});
+
+test("top-level Text style.display maps Vue v-show writes onto Yoga display", () => {
+  let commits = 0;
+  const ops = buildNodeOps({ onCommit: () => commits++ });
+  const text = ops.createElement("tui-text") as ReturnType<typeof createText>;
+
+  expect(text.style.display).toBe("");
+  expect(Object.keys(text)).not.toContain("style");
+  expect(text.yoga.getDisplay()).toBe(Yoga.DISPLAY_FLEX);
+
+  text.style.display = "none";
+  expect(text.style.display).toBe("none");
+  expect(text.yoga.getDisplay()).toBe(Yoga.DISPLAY_NONE);
+  expect(commits).toBe(1);
+
+  text.style.display = "";
+  expect(text.style.display).toBe("");
+  expect(text.yoga.getDisplay()).toBe(Yoga.DISPLAY_FLEX);
+  expect(commits).toBe(2);
+});
+
+test("top-level Text style.display becomes inert before its Yoga node is freed", () => {
+  let commits = 0;
+  const ops = buildNodeOps({ onCommit: () => commits++ });
+  const parent = ops.createElement("tui-box") as ReturnType<typeof createBox>;
+  const text = ops.createElement("tui-text") as ReturnType<typeof createText>;
+  ops.insert(text, parent, null);
+  ops.remove(text);
+  const commitsAfterRemoval = commits;
+
+  expect(() => {
+    text.style.display = "none";
+  }).not.toThrow();
+  expect(commits).toBe(commitsAfterRemoval);
+});
+
+test("nested Text style.display invalidates its top-level Text measure owner", () => {
+  const ops = buildNodeOps({ onCommit: () => {} });
+  const box = ops.createElement("tui-box") as ReturnType<typeof createBox>;
+  const text = ops.createElement("tui-text") as ReturnType<typeof createText>;
+  const nested = ops.createElement("tui-virtual-text") as ReturnType<typeof createVirtualText>;
+  const leaf = ops.createText("hello") as ReturnType<typeof createTextLeaf>;
+  ops.insert(text, box, null);
+  ops.insert(nested, text, null);
+  ops.insert(leaf, nested, null);
+
+  box.yoga.calculateLayout(20, undefined, Yoga.DIRECTION_LTR);
+  expect(text.yoga.getComputedLayout().width).toBe(5);
+
+  nested.style.display = "none";
+  box.yoga.calculateLayout(20, undefined, Yoga.DIRECTION_LTR);
+  expect(text.yoga.getComputedLayout().width).toBe(0);
+
+  nested.style.display = "";
+  box.yoga.calculateLayout(20, undefined, Yoga.DIRECTION_LTR);
+  expect(text.yoga.getComputedLayout().width).toBe(5);
 });
 
 test("createTextLeaf carries its value", () => {

@@ -16,15 +16,16 @@ const instance = getCurrentInstance();
 if (!instance) throw new Error("<Box> must be created inside a Vue component instance");
 const componentInstance = instance;
 
+// Keep the template root free of comments. A root-level template comment makes
+// the SFC compiler emit a development-root Fragment: Vue unwraps that Fragment
+// for component directives in development, but production `v-show` never
+// reaches the host. One conditional host root works in both builds.
 function hostProps(): Record<string, unknown> {
   return explicitHostProps(props, componentInstance.vnode.props, boxProps);
 }
 </script>
 
 <template>
-  <!-- The root `v-if` makes this component a Vue Fragment, so its `$el` is the fragment's
-       boundary anchor — NOT the `tui-box` host node; a Box ref is resolved to its host node
-       by the shared rendered-target resolver. -->
   <tui-box
     v-if="assertNoUnsupportedAttrs('Box', attrs) && assertBoxValid(props)"
     v-bind="hostProps()"

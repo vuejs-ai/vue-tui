@@ -13,6 +13,7 @@ import { sanitizeAnsiMultiline } from "../paint/sanitize-ansi.ts";
 import type { TextProps, TuiNode, TuiText, TuiVirtualText } from "./nodes.ts";
 
 export function flattenLeaves(node: TuiText | TuiVirtualText): string {
+  if (node.style.display === "none") return "";
   if (!node.children || node.children.length === 0) return "";
   let out = "";
   for (const child of node.children) {

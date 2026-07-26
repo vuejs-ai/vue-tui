@@ -28,7 +28,7 @@ function throughMarker(output: string, marker: string): string {
   return output.slice(0, index + marker.length);
 }
 
-test("Box-rooted v-show preserves state and terminal ownership through a real Fullscreen PTY", async () => {
+test("Box- and Text-rooted v-show preserve state and terminal ownership through a real Fullscreen PTY", async () => {
   const ps = term("v-show", ["24"], { name: "xterm-256color" });
   let exited = false;
 
@@ -37,6 +37,8 @@ test("Box-rooted v-show preserves state and terminal ownership through a real Fu
     await ps.waitForOutput((output) => output.includes(shownMarker));
     let lines = await visibleLines(throughMarker(ps.output, shownMarker));
     expect(lines).toContain("probe:0");
+    expect(lines).toContain("text-top:0");
+    expect(lines).toContain("text-before[text-inline:0]text-after");
     expect(lines).toContain("visible=true revision=0 focused=true");
 
     let before = ps.output.length;
@@ -46,6 +48,8 @@ test("Box-rooted v-show preserves state and terminal ownership through a real Fu
     const hiddenOutput = throughMarker(ps.output, hiddenMarker);
     lines = await visibleLines(hiddenOutput);
     expect(lines).not.toContain("probe:0");
+    expect(lines).not.toContain("text-top:0");
+    expect(lines).toContain("text-before[]text-after");
     expect(lines).toContain("visible=false revision=0 focused=false");
 
     before = ps.output.length;
@@ -54,6 +58,8 @@ test("Box-rooted v-show preserves state and terminal ownership through a real Fu
     await ps.waitForOutput((output) => output.slice(before).includes(updatedMarker));
     lines = await visibleLines(throughMarker(ps.output, updatedMarker));
     expect(lines).not.toContain("probe:2");
+    expect(lines).not.toContain("text-top:2");
+    expect(lines).toContain("text-before[]text-after");
     expect(lines).toContain("visible=false revision=2 focused=false");
 
     before = ps.output.length;
@@ -62,6 +68,8 @@ test("Box-rooted v-show preserves state and terminal ownership through a real Fu
     await ps.waitForOutput((output) => output.slice(before).includes(restoredMarker));
     lines = await visibleLines(throughMarker(ps.output, restoredMarker));
     expect(lines).toContain("probe:2");
+    expect(lines).toContain("text-top:2");
+    expect(lines).toContain("text-before[text-inline:2]text-after");
     expect(lines).toContain("visible=true revision=2 focused=false");
 
     before = ps.output.length;
@@ -84,6 +92,7 @@ test("Box-rooted v-show preserves state and terminal ownership through a real Fu
       ps.output.lastIndexOf(ENTER_ALT_SCREEN),
     );
     expect(ps.output.lastIndexOf(SHOW_CURSOR)).toBeLessThan(ps.output.indexOf("__VSHOW_OK__"));
+    expect(ps.output).not.toContain("Runtime directive used on component with non-element root");
   } finally {
     if (!exited) ps.killNow("SIGTERM");
   }

@@ -132,13 +132,15 @@ renderer-owned facts. [Package guide](./packages/runtime).
 
 ### Components
 
-| Component                                                  | Import from                   | Description                                                                                    |
-| ---------------------------------------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------- |
-| [`<Box>`](./packages/runtime/src/components/box.vue)       | `@vue-tui/runtime`            | Layout container — flex, size, spacing, border, background, clipping, plus Box-rooted `v-show` |
-| [`<Text>`](./packages/runtime/src/components/text.vue)     | `@vue-tui/runtime`            | Text — foreground/background color, six modifiers, wrapping, truncation                        |
-| [`<Static>`](./packages/runtime/src/components/static.vue) | **`@vue-tui/runtime/inline`** | Commits a mounted subtree to Inline terminal history                                           |
+| Component                                                  | Import from                   | Description                                                                           |
+| ---------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------- |
+| [`<Box>`](./packages/runtime/src/components/box.vue)       | `@vue-tui/runtime`            | Layout container — flex, size, spacing, border, background, clipping, and `v-show`    |
+| [`<Text>`](./packages/runtime/src/components/text.vue)     | `@vue-tui/runtime`            | Text — foreground/background color, six modifiers, wrapping, truncation, and `v-show` |
+| [`<Static>`](./packages/runtime/src/components/static.vue) | **`@vue-tui/runtime/inline`** | Commits a mounted subtree to Inline terminal history                                  |
 
 `Box` and `Text` have closed prop surfaces: unknown props, misspellings, browser attributes, and listeners such as `@click` are rejected at runtime instead of silently ignored. The full prop tables are in the [Runtime guide](./packages/runtime/README.md#components).
+
+`v-show` belongs to the visual host layer rather than to a component allowlist. Vue forwards it through any chain of components whose current effective root is one `Box` or `Text`, so ordinary custom single-root components and the first-party `Newline`, `Spacer`, `Spinner`, and `ScrollBox` inherit it without dedicated support code. Fragment and text roots keep Vue's development warning and ineffective behavior, Comment roots are silently ineffective, and `Static` remains the explicit history-boundary exception.
 
 `Static` is the only export on that subpath, and it is deliberately absent from the package root. It has no collection API — use ordinary Vue iteration with stable keys. Each instance commits its output once and then releases its subtree; effective Fullscreen rejects `Static`.
 

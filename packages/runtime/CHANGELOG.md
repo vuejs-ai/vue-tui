@@ -14,7 +14,7 @@ behind flags.
 ### Added
 
 - **Inline history** — `@vue-tui/runtime/inline` exports `Static`.
-- **Visibility** — Box-rooted `v-show`; hidden subtrees stay mounted and reactive.
+- **Visibility** — host-based `v-show` for Box, top-level Text, inline Text, and single-root component chains; hidden subtrees stay mounted and reactive.
 - **Text colors** — `color="default"` / `backgroundColor="default"` select the terminal default per channel.
 - **Box styles** — `alignContent`, `aspectRatio`, per-edge `borderColor`, `borderDimColor`, and `borderBackgroundColor`.
 - **Borders** — `borderStyle` accepts all eight `cli-boxes` frames or a complete custom frame object.

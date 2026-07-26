@@ -54,3 +54,16 @@ test("empty <Text> in a column contributes height 0 (no leading blank line)", as
   // Single line "hello" — the empty text adds no row above it.
   expect(lastFrame()).toBe("hello");
 });
+
+test("childless <Text /> does not create a flex gap", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box gap={1}>
+        <Text />
+        <Text>hello</Text>
+      </Box>
+    )),
+    { columns: 100 },
+  );
+  expect(lastFrame()).toBe("hello");
+});

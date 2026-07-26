@@ -46,6 +46,7 @@ import { Static } from "@vue-tui/runtime/inline";
   <Text wrap="truncate-start">start truncate</Text>
   <Box flex-direction="row-reverse" :padding-x="1">restored box props</Box>
   <Box v-show="true"><Text>v-show</Text></Box>
+  <Text v-show="true">text v-show</Text>
   <Static v-for="(item, index) in [1, 2, 3]" :key="item">
     <Text>{{ item.toFixed(0) }}:{{ index.toFixed(0) }}</Text>
   </Static>

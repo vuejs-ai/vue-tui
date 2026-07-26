@@ -102,6 +102,18 @@ const App = defineComponent(() => {
         visible: visible.value,
         revision: revision.value,
       }),
+      withDirectives(
+        h(Text, null, () => `text-top:${revision.value}`),
+        [[vShow, visible.value]],
+      ),
+      h(Text, null, () => [
+        "text-before[",
+        withDirectives(
+          h(Text, null, () => `text-inline:${revision.value}`),
+          [[vShow, visible.value]],
+        ),
+        "]text-after",
+      ]),
       h(
         Text,
         null,

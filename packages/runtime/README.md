@@ -80,11 +80,11 @@ useInput((event) => {
 
 ## Components
 
-| Component  | Description                                                                                             |
-| ---------- | ------------------------------------------------------------------------------------------------------- |
-| `<Box>`    | Terminal layout container with flex, size, spacing, border, and clipping props plus Box-rooted `v-show` |
-| `<Text>`   | Terminal text with foreground/background color, dim, bold, wrapping, and truncation                     |
-| `<Static>` | Commits one mounted slot tree to Inline terminal history; import from `@vue-tui/runtime/inline`         |
+| Component  | Description                                                                                     |
+| ---------- | ----------------------------------------------------------------------------------------------- |
+| `<Box>`    | Terminal layout container with flex, size, spacing, border, clipping, and `v-show`              |
+| `<Text>`   | Terminal text with foreground/background color, dim, bold, wrapping, truncation, and `v-show`   |
+| `<Static>` | Commits one mounted slot tree to Inline terminal history; import from `@vue-tui/runtime/inline` |
 
 `Box` and `Text` have closed prop surfaces. The exported `BoxProps` type has these 62 fields:
 
@@ -105,7 +105,7 @@ useInput((event) => {
 
 The three border color channels each have one shared field plus four per-edge spellings. A per-edge value overrides the shared one on that edge only.
 
-`BoxProps` deliberately has no `display` field. Use `v-if` when Vue should own creation and lifecycle, or Box-rooted `v-show` when the subtree should remain mounted while hidden.
+`BoxProps` deliberately has no `display` field. Use `v-if` when Vue should own creation and lifecycle, or `v-show` when a subtree with a single visual root should remain mounted while hidden.
 
 The exported `TextProps` type has exactly nine fields: `color`, `backgroundColor`, `dimColor`, `bold`, `italic`, `underline`, `strikethrough`, `inverse`, and `wrap`. Foreground and background each accept `Color | "default"`: omission independently inherits the enclosing Text's resolved channel, while `"default"` selects that channel's terminal default for the subtree.
 
@@ -140,7 +140,11 @@ Each mounted instance participates immediately and remains open until its first 
 
 On non-TTY output, an accepted block appends immediately before the current dynamic document is written once at clean teardown. Effective visual Fullscreen rejects `Static` before Static bytes or a replacement frame are written; keep Fullscreen history in application state, for example with a bounded `ScrollBox`. Component errors follow Vue's ordinary error handling, and output failures follow the app's general stream and lifecycle contract; Static does not add a separate public failure protocol.
 
-Vue's built-in `v-show` is supported on `<Box>` roots in templates and compiled render functions. It keeps the ordinary component subtree mounted while removing hidden layout content from Yoga layout, paint, targeted focus availability, and Box size. When it becomes true, the Box returns to its current layout and paint properties. Static is a mounted history boundary rather than a layout node, so ancestor or direct `v-show` does not affect its output. Applying `v-show` directly to `Text` is not supported.
+Vue's built-in `v-show` is implemented by the visual host layer, not by an allowlist of public components. `tui-box`, `tui-text`, and inline `tui-virtual-text` provide the display behavior Vue's directive expects. Vue therefore forwards `v-show` through any number of custom components when their current effective root resolves to one `Box` or `Text`; no custom-component registration or component-specific renderer code is needed. The first-party `Newline`, `Spacer`, `Spinner`, and `ScrollBox` follow the same rule through their Text or Box root.
+
+Text emits exactly one host while its current vnode has a default slot, including when the slot currently returns empty content; a completely childless `<Text />` emits a Comment so it cannot introduce flex gap. Render functions may add or remove the slot on the same Text instance, and the root shape is reevaluated on every render. `v-show` keeps the ordinary component subtree mounted while excluding a hidden Box or top-level Text from Yoga layout and paint; a hidden nested Text is omitted from its enclosing Text's measurement and paint. Targeted focus bound to either hidden root becomes unavailable, and showing it again reveals the latest reactive state without restoring focus automatically.
+
+This is Vue's normal current-root behavior rather than a vue-tui directive override. A Fragment root or text root receives Vue's non-element-root warning in development and the directive does not run. A Comment root, including a completely childless Text, is ineffective but does not produce that warning. Runtime does not intercept the directive, collect roots, or guess among descendants. `Static` is the deliberate semantic exception: it commits mounted history rather than representing retractable visual layout, so ancestor or direct `v-show` does not affect its output.
 
 Nested Text spans may nest and wrap safely. Each explicit color or modifier choice applies to its subtree, and the enclosing resolved values resume afterward; a nested `wrap` value has no independent effect because the outermost Text owns width handling for the composed content.
 
