@@ -7,6 +7,7 @@ Build with components, develop with HMR, test with confidence.
 
 <p align="center">
   <a href="https://npmx.dev/@vue-tui/runtime"><img alt="@vue-tui/runtime npm version" src="https://img.shields.io/npm/v/@vue-tui/runtime?label=%40vue-tui%2Fruntime&color=42b883"></a>
+  <a href="https://npmx.dev/@vue-tui/use"><img alt="@vue-tui/use npm version" src="https://img.shields.io/npm/v/@vue-tui/use?label=%40vue-tui%2Fuse&color=42b883"></a>
   <a href="https://npmx.dev/@vue-tui/components"><img alt="@vue-tui/components npm version" src="https://img.shields.io/npm/v/@vue-tui/components?label=%40vue-tui%2Fcomponents&color=42b883"></a>
   <a href="https://npmx.dev/@vue-tui/vite"><img alt="@vue-tui/vite npm version" src="https://img.shields.io/npm/v/@vue-tui/vite?label=%40vue-tui%2Fvite&color=42b883"></a>
   <a href="https://npmx.dev/@vue-tui/testing"><img alt="@vue-tui/testing npm version" src="https://img.shields.io/npm/v/@vue-tui/testing?label=%40vue-tui%2Ftesting&color=42b883"></a>
@@ -96,6 +97,7 @@ createApp(App).mount({ exitOnCtrlC: true });
 - [Packages](#packages)
 - [Examples](#examples)
 - [`@vue-tui/runtime`](#vue-tuiruntime)
+- [`@vue-tui/use`](#vue-tuiuse)
 - [`@vue-tui/components`](#vue-tuicomponents)
 - [`@vue-tui/testing`](#vue-tuitesting)
 - [Development](#development)
@@ -108,6 +110,7 @@ createApp(App).mount({ exitOnCtrlC: true });
 | Package                                                                    | Description                                                                                                                                                                                                                                                                                                        |
 | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime)       | The core framework — Vue 3 renderer for the terminal with common components (`Box`, `Text`, etc.), an explicit Inline-history subpath, narrow public layout and Box facts, normalized input, explicit unique focus ownership, lifecycle, and yoga-based flexbox layout. _API stabilizing._                         |
+| [`@vue-tui/use`](https://www.npmjs.com/package/@vue-tui/use)               | Reusable public-Runtime-only behavior — lifecycle-scoped input as a function-ref composable or renderless component.                                                                                                                                                                                               |
 | [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite)             | Vite plugin — add `vueTui()` to `vite.config.ts` for an in-process terminal dev server with HMR (`npm run dev`). Dev only; the production build is a plain `tsdown` config that bundles the app into one self-contained Node file (see the starter and `examples/*/tsdown.config.ts`). _Experimental; may change._ |
 | [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing)       | Deterministic test host — model terminal or stream conditions, inspect content commits, and assert the terminal-emulated screen                                                                                                                                                                                    |
 | [`@vue-tui/components`](https://www.npmjs.com/package/@vue-tui/components) | High-level components built on the runtime primitives — `<ScrollBox>`, `<Spinner>`, `<Newline>`, and `<Spacer>`.                                                                                                                                                                                                   |
@@ -177,6 +180,26 @@ A `key` carries exactly one normalized `name` or one logical `character`, plus `
 Every active subscription receives every event and handler return values are ignored, so nothing consumes input or steers routing. Focus composes directly as `useInput(handler, { isActive: focus.isFocused })`. See the [Runtime guide](./packages/runtime/README.md#composables) for ownership and lifecycle rules.
 
 `useApp()` intentionally exposes only `exit()`; the coordination barriers `waitUntilExit()` and `waitUntilRenderFlush()` belong to the app owner returned by `createApp()`. Component failures stay Vue failures — Runtime preserves your `onErrorCaptured()` and `app.config.errorHandler` policy. See [App Lifecycle](./packages/runtime/README.md#app-lifecycle).
+
+## `@vue-tui/use`
+
+Reusable behavior composed only from public Runtime APIs. [Package guide](./packages/use).
+
+`useInputWhileMounted()` returns a Vue function ref, ready to bind directly to a vnode. The input subscription is active while that vnode is mounted and inactive after Vue assigns `null` on unmount:
+
+```vue
+<script setup lang="ts">
+import { useInputWhileMounted } from "@vue-tui/use";
+
+const targetRef = useInputWhileMounted(handleInput);
+</script>
+
+<template>
+  <Panel v-if="open" :ref="targetRef" />
+</template>
+```
+
+`<UseInputWhileMounted>` is exported separately from `@vue-tui/use/components`. It provides the same lifetime as a renderless component that emits `input` and renders only its default slot. Both forms retain `useInput()`'s global broadcast semantics; the bound ref is a lifecycle signal, not a focus or routing target. `v-show` does not unmount, so it remains active.
 
 ## `@vue-tui/components`
 

@@ -93,11 +93,18 @@ export default defineConfig({
         command: "vp run @vue-tui/components#test",
         dependsOn: ["ci:build"],
       },
+      // @vue-tui/use carries public-Runtime-only composables and renderless
+      // companion components. Keep its runtime and authoring-shape tests on an
+      // independent branch like the other public packages.
+      "ci:test:use": {
+        command: "vp run @vue-tui/use#test",
+        dependsOn: ["ci:build"],
+      },
       // The package graph's own Vue version cannot catch declaration bundling
       // against a different supported Vue patch. Install packed runtime,
-      // testing, and components packages beside Vue 3.4 and TypeScript 6. Pack
-      // only after dist-consuming tests finish because the pack build cleans
-      // those shared worktree outputs before recreating them.
+      // testing, use, and components packages beside Vue 3.4 and TypeScript 6.
+      // Pack only after dist-consuming tests finish because the pack build
+      // cleans those shared worktree outputs before recreating them.
       "ci:package-consumer": {
         command: "vp run verify:package-consumer",
         dependsOn: [
@@ -110,6 +117,7 @@ export default defineConfig({
           "ci:test:vite-plugin",
           "ci:test:examples",
           "ci:test:components",
+          "ci:test:use",
         ],
       },
       ci: {
@@ -125,6 +133,7 @@ export default defineConfig({
           "ci:test:vite-plugin",
           "ci:test:examples",
           "ci:test:components",
+          "ci:test:use",
           "ci:package-consumer",
         ],
       },

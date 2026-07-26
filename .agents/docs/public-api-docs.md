@@ -2,7 +2,7 @@
 
 Every public export carries a TSDoc block, because go-to-definition and hover are where users actually read the API. A public export without one is incomplete, not merely undocumented.
 
-Scope: the exports of `@vue-tui/runtime` (root and `/inline`), `@vue-tui/components`, and `@vue-tui/testing`. Internal entries and private helpers are exempt.
+Scope: the exports of `@vue-tui/runtime` (root and `/inline`), `@vue-tui/use`, `@vue-tui/components`, and `@vue-tui/testing`. Internal entries and private helpers are exempt.
 
 ## The shape
 

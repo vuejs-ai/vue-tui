@@ -65,9 +65,11 @@ try {
   run("vp", ["run", "@vue-tui/runtime#build"]);
   run("vp", ["run", "@vue-tui/testing#build"]);
   run("vp", ["run", "@vue-tui/components#build"]);
+  run("vp", ["run", "@vue-tui/use#build"]);
   const runtimeTarball = pack(join(repositoryRoot, "packages/runtime"));
   const testingTarball = pack(join(repositoryRoot, "packages/testing"));
   const componentsTarball = pack(join(repositoryRoot, "packages/components"));
+  const useTarball = pack(join(repositoryRoot, "packages/use"));
 
   const consumerVariants = [
     { directoryName: "vue-3.4", vueVersion: "3.4.38", supportsUseTemplateRef: false },
@@ -88,6 +90,7 @@ try {
             "@vue-tui/runtime": `file:${runtimeTarball}`,
             "@vue-tui/testing": `file:${testingTarball}`,
             "@vue-tui/components": `file:${componentsTarball}`,
+            "@vue-tui/use": `file:${useTarball}`,
             vue: vueVersion,
           },
           devDependencies: {
@@ -161,6 +164,14 @@ import {
 } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
 import { render } from "@vue-tui/testing";
+import {
+  useInputWhileMounted,
+  type InputWhileMountedTargetRef,
+} from "@vue-tui/use";
+import {
+  UseInputWhileMounted,
+  type UseInputWhileMountedProps,
+} from "@vue-tui/use/components";
 import type { ComponentPublicInstance } from "vue";
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
@@ -200,6 +211,16 @@ void Box;
 void Text;
 void Static;
 void render;
+void UseInputWhileMounted;
+
+const targetRef: InputWhileMountedTargetRef = useInputWhileMounted(() => undefined);
+const inputWhileMountedProps: UseInputWhileMountedProps = {
+  onInput(event) {
+    if (event.type === "text") event.text.toUpperCase();
+  },
+};
+void targetRef;
+void inputWhileMountedProps;
 
 const sampleKey: TuiInputEvent = {
   type: "key",
@@ -221,6 +242,10 @@ type _RemovedTransform = typeof import("@vue-tui/runtime").Transform;
 type _RemovedUseRenderSession = typeof import("@vue-tui/runtime").useRenderSession;
 // @ts-expect-error Former public /devtools path is not a package export.
 type _RemovedPublicDevtools = typeof import("@vue-tui/runtime/devtools");
+// @ts-expect-error Renderless companions stay off the composable-only root.
+type _NoUseComponentOnRoot = typeof import("@vue-tui/use").UseInputWhileMounted;
+// @ts-expect-error Composables stay on the root rather than the component entry.
+type _NoHookOnUseComponents = typeof import("@vue-tui/use/components").useInputWhileMounted;
 `,
     );
 
@@ -230,10 +255,15 @@ type _RemovedPublicDevtools = typeof import("@vue-tui/runtime/devtools");
 import { Box, Text, useFocus, useInput, useLayoutSize } from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
 import { ScrollBox } from "@vue-tui/components";
+import { useInputWhileMounted } from "@vue-tui/use";
+import { UseInputWhileMounted } from "@vue-tui/use/components";
 
 export const Smoke = defineComponent(() => {
   const focus = useFocus();
   const { width } = useLayoutSize();
+  const targetRef = useInputWhileMounted((event) => {
+    if (event.type === "paste") event.text.toUpperCase();
+  });
   useInput(
     (event) => {
       if (event.type === "key" && event.key.name === "enter") {
@@ -243,13 +273,20 @@ export const Smoke = defineComponent(() => {
     { isActive: focus.isFocused },
   );
   return () => (
-    <Box>
+    <Box ref={targetRef}>
       <Static>
         <Text>history</Text>
       </Static>
       <ScrollBox>
         <Text>{String(width.value)}</Text>
       </ScrollBox>
+      <UseInputWhileMounted
+        onInput={(event) => {
+          if (event.type === "text") event.text.toUpperCase();
+        }}
+      >
+        <Text>scoped</Text>
+      </UseInputWhileMounted>
     </Box>
   );
 });
@@ -260,13 +297,29 @@ export const Smoke = defineComponent(() => {
       join(consumerDirectory, "App.vue"),
       `<script setup lang="ts">
 import { onMounted, shallowRef } from "vue";
-import { Box, Text, useFocus, useInput, useLayoutSize, useStdin } from "@vue-tui/runtime";
+import {
+  Box,
+  Text,
+  useFocus,
+  useInput,
+  useLayoutSize,
+  useStdin,
+  type TuiInputEvent,
+} from "@vue-tui/runtime";
 import { Static } from "@vue-tui/runtime/inline";
+import { useInputWhileMounted } from "@vue-tui/use";
+import { UseInputWhileMounted } from "@vue-tui/use/components";
 
 const host = shallowRef<InstanceType<typeof Box> | null>(null);
 const focus = useFocus(host);
 const { width } = useLayoutSize();
 const stdin = useStdin();
+const targetRef = useInputWhileMounted((event) => {
+  if (event.type === "paste") event.text.toUpperCase();
+});
+function handleMountedInput(event: TuiInputEvent): void {
+  if (event.type === "text") event.text.toUpperCase();
+}
 onMounted(() => focus.focus());
 useInput(
   (event) => {
@@ -278,12 +331,14 @@ stdin.setRawMode(false);
 </script>
 
 <template>
-  <Box ref="host">
-    <Static>
-      <Text>static</Text>
-    </Static>
-    <Text>{{ width }}:{{ focus.isFocused }}</Text>
-  </Box>
+  <UseInputWhileMounted @input="handleMountedInput">
+    <Box ref="host">
+      <Static>
+        <Text>static</Text>
+      </Static>
+      <Box :ref="targetRef"><Text>{{ width }}:{{ focus.isFocused }}</Text></Box>
+    </Box>
+  </UseInputWhileMounted>
 </template>
 `,
     );
@@ -315,6 +370,8 @@ void accepted;
 import { PassThrough } from "node:stream";
 import * as runtime from "@vue-tui/runtime";
 import * as inline from "@vue-tui/runtime/inline";
+import * as useRoot from "@vue-tui/use";
+import * as useComponents from "@vue-tui/use/components";
 import { render } from "@vue-tui/testing";
 import { defineComponent, h, onScopeDispose } from "vue";
 
@@ -345,6 +402,8 @@ for (const [name, value] of Object.entries({
 assert.equal(typeof Box, "object");
 assert.equal(typeof Text, "object");
 assert.deepEqual(Object.keys(inline).sort(), ["Static"]);
+assert.deepEqual(Object.keys(useRoot).sort(), ["useInputWhileMounted"]);
+assert.deepEqual(Object.keys(useComponents).sort(), ["UseInputWhileMounted"]);
 assert.equal("Transform" in runtime, false);
 assert.equal("useRenderSession" in runtime, false);
 assert.equal("kittyFlags" in runtime, false);
@@ -370,6 +429,28 @@ const App = defineComponent(() => {
 const result = await render(App);
 assert.match(result.lastFrame().replace(/\\x1b\\[[0-9;]*m/g, ""), /w=/);
 result.dispose();
+
+const receivedWhileMounted = [];
+const MountedInput = defineComponent(() => {
+  const targetRef = useRoot.useInputWhileMounted((event) => {
+    if (event.type === "text") receivedWhileMounted.push("hook:" + event.text);
+  });
+  return () =>
+    h(
+      useComponents.UseInputWhileMounted,
+      {
+        onInput(event) {
+          if (event.type === "text") receivedWhileMounted.push("component:" + event.text);
+        },
+      },
+      () => h(Box, { ref: targetRef }, () => h(Text, null, () => "mounted-input")),
+    );
+});
+const mountedInputResult = await render(MountedInput);
+assert.equal(mountedInputResult.terminal.rawMode.current, true);
+await mountedInputResult.stdin.write("x");
+assert.deepEqual(receivedWhileMounted.sort(), ["component:x", "hook:x"]);
+mountedInputResult.dispose();
 
 // Failed-mount behavior, through the packed tarball, on this consumer's Vue.
 // Runtime aligns with Vue instead of exceeding it: Vue takes container ownership

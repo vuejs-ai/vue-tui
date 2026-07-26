@@ -71,18 +71,20 @@ The selected supported subpaths are deliberately small:
 
 `/fullscreen` is absent because Fullscreen is a mount mode rather than a separate component or composable universe. Per-area implementation evidence — which test proves which contract — is maintained in the [re-audit](./runtime-public-foundation-reaudit.md), not duplicated here.
 
-The public API is everything exported from the common root (`@vue-tui/runtime`) and every explicitly documented supported public subpath, together with **their types**: component prop types, composable return/options types, and named types such as `UseBoxMetricsReturn`, `BoxProps`, `UseXReturn`, and `UseXOptions`. A package `exports` entry is not sufficient by itself; the path becomes supported only when the project documents and guards it as an authoring surface.
+The independent higher layer now has two supported entries. The `@vue-tui/use` root exports exactly the `useInputWhileMounted` value and named `InputWhileMountedTargetRef` type. `@vue-tui/use/components` exports exactly the `UseInputWhileMounted` value and named `UseInputWhileMountedProps` type. Its lifecycle contract is recorded in [input-while-mounted](./input-while-mounted.md); it composes only the public Runtime root and does not expand Runtime's own foundation.
+
+The Runtime public API is everything exported from the common root (`@vue-tui/runtime`) and every explicitly documented supported public subpath, together with **their types**: component prop types, composable return/options types, and named types such as `UseBoxMetricsReturn`, `BoxProps`, `UseXReturn`, and `UseXOptions`. A package `exports` entry is not sufficient by itself; the path becomes supported only when the project documents and guards it as an authoring surface. The same value-and-type rule applies to the separate public `@vue-tui/use` root.
 
 A type is **as much a part of the current contract as runtime behavior**. If user code can name a type and annotate with it, changing or removing it changes the supported authoring surface at compile time. That is allowed during experimentation when deliberate, but the type surface must be designed, updated, and tested with the same care as runtime behavior.
 
 Because it is contract, it is **tested, not merely shipped**:
 
-- `public-api.test.ts` snapshots the **exact** common-root value-export set — adding, removing, or renaming any runtime export fails it, so every surface change must be a deliberate edit there. Each supported public subpath needs its own exact value-export guard, named-type checks, declaration inspection, and clean package consumer. Type-only exports are erased at runtime, so the type surface is guarded individually rather than exhaustively snapshotted. The removed presentation option, ARIA names, environment behavior, and helper paths have negative package and runtime guards rather than private compatibility shims.
+- `public-api.test.ts` snapshots the **exact** Runtime common-root value-export set, and the `@vue-tui/use` root and `/components` entry each have an exact guard — adding, removing, or renaming a value fails the owning package's test, so every surface change must be deliberate. Each supported public subpath needs its own exact value-export guard, named-type checks, declaration inspection, and clean package consumer. Type-only exports are erased at runtime, so the type surface is guarded individually rather than exhaustively snapshotted. The removed presentation option, ARIA names, environment behavior, and helper paths have negative package and runtime guards rather than private compatibility shims.
 - Type-safety behavior is established by running the type-checker against real TSX and template usage, never assumed. The historical ARIA experiment in [accessibility-api](./removed-experiments.md#screen-reader-presentation-and-aria) remains evidence that permissive template global attributes cannot replace a closed Runtime semantic contract.
 
 ## Explicitly outside this foundation
 
-- No `@vue-tui/use` package exists. A replaceable higher layer should grow only after real applications repeat behavior worth sharing.
+- `@vue-tui/use` is a replaceable public-only higher layer and is not part of the Runtime foundation. Its current lifecycle helper does not add a Runtime primitive, target route, or privileged dependency.
 - No physical caret, pointer targeting, arbitrary painted-text selection, OSC 52 clipboard, child-PTY forwarding, or generic terminal-protocol transaction is promised.
 - No screen-reader or ARIA contract is claimed.
 - No component catalog, formatted error screen, application policy, release, or 1.0 compatibility promise is part of this foundation.
