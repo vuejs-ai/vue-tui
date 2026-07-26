@@ -129,34 +129,40 @@ renderer-owned facts. [Package guide](./packages/runtime).
 
 ### Components
 
-| Component  | Description                                                                                    |
-| ---------- | ---------------------------------------------------------------------------------------------- |
-| `<Box>`    | Layout container — flex, size, spacing, border, background, clipping, plus Box-rooted `v-show` |
-| `<Text>`   | Text — foreground/background color, six modifiers, wrapping, truncation                        |
-| `<Static>` | Commits a mounted subtree to Inline terminal history; import from `@vue-tui/runtime/inline`    |
+| Component                                                  | Import from                   | Description                                                                                    |
+| ---------------------------------------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------- |
+| [`<Box>`](./packages/runtime/src/components/box.vue)       | `@vue-tui/runtime`            | Layout container — flex, size, spacing, border, background, clipping, plus Box-rooted `v-show` |
+| [`<Text>`](./packages/runtime/src/components/text.vue)     | `@vue-tui/runtime`            | Text — foreground/background color, six modifiers, wrapping, truncation                        |
+| [`<Static>`](./packages/runtime/src/components/static.vue) | **`@vue-tui/runtime/inline`** | Commits a mounted subtree to Inline terminal history                                           |
 
 `Box` and `Text` have closed prop surfaces: unknown props, misspellings, browser attributes, and listeners such as `@click` are rejected at runtime instead of silently ignored. The full prop tables are in the [Runtime guide](./packages/runtime/README.md#components).
 
-`Static` is absent from the root export and has no collection API — use ordinary Vue iteration with stable keys. Each instance commits its output once and then releases its subtree; effective Fullscreen rejects `Static`.
+`Static` is the only export on that subpath, and it is deliberately absent from the package root. It has no collection API — use ordinary Vue iteration with stable keys. Each instance commits its output once and then releases its subtree; effective Fullscreen rejects `Static`.
 
 ```vue
-<Static v-for="entry in completedEntries" :key="entry.id">
-  <CompletedEntry :entry="entry" />
-</Static>
+<script setup lang="ts">
+import { Static } from "@vue-tui/runtime/inline";
+</script>
+
+<template>
+  <Static v-for="entry in completedEntries" :key="entry.id">
+    <CompletedEntry :entry="entry" />
+  </Static>
+</template>
 ```
 
 ### Composables
 
 Each one must be called inside a mounted render tree.
 
-| Composable                 | Returns                                     | Description                                                                    |
-| -------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------ |
-| `useInput(handler, opts?)` | —                                           | Normalized text, paste, and key events; `opts.isActive` gates the subscription |
-| `useFocus(target?)`        | `{ isFocused, focus, blur }`                | One explicit focus identity, optionally bound to a rendered component          |
-| `useApp()`                 | `{ exit }`                                  | Request normal or error exit from inside the tree                              |
-| `useLayoutSize()`          | `{ width, height }`                         | Readonly reactive root-layout size; `height` may be `Infinity`                 |
-| `useStdin()`               | `{ stdin, isRawModeSupported, setRawMode }` | Mounted stdin plus an independently owned raw-mode hold                        |
-| `useBoxMetrics(ref)`       | `{ width, height, left, top, hasMeasured }` | Parent-relative metrics for one directly referenced `<Box>`                    |
+| Composable                                                                    | Returns                                     | Description                                                                    |
+| ----------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------ |
+| [`useInput(handler, opts?)`](./packages/runtime/src/composables/useInput.ts)  | —                                           | Normalized text, paste, and key events; `opts.isActive` gates the subscription |
+| [`useFocus(target?)`](./packages/runtime/src/composables/useFocus.ts)         | `{ isFocused, focus, blur }`                | One explicit focus identity, optionally bound to a rendered component          |
+| [`useApp()`](./packages/runtime/src/composables/useApp.ts)                    | `{ exit }`                                  | Request normal or error exit from inside the tree                              |
+| [`useLayoutSize()`](./packages/runtime/src/composables/use-layout-size.ts)    | `{ width, height }`                         | Readonly reactive root-layout size; `height` may be `Infinity`                 |
+| [`useStdin()`](./packages/runtime/src/composables/useStdin.ts)                | `{ stdin, isRawModeSupported, setRawMode }` | Mounted stdin plus an independently owned raw-mode hold                        |
+| [`useBoxMetrics(ref)`](./packages/runtime/src/composables/use-box-metrics.ts) | `{ width, height, left, top, hasMeasured }` | Parent-relative metrics for one directly referenced `<Box>`                    |
 
 `useInput()` delivers one frozen event per input:
 
@@ -177,12 +183,12 @@ Every active subscription receives every event and handler return values are ign
 Higher-level components composed only from the primitives above, published
 separately so the core stays small. [Package guide](./packages/components).
 
-| Component     | Description                                                                            |
-| ------------- | -------------------------------------------------------------------------------------- |
-| `<ScrollBox>` | Bounded sticky-bottom viewport; the app drives scrolling through its imperative handle |
-| `<Spinner>`   | Animated loading spinner — `dots` / `line` presets or custom frames, optional label    |
-| `<Newline>`   | Emits `count` newline characters inside a `<Text>`                                     |
-| `<Spacer>`    | A growing `Box` that fills the free main-axis space                                    |
+| Component                                                            | Description                                                                            |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| [`<ScrollBox>`](./packages/components/src/scroll-box/scroll-box.vue) | Bounded sticky-bottom viewport; the app drives scrolling through its imperative handle |
+| [`<Spinner>`](./packages/components/src/spinner/spinner.vue)         | Animated loading spinner — `dots` / `line` presets or custom frames, optional label    |
+| [`<Newline>`](./packages/components/src/newline/newline.vue)         | Emits `count` newline characters inside a `<Text>`                                     |
+| [`<Spacer>`](./packages/components/src/spacer/spacer.vue)            | A growing `Box` that fills the free main-axis space                                    |
 
 ## `@vue-tui/testing`
 
@@ -231,7 +237,7 @@ test("counter responds to + and - keys", async () => {
 });
 ```
 
-`render(component, options?)` takes a flat options object; omitting it models an Inline TTY.
+[`render(component, options?)`](./packages/testing/src/render.ts) takes a flat options object; omitting it models an Inline TTY.
 
 | Option         | Default    | Description                                     |
 | -------------- | ---------- | ----------------------------------------------- |
