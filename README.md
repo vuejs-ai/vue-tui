@@ -185,21 +185,19 @@ Every active subscription receives every event and handler return values are ign
 
 Reusable behavior composed only from public Runtime APIs. [Package guide](./packages/use).
 
-`useInputWhileMounted()` returns a Vue function ref, ready to bind directly to a vnode. The input subscription is active while that vnode is mounted and inactive after Vue assigns `null` on unmount:
+### Composables
 
-```vue
-<script setup lang="ts">
-import { useInputWhileMounted } from "@vue-tui/use";
+| Composable                                                                                           | Returns     | Description                                                      |
+| ---------------------------------------------------------------------------------------------------- | ----------- | ---------------------------------------------------------------- |
+| [`useInputWhileMounted(handler)`](./packages/use/src/input-while-mounted/use-input-while-mounted.ts) | `targetRef` | Global input while one directly referenced vnode remains mounted |
 
-const targetRef = useInputWhileMounted(handleInput);
-</script>
+### Components
 
-<template>
-  <Panel v-if="open" :ref="targetRef" />
-</template>
-```
+| Component                                                                                      | Import from               | Description                                                        |
+| ---------------------------------------------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------ |
+| [`<UseInputWhileMounted>`](./packages/use/src/input-while-mounted/use-input-while-mounted.vue) | `@vue-tui/use/components` | Emits global input while mounted and renders only its default slot |
 
-`<UseInputWhileMounted>` is exported separately from `@vue-tui/use/components`. It provides the same lifetime as a renderless component that emits `input` and renders only its default slot. Both forms retain `useInput()`'s global broadcast semantics; the bound ref is a lifecycle signal, not a focus or routing target. `v-show` does not unmount, so it remains active.
+Both forms retain `useInput()`'s broadcast semantics. The bound ref is a lifecycle signal rather than a focus or routing target; `v-show` remains mounted and active.
 
 ## `@vue-tui/components`
 
