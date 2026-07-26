@@ -9,6 +9,20 @@ export function trackHost(dispose: () => void): () => void {
   };
 }
 
+/**
+ * Dispose every test host still open in the current file.
+ *
+ * - Registered through the runner's global `afterEach` when one exists, so most
+ *   suites never call it.
+ * - Idempotent; equivalent to `dispose()` on each outstanding result.
+ *
+ * @example Manual cleanup without global hooks
+ * ```ts
+ * afterEach(() => {
+ *   cleanup();
+ * });
+ * ```
+ */
 export function cleanup(): void {
   const disposers = Array.from(activeHosts);
   activeHosts.clear();

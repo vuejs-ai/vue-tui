@@ -8,11 +8,17 @@ export interface UseLayoutSizeReturn {
 }
 
 /**
- * Return the terminal-cell width and height Runtime makes available to the root layout.
+ * Read the terminal-cell width and height Runtime gives the root layout.
  *
- * These are layout inputs from one accepted dimension snapshot, not physical terminal
- * properties and not a component's measured rectangle. `height === Infinity` means
- * Runtime imposes no vertical layout bound.
+ * - One accepted layout snapshot — not physical terminal columns and rows, and
+ *   not a measured rectangle.
+ * - `height === Infinity` means no vertical bound.
+ *
+ * @example Draw a rule across the full width
+ * ```tsx
+ * const { width } = useLayoutSize();
+ * return () => <Text>{"-".repeat(width.value)}</Text>;
+ * ```
  */
 export function useLayoutSize(): UseLayoutSizeReturn {
   const session = useInternalRenderSession().session;

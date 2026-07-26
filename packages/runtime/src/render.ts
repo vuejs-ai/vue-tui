@@ -336,6 +336,28 @@ function isExpectedManagedInputUnavailableError(error: Error): boolean {
   );
 }
 
+/**
+ * Create a terminal application from a root component.
+ *
+ * - `mount()` is one transaction: a failure rolls back every terminal, stream,
+ *   and console change before rethrowing.
+ * - The owner holds `waitUntilExit()` and `waitUntilRenderFlush()`; descendants
+ *   get only `useApp().exit()`.
+ * - Component failures stay Vue failures — your `onErrorCaptured()` and
+ *   `app.config.errorHandler` still apply.
+ *
+ * @example Start an Inline app and wait for it to finish
+ * ```ts
+ * const app = createApp(App);
+ * app.mount({ exitOnCtrlC: true });
+ * await app.waitUntilExit();
+ * ```
+ *
+ * @example Take over the whole screen
+ * ```ts
+ * createApp(Dashboard).mount({ mode: "fullscreen" });
+ * ```
+ */
 export function createApp(root: Component, rootProps?: RootProps | null): TuiApp {
   // exit promise — created at createApp time so waitUntilExit() works even
   // before mount (it just hangs until mount + exit).
@@ -1082,11 +1104,33 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
 
       // Remove the signal-exit handler first (Ink parity G18, ink.tsx:765:
-      // `this.unsubscribeExit()`). When teardown is triggered BY a signal,
-      // signal-exit has already unloaded its own listeners, so this is a no-op;
-      // when triggered by unmount()/exit(), it stops the handler from firing
-      // later (no leak, no double-run — teardownStarted also guards re-entry).
-      if (mountedUnsubscribeExit) {
+      // `this.unsubscribeExit()`), but ONLY on the cooperative path, where it
+      // stops the handler from firing later (no leak, no double-run —
+      // teardownStarted also guards re-entry).
+      //
+      // On a terminating path the unsubscribe is not merely redundant, it is
+      // actively harmful. signal-exit@4 `emit()` iterates its LIVE listener
+      // array (`for (const fn of this.listeners[ev])`) while this unsubscribe
+      // `splice`s that same array, so an app that removes ITSELF mid-dispatch
+      // shifts the cursor past its neighbour and the next app's handler never
+      // runs — stranding a second app on the same terminal in raw mode.
+      // Leaving the token registered cannot double-run: the emitter latches
+      // `emitted.exit` before dispatching, and the process is terminating
+      // regardless. (Node's own EventEmitter clones its handler array before
+      // emitting, so the `process.on("exit")` path never had this hazard.) The
+      // earlier claim that this call was a signal-path no-op held only for the
+      // PROCESS signal listeners that `unload()` removes; the emitter's own
+      // listener array stays live and mutable during the dispatch.
+      //
+      // Gating on `immediateTermination` alone is sufficient, and deliberately
+      // so. Removing a LATER-registered app is harmless — the tail shifts left
+      // into the cursor's next step, so nothing is skipped — and removing an
+      // EARLIER one is unreachable, because every app before the cursor has
+      // already torn down and `teardownStarted` makes its unsubscribe a no-op.
+      // signal-teardown-cross-unmount.sequential.test.tsx pins that reasoning
+      // with a real cross-app unmount driven from a Vue cleanup hook, so a
+      // future change that makes teardown re-entrant fails there.
+      if (mountedUnsubscribeExit && !immediateTermination) {
         const unsubscribe = mountedUnsubscribeExit;
         mountedUnsubscribeExit = null;
         runBestEffort(unsubscribe);

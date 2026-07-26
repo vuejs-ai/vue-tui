@@ -37,23 +37,22 @@ export interface RenderToStringOptions {
 }
 
 /**
- * Render a Vue component to a string synchronously. Unlike `createApp()`,
- * this function does not write to stdout, does not set up any terminal event
- * listeners, and returns the rendered output as a string.
+ * Render a component to a string synchronously, with no terminal session.
  *
- * Useful for generating documentation, writing output to files, testing, or
- * any scenario where you need the rendered output as a string without
- * starting a persistent terminal application.
+ * - Writes nothing and installs no listeners; input, focus, and stream
+ *   composables get inert services and `useApp().exit()` is a no-op.
+ * - `<Static>` output is prepended to the dynamic output.
+ * - Models 80x24 by default; pass `height: Infinity` for an unbounded document.
  *
- * Terminal-specific input, focus, and stream composables receive isolated inert
- * services because there is no terminal session. `useApp()` can be called while
- * sharing a component with a live tree, and its `exit()` operation is a no-op.
+ * @example Snapshot a component in a test
+ * ```ts
+ * expect(renderToString(Summary)).toContain("2 passed");
+ * ```
  *
- * The `<Static>` component is supported --- its output is prepended to the
- * dynamic output.
- *
- * If a component throws during rendering, the error is propagated to the
- * caller after cleanup.
+ * @example Render an unbounded document
+ * ```ts
+ * const report = renderToString(Report, { height: Infinity });
+ * ```
  */
 export function renderToString(component: Component, options?: RenderToStringOptions): string {
   return renderToStringInternal(component, normalizePublicOptions(options));

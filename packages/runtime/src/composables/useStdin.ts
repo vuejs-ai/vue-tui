@@ -22,6 +22,24 @@ export interface UseStdinReturn {
   readonly setRawMode: (enabled: boolean) => void;
 }
 
+/**
+ * Access the mounted stdin plus an independently owned raw-mode hold.
+ *
+ * - An escape hatch: no normalized parser, encoding, or Kitty/paste negotiation.
+ *   Direct listeners and their cleanup are yours.
+ * - Each call owns one idempotent hold. `false` releases only this call's, and
+ *   scope disposal releases it without disturbing `useInput()`.
+ * - A non-TTY stream stays observable with `isRawModeSupported` false.
+ *
+ * @example Inspect raw bytes and clean up with the scope
+ * ```ts
+ * const { stdin, isRawModeSupported, setRawMode } = useStdin();
+ * if (isRawModeSupported) setRawMode(true);
+ * const onData = (chunk: Buffer) => inspect(chunk);
+ * stdin.on("data", onData);
+ * onScopeDispose(() => stdin.off("data", onData));
+ * ```
+ */
 export function useStdin(): UseStdinReturn {
   const ctx = inject(StdinContextKey);
   if (!ctx) throw new Error("useStdin() must be called inside a vue-tui render tree");

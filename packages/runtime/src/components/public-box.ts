@@ -15,6 +15,35 @@ export type PublicBoxInstance = ComponentPublicInstance<BoxProps> & BoxInstanceB
 // Publish only the stable author-facing constructor shape. Exposing the SFC's
 // generated DefineComponent type bakes the build-time Vue patch release's
 // private generic arity into our tarball and breaks other supported Vue patches.
+
+/**
+ * Terminal layout container: the flexbox primitive every layout is built from.
+ *
+ * - Yoga flexbox, so `flexDirection` defaults to `"row"`, not CSS block flow.
+ * - 62 closed props. Unknown props, misspellings, and listeners like `@click`
+ *   throw rather than pass through.
+ * - No `display` prop: `v-if` to own creation, Box-rooted `v-show` to hide a
+ *   mounted subtree.
+ * - `borderStyle` takes one of eight frame names or a complete custom frame;
+ *   per-edge color props override the shared one.
+ *
+ * @example A bordered column
+ * ```tsx
+ * <Box flexDirection="column" borderStyle="round" padding={1} gap={1}>
+ *   <Text bold>Title</Text>
+ *   <Text>Body</Text>
+ * </Box>
+ * ```
+ *
+ * @example Push content apart with a growing spacer
+ * ```tsx
+ * <Box width="100%">
+ *   <Text>left</Text>
+ *   <Box flexGrow={1} />
+ *   <Text>right</Text>
+ * </Box>
+ * ```
+ */
 export const Box = BoxSfc as unknown as PublicComponent<BoxProps, BoxInstanceBrand>;
 
 /** Runtime check corresponding to the nominal public constructor type above. */

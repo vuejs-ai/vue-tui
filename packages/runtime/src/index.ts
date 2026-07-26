@@ -11,6 +11,28 @@ export { renderToString, type RenderToStringOptions } from "./render-to-string.t
 export { Box } from "./components/public-box.ts";
 export type { BoxProps } from "./components/box-props.ts";
 export type { Color } from "./components/color.ts";
+/**
+ * Terminal text: the only component that renders characters.
+ *
+ * - All text must sit inside a `<Text>`; a bare string in a `<Box>` is not
+ *   renderable.
+ * - Nested spans inherit per channel; `color="default"` resets only that channel.
+ * - The six modifiers are three-state: omitted inherits, `true` on, `false` off.
+ * - The outermost `wrap` governs composed content.
+ *
+ * @example Compose styled spans
+ * ```tsx
+ * <Text>
+ *   Count: <Text bold color="green">{count}</Text>
+ *   <Text dimColor> (+/- to change)</Text>
+ * </Text>
+ * ```
+ *
+ * @example Truncate a long path to one line
+ * ```tsx
+ * <Text wrap="truncate-start">{longPath}</Text>
+ * ```
+ */
 export const Text = TextSfc as unknown as PublicComponent<TextProps>;
 export type { TextProps } from "./components/text-props.ts";
 

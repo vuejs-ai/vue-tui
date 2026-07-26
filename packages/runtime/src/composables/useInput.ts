@@ -55,8 +55,27 @@ function readIsActive(source: MaybeRefOrGetter<boolean>): boolean {
 /**
  * Subscribe to normalized text, key, and paste input for the current app.
  *
- * A handler ref is resolved when each event arrives. Every active subscription
- * receives the event; return values do not consume it or affect peer delivery.
+ * - Every active subscription receives every event; return values never consume
+ *   one or affect peers.
+ * - Only `type: "key"` guarantees `event.key`; text carries one only when the
+ *   terminal supplied it.
+ * - `isActive` owns managed-input demand, so an inactive subscription holds no
+ *   terminal resources.
+ * - A handler ref is resolved per event, so handlers swap without resubscribing.
+ *
+ * @example Handle typed text and a named key
+ * ```tsx
+ * useInput((event) => {
+ *   if (event.type === "text") append(event.text);
+ *   else if (event.type === "key" && event.key.name === "enter") submit();
+ * });
+ * ```
+ *
+ * @example Listen only while this component owns focus
+ * ```tsx
+ * const focus = useFocus();
+ * useInput(handler, { isActive: focus.isFocused });
+ * ```
  */
 export function useInput(
   handler: MaybeRef<InputHandler>,

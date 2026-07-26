@@ -32,11 +32,22 @@ const EMPTY_METRICS: BoxMetricsSnapshot = Object.freeze({
 /**
  * Observe the last accepted layout rectangle of one directly referenced Box.
  *
- * Before the first accepted measurement, and while the target is detached,
- * unmounted, retargeted, or excluded from layout by `v-show`, the four numbers
- * are zero and `hasMeasured` is false. A real zero-sized Box reports zero size
- * with `hasMeasured` true. Pending repaint or temporary suspension for the same
- * target retains the last accepted values.
+ * - Zero with `hasMeasured` false before the first measurement and while the
+ *   target is detached, unmounted, retargeted, or hidden by `v-show`. A real
+ *   zero-sized Box reports zero with `hasMeasured` true.
+ * - A pending repaint keeps the last accepted values.
+ * - The ref must bind directly to `<Box>` in the current app; anything else throws.
+ *
+ * @example Render only once the panel has been measured
+ * ```tsx
+ * const panel = shallowRef<InstanceType<typeof Box> | null>(null);
+ * const { width, hasMeasured } = useBoxMetrics(panel);
+ * return () => (
+ *   <Box ref={panel}>
+ *     <Text>{hasMeasured.value ? `${width.value} cols` : "measuring..."}</Text>
+ *   </Box>
+ * );
+ * ```
  */
 export function useBoxMetrics<T extends PublicBoxInstance>(
   target: Readonly<Ref<T | null | undefined>>,

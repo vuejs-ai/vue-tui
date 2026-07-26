@@ -35,6 +35,30 @@ export interface UseFocusReturn {
   blur(): void;
 }
 
+/**
+ * Create one explicit focus identity for this component.
+ *
+ * - Each call is a distinct identity; `focus()` replaces the current owner
+ *   synchronously. One owner per app.
+ * - `isFocused` composes directly with
+ *   `useInput(handler, { isActive: focus.isFocused })`.
+ * - No target ties validity to the Vue scope; a component ref also clears focus
+ *   on removal or hidden ancestry.
+ * - Operations on a disposed handle are inert. There is no focus manager, Tab
+ *   handling, or restoration.
+ *
+ * @example Focus-gated input
+ * ```tsx
+ * const focus = useFocus();
+ * useInput((event) => handle(event), { isActive: focus.isFocused });
+ * ```
+ *
+ * @example Bind the identity to a rendered Box
+ * ```tsx
+ * const panel = shallowRef<InstanceType<typeof Box> | null>(null);
+ * const focus = useFocus(panel); // focus clears if the Box unmounts
+ * ```
+ */
 export function useFocus(): UseFocusReturn;
 export function useFocus(target: FocusTarget): UseFocusReturn;
 export function useFocus(target?: FocusTarget): UseFocusReturn {

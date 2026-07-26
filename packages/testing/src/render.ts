@@ -191,6 +191,30 @@ function trimFrame(raw: string): string {
     .trimEnd();
 }
 
+/**
+ * Mount a component against a finite modeled terminal host for tests.
+ *
+ * - `frames` and `lastFrame()` are renderer content commits — styling, no control
+ *   sequences. `screen()` is the emulated cell surface. Assert the one you mean.
+ * - Options are flat; omitting them models an Inline TTY at 100x100.
+ * - `unmount()` keeps the emulator readable for restoration assertions;
+ *   `dispose()` releases everything and is idempotent.
+ *
+ * @example Drive a component through input
+ * ```ts
+ * const result = await render(Counter);
+ * await result.stdin.write("+");
+ * expect(result.lastFrame()).toContain("Count: 1");
+ * result.dispose();
+ * ```
+ *
+ * @example Assert terminal restoration in Fullscreen
+ * ```ts
+ * const result = await render(App, { mode: "fullscreen", columns: 40, rows: 10 });
+ * result.unmount();
+ * expect((await result.screen()).cursor.visible).toBe(true);
+ * ```
+ */
 export async function render(
   component: Component,
   options: RenderOptions = {},

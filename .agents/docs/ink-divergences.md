@@ -968,3 +968,18 @@ or internal mechanics so they are not mistaken for parity gaps.
   (the `child.type !== "comment"` guards in `paint.ts` and `text-measure.ts`; `G52`). This is renderer mechanics, not a divergence entry by
   itself. The removed `<Transform>` literal-`false` edge is documented above as a
   historical entry.
+- Teardown unsubscribes its signal-exit token **only on the cooperative path**, unlike Ink's
+  unconditional [`this.unsubscribeExit()`](https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/ink.tsx#L769).
+  The intended behavior is identical — every mounted app is torn down — so this is not a
+  divergence entry; only the implementation differs, and it differs because the two projects
+  pin different major versions of the dependency. Ink pins `signal-exit@^3`, whose emit
+  delegates to a real Node `EventEmitter`; Node clones the handler array before dispatching, so
+  removing a handler mid-emit is harmless. vue-tui is on `signal-exit@4`, which replaced that
+  with a hand-rolled emitter that iterates the **live** array
+  (`for (const fn of this.listeners[ev])`) while its unsubscribe `splice`s the same array. An
+  app that removes itself mid-emit therefore shifts the index and the next app's handler is
+  skipped, stranding a second app on the same terminal in raw mode. Run-verified against both
+  versions with a two-handler probe where the first handler unsubscribes itself: v3 runs both,
+  v4 runs only the first. Copying Ink's unconditional call back would reintroduce the bug;
+  `integration/lifecycle/multi-app-signal-teardown.sequential.test.tsx` pins it. `unload()` is
+  not a substitute — it removes the process signal listeners, not the emitter's own list.
