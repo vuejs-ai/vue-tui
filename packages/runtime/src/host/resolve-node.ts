@@ -45,9 +45,9 @@ export function resolveTuiNode(value: unknown): TuiNode | null {
   if (isRenderedHostNode(value)) return value;
   const obj = value as Record<string, unknown>;
   const host = hostElFromSubTree(obj.$);
-  if (isRenderedHostNode(host)) return host as unknown as TuiNode;
+  if (isRenderedHostNode(host)) return host;
   const el = obj.$el;
-  if (isRenderedHostNode(el)) return el as unknown as TuiNode;
+  if (isRenderedHostNode(el)) return el;
   return null;
 }
 

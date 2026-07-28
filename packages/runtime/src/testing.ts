@@ -6,6 +6,7 @@ import { getSharedStdinIngress, type SharedStdinIngress } from "./io/stdin-ingre
 import { createManualSuspensionHost, INTERNAL_SUSPENSION_HOST } from "./process-suspension.ts";
 import { INTERNAL_TERMINAL_SIZE_PROBE } from "./terminal-size-probe.ts";
 import { createInternalMountOptions } from "./internal-mount-options.ts";
+import { createTerminalStyle } from "./paint/terminal-style.ts";
 
 export interface TestContentFrame {
   readonly dynamic: string;
@@ -110,10 +111,17 @@ export function createTestHostBridge(options: TestHostBridgeOptions = {}): TestH
       // Test hosts observe renderer commits directly. Keep those commits
       // unthrottled so one Vue update turn deterministically produces its
       // corresponding content observation, independent of wall-clock timing.
-      const stdin = mountOptions.stdin ?? process.stdin;
+      const publicOptions = { ...mountOptions };
+      const stdin = publicOptions.stdin ?? process.stdin;
+      const stdout = publicOptions.stdout ?? process.stdout;
       const resolvedOptions = createInternalMountOptions({
-        ...mountOptions,
+        ...publicOptions,
         maxFps: 0,
+        // The official test host models output capability explicitly instead
+        // of inheriting the test worker's FORCE_COLOR / NO_COLOR state.
+        terminalStyle: createTerminalStyle(
+          (stdout as { readonly isTTY?: boolean }).isTTY === true ? 3 : 0,
+        ),
         [INTERNAL_RENDER_OBSERVER]: observer,
         [INTERNAL_SUSPENSION_HOST]: suspensionHost,
         [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),

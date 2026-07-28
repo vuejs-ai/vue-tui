@@ -6,7 +6,7 @@ Reusable Vue composables and renderless helpers built only from the public `@vue
 
 ```sh
 npm install @vue-tui/use @vue-tui/runtime
-# peer deps: @vue-tui/runtime, vue ^3.4
+# peer deps: @vue-tui/runtime, vue ^3.5
 ```
 
 ## `useInputWhileMounted`

@@ -1,6 +1,6 @@
 {
   "name": "@vue-tui/testing",
-  "version": "0.0.3",
+  "version": "0.3.0",
   "description": "Deterministic test host for Vue terminal applications.",
   "license": "MIT",
   "files": [
@@ -25,18 +25,19 @@
     "prepublishOnly": "vp run build"
   },
   "dependencies": {
-    "@vue-tui/runtime": "workspace:*",
     "@xterm/addon-unicode11": "catalog:",
     "@xterm/headless": "catalog:"
   },
   "devDependencies": {
-    "@types/node": "^25.6.2",
+    "@types/node": "catalog:",
     "@vitejs/plugin-vue-jsx": "catalog:",
-    "typescript": "^6.0.3",
-    "vite-plus": "^0.1.20",
-    "vue": "^3.4.0"
+    "@vue-tui/runtime": "workspace:*",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:",
+    "vue": "^3.5.0"
   },
   "peerDependencies": {
-    "vue": "^3.4.0"
+    "@vue-tui/runtime": "workspace:*",
+    "vue": "^3.5.0"
   }
 }

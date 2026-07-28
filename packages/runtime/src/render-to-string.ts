@@ -20,6 +20,8 @@ import {
   type InternalStringRenderSessionService,
 } from "./render-session.ts";
 import { MAX_LAYOUT_VALUE } from "./numeric-limits.ts";
+import { resolveTerminalStyle } from "./paint/terminal-style.ts";
+import { normalizeColorOption, type ColorProfile } from "./color-profile.ts";
 
 export interface RenderToStringOptions {
   /**
@@ -34,6 +36,15 @@ export interface RenderToStringOptions {
    * @default 24
    */
   readonly height?: number;
+  /**
+   * Select terminal styling for the returned string. Omission and `false`
+   * produce plain output. `true` automatically detects process stdout, while a
+   * named profile forces that capability. The policy also constrains SGR
+   * already present in rendered text.
+   *
+   * @default false
+   */
+  readonly color?: boolean | ColorProfile;
 }
 
 /**
@@ -62,12 +73,18 @@ interface NormalizedStringOptions {
   readonly width: number;
   /** `null` is Runtime's private unbounded representation. */
   readonly height: number | null;
+  readonly color: boolean | ColorProfile;
 }
 
 function renderToStringInternal(component: Component, options: NormalizedStringOptions): string {
+  const terminalStyle =
+    options.color === true
+      ? resolveTerminalStyle({ color: true, stdout: process.stdout, environment: process.env })
+      : resolveTerminalStyle({ color: options.color });
   const renderSession = createStringRenderSessionService({
     columns: options.width,
     rows: options.height,
+    terminalStyle,
   });
   const contexts = createStringContexts(options.width);
   try {
@@ -177,7 +194,7 @@ function renderStringDocument(
       // String rendering has no physical handoff. Snapshot every complete open
       // Static subtree only after mount, then accept that local document prefix
       // before painting the mutable region that excludes Static hosts.
-      const preparedStatic = prepareStaticOutput(root, options.width);
+      const preparedStatic = prepareStaticOutput(root, options.width, renderSession.terminalStyle);
       capturedStaticOutput = preparedStatic.output;
       preparedStatic.accept();
 
@@ -185,7 +202,7 @@ function renderStringDocument(
       // short documents. Yoga already applied a finite height bound when content
       // exceeded it; shorter output stays unpadded. Clip only by line count so
       // ordinary horizontal overflow behavior matches the previous unbounded paint.
-      output = paint(root);
+      output = paint(root, { terminalStyle: renderSession.terminalStyle });
       if (options.height !== null && output !== "") {
         const lines = output.split("\n");
         if (lines.length > options.height) {
@@ -312,6 +329,7 @@ function normalizePublicOptions(options: unknown): NormalizedStringOptions {
   return {
     width: normalizeWidth(object.width),
     height: normalizeHeight(object.height),
+    color: normalizeColorOption(object.color, false, "renderToString"),
   };
 }
 
@@ -320,13 +338,13 @@ function createDiscardWritable(columns: number): NodeJS.WriteStream {
     write(_chunk, _encoding, callback) {
       callback();
     },
-  }) as unknown as NodeJS.WriteStream;
+  }) as NodeJS.WriteStream;
   Object.assign(stream, { isTTY: false, columns });
   return stream;
 }
 
 function createInertReadable(): NodeJS.ReadStream {
-  const stream = new Readable({ read() {} }) as unknown as NodeJS.ReadStream;
+  const stream = new Readable({ read() {} }) as NodeJS.ReadStream;
   Object.assign(stream, {
     isTTY: false,
     setRawMode() {

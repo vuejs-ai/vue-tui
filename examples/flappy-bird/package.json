@@ -4,17 +4,19 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "check:type": "vue-tsc --noEmit",
     "build": "tsdown",
     "preview": "tsdown && node dist/game.mjs"
   },
   "dependencies": {
     "@vue-tui/runtime": "workspace:*",
     "chalk": "^5.3.0",
-    "vue": "^3.4.0"
+    "vue": "^3.5.0"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "tsdown": "catalog:",
-    "unplugin-vue": "catalog:"
+    "unplugin-vue": "catalog:",
+    "vue-tsc": "catalog:"
   }
 }

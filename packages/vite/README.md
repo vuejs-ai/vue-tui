@@ -1,24 +1,22 @@
 # @vue-tui/vite
 
-Vite plugin for [vue-tui](https://github.com/vuejs-ai/vue-tui): an in-process terminal dev server
-with HMR, for Vue apps that render to the terminal via `@vue-tui/runtime`.
+Vite plugin for [vue-tui](https://github.com/vuejs-ai/vue-tui): an in-process terminal dev server with HMR, for Vue apps that render to the terminal via `@vue-tui/runtime`.
 
 ## Install
 
 ```sh
-npm install -D @vue-tui/vite @vitejs/plugin-vue
-# peer deps: vite ^8, @vue-tui/runtime
+npm install @vue-tui/runtime vue
+npm install -D @vue-tui/vite unplugin-vue vite
 ```
 
 ## Usage
 
-`vueTui()` adds the terminal dev server (HMR). Bring your own SFC/JSX compiler alongside it —
-`@vitejs/plugin-vue` for SFCs (or `@vitejs/plugin-vue-jsx` for JSX):
+`vueTui()` adds the terminal dev server (HMR). Bring your own compiler alongside it: `unplugin-vue/vite` for SFCs, or `@vitejs/plugin-vue-jsx` for JSX. The SFC compiler's default `ssr: false` setting emits the client render functions required by the terminal renderer even though Vite evaluates the app through its SSR module runner.
 
 ```ts
 // vite.config.ts
 import { defineConfig } from "vite";
-import vue from "@vitejs/plugin-vue";
+import vue from "unplugin-vue/vite";
 import { vueTui } from "@vue-tui/vite";
 
 export default defineConfig({
@@ -26,8 +24,7 @@ export default defineConfig({
 });
 ```
 
-- `vite` (dev) — boots the app in-process through Vite's SSR module runner and renders it to the
-  terminal, with state-preserving HMR.
+- `vite` (or `vp run dev` through a package script) — boots the app in-process through Vite's SSR module runner and renders it to the terminal, with state-preserving HMR.
 
 ### Options
 
@@ -37,7 +34,9 @@ vueTui({
 });
 ```
 
-For a JSX/TSX entry, use `@vitejs/plugin-vue-jsx` and point `entry` at the `.tsx` file:
+`entry` accepts a path relative to the Vite root (with or without a leading `/`) or an existing absolute filesystem path.
+
+For a JSX/TSX entry, install `@vitejs/plugin-vue-jsx`, use it for development, and point `entry` at the `.tsx` file. Production JSX builds use `unplugin-vue-jsx/rolldown` in the separate `tsdown` config.
 
 ```ts
 import vueJsx from "@vitejs/plugin-vue-jsx";
@@ -49,9 +48,7 @@ export default defineConfig({
 
 ## Production build
 
-`vueTui()` is **dev only** — it does not touch the production build. `vite build` is browser-first
-and the wrong tool for a Node program, so build with [`tsdown`](https://tsdown.dev) instead: it
-bundles the whole app into one self-contained Node file that runs with no `node_modules` present.
+`vueTui()` is **dev only** — it does not touch the production build. `vite build` is browser-first and the wrong tool for a Node program, so build with [`tsdown`](https://tsdown.dev) instead: it bundles the whole app into one self-contained Node file that runs with no `node_modules` present.
 
 ```ts
 // tsdown.config.ts
@@ -72,8 +69,7 @@ npm install -D tsdown unplugin-vue
 tsdown # → dist/main.mjs, self-contained
 ```
 
-See the [starter](https://github.com/vuejs-ai/vue-tui-starter) and this repo's `examples/` for
-complete setups.
+See the [starter](https://github.com/vuejs-ai/vue-tui/tree/main/templates/vite) and this repo's `examples/` for complete setups.
 
 ## License
 

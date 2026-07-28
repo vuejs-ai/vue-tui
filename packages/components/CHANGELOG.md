@@ -17,6 +17,7 @@ Measured against the published `0.1.1`, which exported only `Spinner`.
 
 ### Changed
 
+- **Vue baseline** — requires Vue 3.5 or newer within the Vue 3 major line.
 - **Visibility** — `Newline`, `Spacer`, `Spinner`, and `ScrollBox` keep a single Box or Text root and inherit host-based `v-show`; hidden components remain mounted.
 - **Component types** — exports publish a stable author-facing constructor instead of the SFC's generated `DefineComponent`, which bakes the build-time Vue patch release into the tarball.
 - **`SpinnerProps["color"]`** — narrowed from `string` to Runtime's `Color`.

@@ -16,6 +16,5 @@ export default defineConfig({
   },
   test: {
     globals: true,
-    env: { FORCE_COLOR: "3" },
   },
 });

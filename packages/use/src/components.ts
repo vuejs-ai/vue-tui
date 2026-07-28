@@ -18,6 +18,9 @@ type UseInputWhileMountedEmit = (event: "input", value: TuiInputEvent) => void;
  * - Renders only its default slot and adds no host node or layout.
  * - Keeping this component mounted while changing or hiding its slot keeps input active.
  *
+ * The public constructor stays independent from the Vue patch release used to
+ * compile the SFC; generated `DefineComponent` arity is not a package contract.
+ *
  * @example Scope input declaratively
  * ```vue
  * <UseInputWhileMounted v-if="open" @input="handleInput">

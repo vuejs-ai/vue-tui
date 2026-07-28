@@ -7,9 +7,9 @@ import {
   styledCharsFromTokens,
   tokenize,
 } from "@alcalzone/ansi-tokenize";
-import chalk from "chalk";
 import { hasAnsiControlCharacters, tokenizeAnsi } from "./ansi-tokenizer.ts";
 import { applyChalk, applyColor } from "./text-style.ts";
+import type { TerminalStyle } from "./terminal-style.ts";
 import { sanitizeAnsi, sanitizeAnsiMultiline } from "./sanitize-ansi.ts";
 import Yoga from "yoga-layout";
 import type {
@@ -288,7 +288,13 @@ class Output {
   private readonly caches: OutputCaches;
   private readonly hardClip: ClipRect | undefined;
 
-  constructor(width: number, height: number, clipToBounds = false, caches = new OutputCaches()) {
+  constructor(
+    width: number,
+    height: number,
+    private readonly terminalStyle: TerminalStyle,
+    clipToBounds = false,
+    caches = new OutputCaches(),
+  ) {
     assertPaintSurfaceSize(width, height);
     this.width = width;
     this.height = height;
@@ -385,7 +391,7 @@ class Output {
         // Every write operation is already split into structural rows. Remove
         // C0/DEL and unsafe terminal controls before width calculation or
         // clipping so the measured grid and emitted bytes stay identical.
-        line = sanitizeAnsi(line, { singleLine: true });
+        line = sanitizeAnsi(line, { singleLine: true, terminalStyle: this.terminalStyle });
         const currentLine = output[y + offsetY];
 
         // Line can be missing if text is taller than pre-initialized output
@@ -565,6 +571,7 @@ function inlineTextValue(chunks: InlineText): string {
 
 function renderTextWithInlineStyles(
   node: TuiText | TuiVirtualText,
+  terminalStyle: TerminalStyle,
   inheritedBg?: unknown,
 ): InlineText {
   if (node.style.display === "none") return [];
@@ -573,8 +580,8 @@ function renderTextWithInlineStyles(
   // Text nodes receive no second Box fallback: omission then inherits this
   // Text's resolved background through the same channel cascade as foreground
   // and modifiers.
-  const inner = squashInlineChildren(node.children, undefined);
-  return applyOwnStyle(node.props, inner, inheritedBg);
+  const inner = squashInlineChildren(node.children, terminalStyle, undefined);
+  return applyOwnStyle(node.props, inner, terminalStyle, inheritedBg);
 }
 
 function explicitStyleMask(props: TextProps): number {
@@ -610,7 +617,12 @@ function omitBlockedStyles(props: TextProps, mask: number): TextProps {
 // selects the terminal-default foreground or background. The structural mask
 // makes enclosing wrappers skip channels already settled by a nested Text,
 // including bold and dim which share SGR 22 as their reset code.
-function applyOwnStyle(props: TextProps, inner: InlineText, inheritedBg: unknown): InlineText {
+function applyOwnStyle(
+  props: TextProps,
+  inner: InlineText,
+  terminalStyle: TerminalStyle,
+  inheritedBg: unknown,
+): InlineText {
   if (inner.length === 0) return inner;
   const defined = Object.fromEntries(
     Object.entries(props).filter(([, v]) => v !== undefined),
@@ -627,7 +639,7 @@ function applyOwnStyle(props: TextProps, inner: InlineText, inheritedBg: unknown
     inner.map((chunk) => {
       const chunkProps = omitBlockedStyles(styleProps, chunk.blockedAncestorStyles);
       return {
-        value: sanitizeAnsiMultiline(applyChalk(chunk.value, chunkProps)),
+        value: sanitizeAnsiMultiline(applyChalk(terminalStyle, chunk.value, chunkProps)),
         blockedAncestorStyles: chunk.blockedAncestorStyles | ownMask,
       };
     }),
@@ -638,10 +650,14 @@ function applyOwnStyle(props: TextProps, inner: InlineText, inheritedBg: unknown
 // virtual-text nodes (Ink squash-text-nodes.ts). `inheritedBg` is a base for
 // nested Text descendants that inherit background through the parent's style
 // channel rather than receiving the surrounding Box value again.
-function squashInlineChildren(children: readonly TuiNode[], inheritedBg: unknown): InlineText {
+function squashInlineChildren(
+  children: readonly TuiNode[],
+  terminalStyle: TerminalStyle,
+  inheritedBg: unknown,
+): InlineText {
   const chunks: InlineTextChunk[] = [];
   for (const child of children) {
-    chunks.push(...squashInlineChild(child, inheritedBg));
+    chunks.push(...squashInlineChild(child, terminalStyle, inheritedBg));
   }
   return mergeInlineText(chunks);
 }
@@ -657,12 +673,16 @@ function squashInlineChildren(children: readonly TuiNode[], inheritedBg: unknown
 // `<Box bg=red><Text bg=blue>x` would render red, not blue. A nested
 // <Text>/<virtual-text> child wraps itself (renderTextWithInlineStyles),
 // carrying its own style INSIDE the parent's eventual wrap.
-function squashInlineChild(child: TuiNode, inheritedBg: unknown): InlineText {
+function squashInlineChild(
+  child: TuiNode,
+  terminalStyle: TerminalStyle,
+  inheritedBg: unknown,
+): InlineText {
   if (child.type === "text-leaf") {
     return child.value.length === 0 ? [] : [{ value: child.value, blockedAncestorStyles: 0 }];
   }
   if (child.type === "tui-virtual-text" || child.type === "tui-text") {
-    return renderTextWithInlineStyles(child, inheritedBg);
+    return renderTextWithInlineStyles(child, terminalStyle, inheritedBg);
   }
   // Comments (null/undefined renders), boxes, etc. contribute nothing.
   return [];
@@ -670,8 +690,13 @@ function squashInlineChild(child: TuiNode, inheritedBg: unknown): InlineText {
 
 type BoxStyle = (typeof cliBoxes)[keyof cliBoxes.Boxes];
 
+function isBoxStyleName(style: string): style is keyof cliBoxes.Boxes {
+  return Object.prototype.hasOwnProperty.call(cliBoxes, style);
+}
+
 function drawBorder(
   output: Output,
+  terminalStyle: TerminalStyle,
   x: number,
   y: number,
   w: number,
@@ -683,9 +708,7 @@ function drawBorder(
   // Ink parity (render-border.ts:31-34): if borderStyle is already a BoxStyle object,
   // use it directly; otherwise look it up by name in cliBoxes.
   const chars: BoxStyle | undefined =
-    typeof style === "string"
-      ? (cliBoxes as unknown as Record<string, BoxStyle | undefined>)[style]
-      : style;
+    typeof style === "string" ? (isBoxStyleName(style) ? cliBoxes[style] : undefined) : style;
   // Defensive internal fallback: an unknown borderStyle name has no entry in
   // cliBoxes, so silently draw no border rather than throw. This is unreachable
   // via the public API — the Box component validates an unknown non-empty
@@ -734,9 +757,11 @@ function drawBorder(
     // stay unchanged. Routing edges through applyChalk would emit the bytes
     // in the wrong order (bg, fg, dim) versus Ink's (dim, bg, fg).
     let styled = s;
-    if (edgeColor) styled = applyColor(chalk, edgeColor, false)(styled);
-    if (edgeBg) styled = applyColor(chalk, edgeBg, true)(styled);
-    if (edgeDim) styled = chalk.dim(styled);
+    if (edgeColor) {
+      styled = applyColor(terminalStyle, terminalStyle.chalk, edgeColor, false)(styled);
+    }
+    if (edgeBg) styled = applyColor(terminalStyle, terminalStyle.chalk, edgeBg, true)(styled);
+    if (edgeDim) styled = terminalStyle.chalk.dim(styled);
     return styled;
   }
 
@@ -791,6 +816,7 @@ function getBoxContentMetrics(
 
 function fillBackground(
   output: Output,
+  terminalStyle: TerminalStyle,
   x: number,
   y: number,
   w: number,
@@ -802,7 +828,7 @@ function fillBackground(
   const height = Math.max(0, Math.floor(h));
   if (width === 0 || height === 0) return;
 
-  const line = applyChalk(" ".repeat(width), { backgroundColor: color });
+  const line = applyChalk(terminalStyle, " ".repeat(width), { backgroundColor: color });
   for (let i = 0; i < height; i++) output.write(x, y + i, [line]);
 }
 
@@ -816,12 +842,14 @@ interface PreparedTextPaintCache extends PreparedTextPaint {
   readonly inheritedBg: string | undefined;
   readonly wrapWidth: number;
   readonly wrapMode: TextProps["wrap"];
+  readonly terminalStyleKey: string;
 }
 
 const preparedTextPaintCache = new WeakMap<TuiText, PreparedTextPaintCache>();
 
 function prepareTextPaint(
   node: TuiText,
+  terminalStyle: TerminalStyle,
   inheritedBg: string | undefined,
   wrapWidth: number,
 ): PreparedTextPaint {
@@ -831,22 +859,32 @@ function prepareTextPaint(
     cached?.revision === node.textRevision &&
     cached.inheritedBg === inheritedBg &&
     cached.wrapWidth === wrapWidth &&
-    cached.wrapMode === wrapMode
+    cached.wrapMode === wrapMode &&
+    cached.terminalStyleKey === terminalStyle.cacheKey
   ) {
     return cached;
   }
 
-  const text = inlineTextValue(renderTextWithInlineStyles(node, inheritedBg));
+  const text = inlineTextValue(renderTextWithInlineStyles(node, terminalStyle, inheritedBg));
   const wrapped = wrapText(text, wrapWidth, wrapMode ?? "wrap");
   if (inheritedBg) {
     const padProps: TextProps = { backgroundColor: inheritedBg };
     for (let index = 0; index < wrapped.length; index++) {
       const pad = wrapWidth - stringWidth(wrapped[index]!);
-      if (pad > 0) wrapped[index] = wrapped[index]! + applyChalk(" ".repeat(pad), padProps);
+      if (pad > 0) {
+        wrapped[index] = wrapped[index]! + applyChalk(terminalStyle, " ".repeat(pad), padProps);
+      }
     }
   }
   const prepared = { text, wrapped };
-  const entry = { revision: node.textRevision, inheritedBg, wrapWidth, wrapMode, ...prepared };
+  const entry = {
+    revision: node.textRevision,
+    inheritedBg,
+    wrapWidth,
+    wrapMode,
+    terminalStyleKey: terminalStyle.cacheKey,
+    ...prepared,
+  };
   preparedTextPaintCache.set(node, entry);
   return entry;
 }
@@ -859,6 +897,8 @@ interface PaintRect {
 }
 
 export interface PaintOptions {
+  /** Text styling capability resolved for this render session. */
+  readonly terminalStyle: TerminalStyle;
   /** Private frame-local geometry collector. Publication happens after paint succeeds. */
   readonly geometry?: InternalGeometryPaintFrame;
   /**
@@ -905,20 +945,27 @@ function recordZeroContentGeometry(
   for (const child of node.children) recordZeroContentGeometry(child, geometry);
 }
 
-export function paint(root: TuiNode, options: PaintOptions = {}): string {
+export function paint(root: TuiNode, options: PaintOptions): string {
   if (root.type !== "root") throw new Error("paint expects TuiRoot");
   const layout = root.yoga.getComputedLayout();
   const width = Math.max(1, Math.floor(options.viewport?.width ?? layout.width));
   const height = Math.max(1, Math.floor(options.viewport?.height ?? layout.height));
-  const out = new Output(width, height, options.viewport !== undefined, getRootOutputCaches(root));
+  const out = new Output(
+    width,
+    height,
+    options.terminalStyle,
+    options.viewport !== undefined,
+    getRootOutputCaches(root),
+  );
   const viewportClip = options.viewport ? { x: 0, y: 0, width, height } : undefined;
-  paintNode(root, out, 0, 0, undefined, viewportClip, options.geometry);
+  paintNode(root, out, options.terminalStyle, 0, 0, undefined, viewportClip, options.geometry);
   return out.get().output;
 }
 
 function paintNode(
   node: TuiNode,
   output: Output,
+  terminalStyle: TerminalStyle,
   x0: number,
   y0: number,
   inheritedBg?: string,
@@ -943,7 +990,7 @@ function paintNode(
   switch (node.type) {
     case "root": {
       for (const child of node.children) {
-        paintNode(child, output, x0, y0, undefined, clip, geometry);
+        paintNode(child, output, terminalStyle, x0, y0, undefined, clip, geometry);
       }
       return;
     }
@@ -970,7 +1017,7 @@ function paintNode(
       const ownBg = typeof rawBg === "string" ? rawBg : undefined;
       const childBg = ownBg ? ownBg : inheritedBg;
       if (node.props["borderStyle"]) {
-        drawBorder(output, x, y, w, h, node.props);
+        drawBorder(output, terminalStyle, x, y, w, h, node.props);
       }
       if (ownBg) {
         const hasBorder = !!node.props["borderStyle"];
@@ -978,7 +1025,7 @@ function paintNode(
         const bb = hasBorder && node.props["borderBottom"] !== false ? 1 : 0;
         const bl = hasBorder && node.props["borderLeft"] !== false ? 1 : 0;
         const br = hasBorder && node.props["borderRight"] !== false ? 1 : 0;
-        fillBackground(output, x + bl, y + bt, w - bl - br, h - bt - bb, ownBg);
+        fillBackground(output, terminalStyle, x + bl, y + bt, w - bl - br, h - bt - bb, ownBg);
       }
 
       // Overflow clipping: clip children to the box content area (inside
@@ -1034,7 +1081,7 @@ function paintNode(
         for (const child of node.children) {
           const childYoga = (child as { yoga?: { getPositionType?: () => number } }).yoga;
           if (childYoga?.getPositionType?.() === Yoga.POSITION_TYPE_ABSOLUTE) {
-            paintNode(child, output, x, y, childBg, childClip, geometry);
+            paintNode(child, output, terminalStyle, x, y, childBg, childClip, geometry);
           } else {
             recordZeroContentGeometry(child, geometry);
           }
@@ -1044,7 +1091,7 @@ function paintNode(
       }
 
       for (const child of node.children) {
-        paintNode(child, output, x, y, childBg, childClip, geometry);
+        paintNode(child, output, terminalStyle, x, y, childBg, childClip, geometry);
       }
 
       if (clipped) output.unclip();
@@ -1074,7 +1121,7 @@ function paintNode(
       // row-sibling overwrites it (the text-drop bug). Fitting text is untouched: wrapText's
       // fast-path returns it verbatim.
       const wrapWidth = Math.floor(layout.width);
-      const { text, wrapped } = prepareTextPaint(node, inheritedBg, wrapWidth);
+      const { text, wrapped } = prepareTextPaint(node, terminalStyle, inheritedBg, wrapWidth);
       // Skip writing empty text — matches Ink's behavior of not writing empty text nodes.
       if (text === "") return;
       // Pad each line to the cell width with the INHERITED Box background only —
@@ -1107,21 +1154,22 @@ function paintNode(
   }
 }
 
-export function paintContainer(container: TuiContainer): string {
+export function paintContainer(container: TuiContainer, terminalStyle: TerminalStyle): string {
   // Used by Static channel and tests.
-  if (container.type === "root") return paint(container);
+  if (container.type === "root") return paint(container, { terminalStyle });
   throw new Error("paintContainer currently only supports root");
 }
 
 export function paintIsolated(
   nodes: TuiNode[],
   width: number,
+  terminalStyle: TerminalStyle,
   staticNode?: import("../host/nodes.ts").TuiStatic,
 ): string {
   // No staticNode: legacy/simple path — a single iso root sized to the available
   // columns, with the nodes parented directly under it.
   if (!staticNode) {
-    return paintUnderRoot(nodes, width, (iso) => iso.yoga.setWidth(width));
+    return paintUnderRoot(nodes, width, terminalStyle, (iso) => iso.yoga.setWidth(width));
   }
 
   // TWO-LEVEL structure, mirroring Ink's static layout (renderer.ts:30-37,
@@ -1185,9 +1233,8 @@ export function paintIsolated(
   // they lay out within the absolute, auto-width static node — exactly the tree
   // Ink builds. We temporarily move only the yoga parentage (never the DOM
   // .parent — see below) and restore it in the finally block.
-  type YogaCarrier = { yoga: import("yoga-layout").Node };
   const yogaAdded: Array<{
-    yc: YogaCarrier;
+    yoga: import("yoga-layout").Node;
     origParent: import("yoga-layout").Node | null;
     origIndex: number;
   }> = [];
@@ -1204,22 +1251,19 @@ export function paintIsolated(
     // node.parent.
     staticBox.children.push(node);
 
-    const yCarrier = node as unknown as YogaCarrier;
     // Skip nodes that carry no yoga node (text-leaf, comment, fragment anchors).
-    if (!yCarrier.yoga || typeof yCarrier.yoga === "symbol") continue;
+    const yoga = attachedYogaNode(node);
+    if (!yoga) continue;
 
     // If the node already has a yoga parent, temporarily remove it so we can
     // re-insert it under the inner box for layout calculation.
-    const yParent = (yCarrier.yoga as unknown as { getParent(): import("yoga-layout").Node | null })
-      .getParent
-      ? (yCarrier.yoga as unknown as { getParent(): import("yoga-layout").Node | null }).getParent()
-      : null;
-    const origIndex = yParent ? findYogaIndex(yParent, yCarrier.yoga) : 0;
+    const yParent = yoga.getParent();
+    const origIndex = yParent ? findYogaIndex(yParent, yoga) : 0;
     if (yParent) {
-      yParent.removeChild(yCarrier.yoga);
+      yParent.removeChild(yoga);
     }
-    staticBox.yoga.insertChild(yCarrier.yoga, yIdx);
-    yogaAdded.push({ yc: yCarrier, origParent: yParent, origIndex });
+    staticBox.yoga.insertChild(yoga, yIdx);
+    yogaAdded.push({ yoga, origParent: yParent, origIndex });
     yIdx++;
   }
 
@@ -1237,21 +1281,23 @@ export function paintIsolated(
     const boxLayout = staticBox.yoga.getComputedLayout();
     const outW = Math.max(1, Math.floor(boxLayout.width));
     const outH = Math.max(1, Math.floor(boxLayout.height));
-    const out = new Output(outW, outH);
+    const out = new Output(outW, outH, terminalStyle);
     // Paint the inner box's children at the grid origin. The absolute box itself
     // resolves to left:0/top:0; offsetting by -(left/top) keeps children at the
     // origin even if yoga ever computes a non-zero inset.
     const x0 = -Math.floor(boxLayout.left);
     const y0 = -Math.floor(boxLayout.top);
-    for (const child of staticBox.children) paintNode(child, out, x0, y0);
+    for (const child of staticBox.children) {
+      paintNode(child, out, terminalStyle, x0, y0);
+    }
     return out.get().output;
   } finally {
     restoreLayoutGuards();
     // Restore yoga parents in reverse order so earlier indices remain stable.
-    for (const { yc, origParent, origIndex } of yogaAdded.slice().reverse()) {
-      staticBox.yoga.removeChild(yc.yoga);
+    for (const { yoga, origParent, origIndex } of yogaAdded.slice().reverse()) {
+      staticBox.yoga.removeChild(yoga);
       if (origParent) {
-        origParent.insertChild(yc.yoga, origIndex);
+        origParent.insertChild(yoga, origIndex);
       }
     }
     staticBox.children.length = 0;
@@ -1271,15 +1317,15 @@ export function paintIsolated(
 function paintUnderRoot(
   nodes: TuiNode[],
   width: number,
+  terminalStyle: TerminalStyle,
   configureRoot: (iso: import("../host/nodes.ts").TuiRoot) => void,
 ): string {
   const iso = createIsoRoot({} as never);
   attachYoga(iso);
   configureRoot(iso);
 
-  type YogaCarrier = { yoga: import("yoga-layout").Node };
   const yogaAdded: Array<{
-    yc: YogaCarrier;
+    yoga: import("yoga-layout").Node;
     origParent: import("yoga-layout").Node | null;
     origIndex: number;
   }> = [];
@@ -1289,19 +1335,16 @@ function paintUnderRoot(
     const node = nodes[i]!;
     iso.children.push(node);
 
-    const yCarrier = node as unknown as YogaCarrier;
-    if (!yCarrier.yoga || typeof yCarrier.yoga === "symbol") continue;
+    const yoga = attachedYogaNode(node);
+    if (!yoga) continue;
 
-    const yParent = (yCarrier.yoga as unknown as { getParent(): import("yoga-layout").Node | null })
-      .getParent
-      ? (yCarrier.yoga as unknown as { getParent(): import("yoga-layout").Node | null }).getParent()
-      : null;
-    const origIndex = yParent ? findYogaIndex(yParent, yCarrier.yoga) : 0;
+    const yParent = yoga.getParent();
+    const origIndex = yParent ? findYogaIndex(yParent, yoga) : 0;
     if (yParent) {
-      yParent.removeChild(yCarrier.yoga);
+      yParent.removeChild(yoga);
     }
-    iso.yoga.insertChild(yCarrier.yoga, yIdx);
-    yogaAdded.push({ yc: yCarrier, origParent: yParent, origIndex });
+    iso.yoga.insertChild(yoga, yIdx);
+    yogaAdded.push({ yoga, origParent: yParent, origIndex });
     yIdx++;
   }
 
@@ -1313,18 +1356,23 @@ function paintUnderRoot(
       undefined,
       Yoga.DIRECTION_LTR,
     );
-    return paint(iso);
+    return paint(iso, { terminalStyle });
   } finally {
     restoreLayoutGuards();
-    for (const { yc, origParent, origIndex } of yogaAdded.slice().reverse()) {
-      iso.yoga.removeChild(yc.yoga);
+    for (const { yoga, origParent, origIndex } of yogaAdded.slice().reverse()) {
+      iso.yoga.removeChild(yoga);
       if (origParent) {
-        origParent.insertChild(yc.yoga, origIndex);
+        origParent.insertChild(yoga, origIndex);
       }
     }
     iso.children.length = 0;
     detachYoga(iso);
   }
+}
+
+function attachedYogaNode(node: TuiNode): import("yoga-layout").Node | null {
+  if (!("yoga" in node) || typeof node.yoga === "symbol") return null;
+  return node.yoga;
 }
 
 function findYogaIndex(

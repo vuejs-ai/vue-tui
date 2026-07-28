@@ -1,0 +1,16 @@
+{
+  "extends": "@vue/tsconfig/tsconfig.json",
+  "include": ["env.d.ts", "src/**/*", "src/**/*.vue"],
+  "compilerOptions": {
+    // This is a terminal app, not a browser one. @vue/tsconfig's base leaves `lib`
+    // at its default (which includes DOM for an ESNext target), so pin it to ESNext
+    // only — no DOM — and bring in Node globals (setTimeout, process, ...) via
+    // @types/node. (We extend the base, not the `.dom.json` variant.)
+    "lib": ["ESNext"],
+    "types": ["node"],
+
+    // `vue-tsc --build` writes a .tsbuildinfo for incremental type-checking; keep
+    // it out of the project root.
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo"
+  }
+}

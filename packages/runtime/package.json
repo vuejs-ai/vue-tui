@@ -1,6 +1,6 @@
 {
   "name": "@vue-tui/runtime",
-  "version": "0.1.1",
+  "version": "0.3.0",
   "description": "Vue 3 terminal renderer with Yoga flexbox layout, inspired by React Ink.",
   "keywords": [
     "ansi",
@@ -32,7 +32,6 @@
     "dist/internal/devtools.d.mts",
     "dist/internal/testing.mjs",
     "dist/internal/testing.d.mts",
-    "docs/visual-development-feedback-loops.md",
     "CHANGELOG.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md"
@@ -69,16 +68,16 @@
     "yoga-layout": "^3.1.0"
   },
   "devDependencies": {
-    "@types/node": "^25.6.2",
+    "@types/node": "catalog:",
     "@vitejs/plugin-vue-jsx": "catalog:",
-    "typescript": "^6.0.3",
+    "typescript": "catalog:",
     "unplugin-vue": "catalog:",
-    "vite-plus": "^0.1.20",
-    "vue": "^3.4.0",
+    "vite-plus": "catalog:",
+    "vue": "^3.5.0",
     "vue-tsc": "catalog:"
   },
   "peerDependencies": {
-    "vue": "^3.4.0"
+    "vue": "^3.5.0"
   },
   "engines": {
     "node": ">=22.18.0"

@@ -1,6 +1,6 @@
 # Terminal UI prior art
 
-> **Status:** unstamped evidence ledger, last reverified 2026-07-13. This record compares how other terminal UI systems handle rendering mode, history ownership, runtime facts, input ownership, mouse tracking, targeted events, and public widget APIs. It supplies evidence rather than acceptance; current vue-tui API decisions live in the [decision ledger](./runtime-public-api-decisions.md) and the implemented [Runtime foundation re-audit](./runtime-public-foundation-reaudit.md), with [intent](./intent.md) and [product scenarios](./product-scenarios.md) providing product context.
+> **Status:** unstamped evidence ledger, last reverified 2026-07-13. This record compares how other terminal UI systems handle rendering mode, history ownership, runtime facts, input ownership, mouse tracking, targeted events, and public widget APIs. It supplies evidence rather than acceptance; current vue-tui API decisions live in the [decision ledger](./runtime-public-api-decisions.md) and [public API contract](./api-contract.md), with [intent](./intent.md) and [product scenarios](./product-scenarios.md) providing product context.
 
 ## Scope and evidence rules
 

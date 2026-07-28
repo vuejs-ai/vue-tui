@@ -1,4 +1,31 @@
+import { availableParallelism } from "node:os";
 import { defineConfig } from "vite-plus";
+
+// The `test` and `check` entry tasks use this deliberately simple saturation
+// heuristic rather than claiming exact CPU use by child processes. Keep up to
+// three graph branches active, but never schedule more branches than CPUs.
+const TEST_CPU_BUDGET = availableParallelism();
+const TEST_TASK_CONCURRENCY = Math.min(3, TEST_CPU_BUDGET);
+const TEST_MAX_WORKERS = Math.max(1, Math.floor(TEST_CPU_BUDGET / TEST_TASK_CONCURRENCY));
+
+function testTask(task: string) {
+  return {
+    command: `vp run ${task} --maxWorkers ${TEST_MAX_WORKERS}`,
+    dependsOn: ["build:packages"],
+  };
+}
+
+const testTasks = {
+  "check:test:runtime:integration": testTask("tests-runtime#test:integration"),
+  "check:test:runtime:e2e": testTask("tests-runtime#test:pty"),
+  "check:test:vite:system": testTask("tests-vite#test"),
+  "check:test:runtime:examples": testTask("tests-runtime#test:examples"),
+  "check:test:runtime:unit": testTask("@vue-tui/runtime#test"),
+  "check:test:vite:unit": testTask("@vue-tui/vite#test"),
+  "check:test:testing:unit": testTask("@vue-tui/testing#test"),
+  "check:test:components:unit": testTask("@vue-tui/components#test"),
+  "check:test:use:unit": testTask("@vue-tui/use#test"),
+};
 
 export default defineConfig({
   staged: {
@@ -10,13 +37,11 @@ export default defineConfig({
     ignorePatterns: ["AGENTS.md"],
   },
   lint: {
-    // Don't lint test fixtures. They are test INPUTS, not shipped source, and some are
-    // deliberately broken: the overlay / full-reload dev-server tests transiently overwrite a
-    // fixture's app.vue with a syntax error (to exercise the error overlay / failed HMR), then
-    // restore it. Because `vp run ci` runs lint CONCURRENTLY with those tests, a linter that read
-    // a fixture inside that broken window failed with a spurious "Unexpected token" (a flaky race,
-    // surfaced by test timing). Excluding fixtures removes the race and the wasted lint work.
-    ignorePatterns: ["**/test/fixtures/**"],
+    // Don't lint test inputs or runtime scratch projects. Some fixtures are
+    // deliberately broken, while Vite e2e creates and removes tmp projects as
+    // lint runs concurrently. Neither is repository source, and scanning them
+    // introduces races with no useful coverage.
+    ignorePatterns: ["**/tests/fixtures/**", "tests/**/fixtures/**", "tests/**/tmp/**"],
     options: { typeAware: true, typeCheck: false },
     rules: {
       // This is a terminal UI library: parsing keyboard escape sequences and
@@ -29,113 +54,55 @@ export default defineConfig({
     },
   },
   run: {
+    // vite-plus@0.2.6 can leave a cached multi-branch run idle after a Vitest
+    // failure even though every child has exited. Keep failure reporting
+    // bounded; revisit caching when the runner guarantees graph teardown.
     cache: false,
-    // `ci` is the parallel verification graph used by .github/workflows/ci.yml.
-    // The task runner fans out independent branches concurrently. Only fmt has
-    // no build dependency, so it starts immediately; lint, check:type, and the
-    // test suites all depend on build because they need the built dist
-    // (@vue-tui/runtime exposes no "types" export — consumers, and the
-    // type-aware lint rules, resolve its types and runtime from dist/*.d.mts).
-    // So the wall-clock critical path is build -> test:pty. The serial `ready`
-    // script in package.json mirrors this order (build before lint) for local use.
+    // `check` is the repository's parallel verification graph. Build, format,
+    // lint, typecheck, and tests retain explicit dependency boundaries; Vite+
+    // supplies the scheduler.
     tasks: {
-      "ci:build": { command: "vp run build" },
-      "ci:fmt": { command: "vp run check:fmt" },
-      // lint depends on build: type-aware rules (e.g. no-implied-eval) on the
-      // PTY fixtures need @vue-tui/runtime's built types resolved, or they
-      // misfire on a fresh checkout. build is already on the critical path, so
-      // this doesn't change overall wall-clock.
-      "ci:lint": { command: "vp run check:lint", dependsOn: ["ci:build"] },
-      "ci:type": { command: "vp run check:type", dependsOn: ["ci:build"] },
-      // Test branches, one per suite via package#script. Normal packages keep a
-      // plain `test`; only runtime-tests splits into test:integration +
-      // test:pty. Targeting each suite directly keeps runtime-tests' slow PTY
-      // suite on its own parallel branch (not serial inside its `test`), and
-      // covers the runtime/testing unit tests that a runtime-tests-only run
-      // would miss.
-      "ci:test:runtime": {
-        command: "vp run @vue-tui/runtime#test",
-        dependsOn: ["ci:build"],
+      // Build release candidates before applications. The cloneable template
+      // deliberately uses ordinary semver ranges, and Vite Task's workspace
+      // ordering does not infer a local edge from those ranges. Phasing the
+      // graph prevents a package build from cleaning `dist` while an example
+      // or template resolves its declarations.
+      "build:runtime": { command: "vp run @vue-tui/runtime#build" },
+      "build:packages": {
+        command:
+          "vp run --filter @vue-tui/components --filter @vue-tui/testing --filter @vue-tui/use --filter @vue-tui/vite build",
+        dependsOn: ["build:runtime"],
       },
-      "ci:test:testing": {
-        command: "vp run @vue-tui/testing#test",
-        dependsOn: ["ci:build"],
+      "build:applications": {
+        command: "vp run --filter './examples/**' --filter './templates/**' build",
+        dependsOn: ["build:packages"],
       },
-      "ci:test:integration": {
-        command: "vp run @vue-tui/runtime-tests#test:integration",
-        dependsOn: ["ci:build"],
+      build: { command: "echo build ok", dependsOn: ["build:applications"] },
+      bench: {
+        command: "vp run benchmarks-runtime#bench",
+        dependsOn: ["build:packages"],
       },
-      "ci:test:pty": {
-        command: "vp run @vue-tui/runtime-tests#test:pty",
-        dependsOn: ["ci:build"],
+      // These public entry tasks inject the repository-wide task budget before
+      // entering the graph, so callers never need to remember option placement.
+      check: { command: `vp run --concurrency-limit ${TEST_TASK_CONCURRENCY} check:all` },
+      test: { command: `vp run --concurrency-limit ${TEST_TASK_CONCURRENCY} check:test` },
+      "check:format": { command: "vp fmt --check" },
+      // Type-aware checks resolve workspace packages through their published
+      // `dist` entries. Build those libraries once, without rebuilding every
+      // example and the cloneable template in each verification branch.
+      "check:lint": { command: "vp lint --deny-warnings", dependsOn: ["build:packages"] },
+      "check:types": {
+        command: `vp run --concurrency-limit ${TEST_TASK_CONCURRENCY} -r check:type`,
+        dependsOn: ["build:packages"],
       },
-      // @vue-tui/vite (the Vite plugin: in-process dev server + production
-      // build) carries its own unit suite; run it on its own parallel branch
-      // like the other packages.
-      "ci:test:vite-plugin": {
-        command: "vp run @vue-tui/vite#test",
-        dependsOn: ["ci:build"],
+      ...testTasks,
+      "check:test": {
+        command: "echo tests ok",
+        dependsOn: Object.keys(testTasks),
       },
-      // Examples smoke suite (#212): launch examples/basic-template and basic-jsx through a real
-      // PTY — both the dev server and the `node dist/main.js` build — and assert each paints a
-      // frame with no module-system crash. This is the regression guard for "the shipped examples
-      // actually run". Depends on ci:build for the built @vue-tui/runtime + @vue-tui/vite dist the
-      // examples consume; its own PTY pool keeps it on a separate parallel branch.
-      "ci:test:examples": {
-        command: "vp run @vue-tui/runtime-tests#test:examples",
-        dependsOn: ["ci:build"],
-      },
-      // @vue-tui/components (high-level components composed from runtime
-      // primitives) carries its own unit suite; run it on its own parallel
-      // branch like the other packages. Depends on ci:build because its tests
-      // resolve @vue-tui/runtime + @vue-tui/testing from their built dist.
-      "ci:test:components": {
-        command: "vp run @vue-tui/components#test",
-        dependsOn: ["ci:build"],
-      },
-      // @vue-tui/use carries public-Runtime-only composables and renderless
-      // companion components. Keep its runtime and authoring-shape tests on an
-      // independent branch like the other public packages.
-      "ci:test:use": {
-        command: "vp run @vue-tui/use#test",
-        dependsOn: ["ci:build"],
-      },
-      // The package graph's own Vue version cannot catch declaration bundling
-      // against a different supported Vue patch. Install packed runtime,
-      // testing, use, and components packages beside Vue 3.4 and TypeScript 6.
-      // Pack only after dist-consuming tests finish because the pack build
-      // cleans those shared worktree outputs before recreating them.
-      "ci:package-consumer": {
-        command: "vp run verify:package-consumer",
-        dependsOn: [
-          "ci:lint",
-          "ci:type",
-          "ci:test:runtime",
-          "ci:test:testing",
-          "ci:test:integration",
-          "ci:test:pty",
-          "ci:test:vite-plugin",
-          "ci:test:examples",
-          "ci:test:components",
-          "ci:test:use",
-        ],
-      },
-      ci: {
-        command: "echo ci ok",
-        dependsOn: [
-          "ci:fmt",
-          "ci:lint",
-          "ci:type",
-          "ci:test:runtime",
-          "ci:test:testing",
-          "ci:test:integration",
-          "ci:test:pty",
-          "ci:test:vite-plugin",
-          "ci:test:examples",
-          "ci:test:components",
-          "ci:test:use",
-          "ci:package-consumer",
-        ],
+      "check:all": {
+        command: "echo check ok",
+        dependsOn: ["check:format", "check:lint", "check:types", "check:test"],
       },
     },
   },

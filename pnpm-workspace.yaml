@@ -1,29 +1,32 @@
 packages:
-  - apps/*
+  - benchmarks/*
   - packages/*
-  - tools/*
+  - tests/*
   - examples/*
+  - templates/*
 
 catalogMode: prefer
+# The cloneable template keeps ordinary semver ranges, but matching local package
+# versions link while it is managed inside this workspace. Its isolated smoke
+# installs the packed release candidates outside the workspace, so root
+# overrides and links cannot make their install, types, build, or dev path pass.
+linkWorkspacePackages: true
 
 catalog:
   "@alcalzone/ansi-tokenize": ^0.3.0
   "@xterm/addon-unicode11": 0.9.0
   "@xterm/headless": 6.0.0
   ansi-escapes: ^7.3.0
-  "@types/node": ^24.12.4
-  typescript: ^5
+  "@types/node": ^22.18.0
+  typescript: ^6.0.3
   # vite: npm:@voidzero-dev/vite-plus-core@latest # Vite+ engine (disabled; on vanilla vite)
   vite: 8.1.0
-  vitest: ^4.1.5
-  vite-plus: ^0.1.22
+  vite-plus: 0.2.6
   "@vitejs/plugin-vue-jsx": ^5.1.5
   chalk: ^5.6.2
   patch-console: ^2.0.0
   strip-ansi: ^7.2.0
   node-pty: 1.2.0-beta.13
-  sharp: 0.35.3
-  terminal-size: ^4.0.1
   tsx: ^4.22.0
   string-width: ^8.0.0
   unplugin-vue: ^7.2.0
@@ -40,10 +43,8 @@ overrides:
 peerDependencyRules:
   allowAny:
     - vite
-    - vitest
   allowedVersions:
     vite: "*"
-    vitest: "*"
 allowBuilds:
   esbuild: true
   node-pty: true

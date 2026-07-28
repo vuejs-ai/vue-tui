@@ -8,7 +8,7 @@ Performance optimization is not a current product priority. [VOUCHED @hyfdev 202
 
 Do not start a renderer rewrite, replace the layout engine, add a native runtime requirement, or schedule speculative optimization from this record alone.
 
-The in-repository [`capacity`](../../packages/runtime-tests/capacity) harness defines the J1-J6 workload set and its acceptance policy: an Inline conversational transcript and finder, a Fullscreen long document, a sparse monitor, a multi-pane workbench, and deliberately slow Inline and Fullscreen writers. A passing run establishes acceptance only for those declared workloads, host, and bounds; it does not prove which phase dominates any other application or machine. Historical machine-local measurements are not a general performance SLA.
+The in-repository [Runtime benchmark workspace](../../benchmarks/runtime) contains representative stable-size Inline transcript, Fullscreen table, and nested-pane updates. Vitest owns warmup, sampling, statistics, filtering, and failure reporting; the fixtures only mount and update those workloads through the official testing host. Results compare those declared workloads on the measured host; they are not an acceptance gate, a general performance SLA, or evidence that any one renderer phase dominates another application or machine.
 
 Yoga stays the layout engine. It is already a dependency, handles the flex semantics the public `Box` contract promises, and no measured workload has shown its cost dominating. Replacing it would need a representative failure that profiling attributes to layout specifically.
 
@@ -21,4 +21,4 @@ Reopen the performance architecture when at least one of these is true:
 - a small visible update scales with total mounted nodes or viewport area enough to block a real application;
 - a required scenario cannot be made correct with the current full-paint or non-virtualized model.
 
-Preserve and rerun the committed J1–J6 harnesses before changing architecture. Record the journey metrics, host, repetitions, estimator, raw artifact, and ownership-release evidence from that rerun rather than copying a historical number. Then change only the phase the measurement actually blames, and remeasure after each step.
+Preserve and rerun the committed benchmarks before changing architecture. Record the workload, host, Vitest version, and raw benchmark report from that rerun rather than copying a historical number. Then change only the phase the measurement actually blames, and remeasure after each step.

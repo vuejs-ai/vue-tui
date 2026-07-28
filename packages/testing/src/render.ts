@@ -1,7 +1,6 @@
-import { PassThrough } from "node:stream";
 import { Console as NodeConsole } from "node:console";
 import { nextTick, readonly, type Component } from "vue";
-import { createApp, type MountOptions, type TuiApp } from "@vue-tui/runtime";
+import { createApp, type ColorProfile, type MountOptions, type TuiApp } from "@vue-tui/runtime";
 import { createTestHostBridge, type TestContentFrame } from "@vue-tui/runtime/internal/testing";
 import { createTerminalEmulator, type ScreenSnapshot } from "./emulator.ts";
 import { makeFakeStdin, makeFakeWritable, type RawModeState } from "./streams.ts";
@@ -14,10 +13,14 @@ export interface RenderOptions {
   readonly stdin?: "tty" | "non-tty";
   /** Output stream class. @default "tty" */
   readonly stdout?: "tty" | "stream";
+  /** Styling policy for this render. Omission automatically uses the modeled stdout. */
+  readonly color?: boolean | ColorProfile;
   /** Route console output through the modeled Runtime writer. @default false */
   readonly patchConsole?: boolean;
   /** Exit before delivering an exact Ctrl+C key. @default false */
   readonly exitOnCtrlC?: boolean;
+  /** Retain renderer commits for `frames` and `lastFrame()`. @default true */
+  readonly retainFrames?: boolean;
   /** Deliberate layout and emulator width. @default 100 */
   readonly columns?: number;
   /** Deliberate emulator height and TTY height. @default 100 */
@@ -71,6 +74,7 @@ interface NormalizedTestHost {
   };
   readonly patchConsole: boolean;
   readonly exitOnCtrlC: boolean;
+  readonly color: boolean | ColorProfile;
   readonly emulatorRows: number;
 }
 
@@ -115,8 +119,24 @@ function dimension(value: unknown, fallback: number, name: string): number {
   return value === undefined ? fallback : positiveDimension(value, name);
 }
 
+function normalizeColorOption(value: unknown): boolean | ColorProfile {
+  if (value === undefined) return true;
+  if (
+    typeof value === "boolean" ||
+    value === "ansi16" ||
+    value === "ansi256" ||
+    value === "truecolor"
+  ) {
+    return value;
+  }
+  throw new TypeError(
+    'render option "color" must be a boolean, "ansi16", "ansi256", "truecolor", or undefined.',
+  );
+}
+
 function normalizeOptions(options: RenderOptions): {
   readonly props: Record<string, unknown> | undefined;
+  readonly retainFrames: boolean;
   readonly host: NormalizedTestHost;
 } {
   const root = assertObject(options, "render options");
@@ -140,8 +160,10 @@ function normalizeOptions(options: RenderOptions): {
   const modeOption = root.mode;
   const stdinOption = root.stdin;
   const stdoutOption = root.stdout;
+  const colorOption = root.color;
   const patchConsoleOption = root.patchConsole;
   const exitOnCtrlCOption = root.exitOnCtrlC;
+  const retainFramesOption = root.retainFrames;
 
   const mode = modeOption === undefined ? "inline" : modeOption;
   if (mode !== "inline" && mode !== "fullscreen") {
@@ -168,16 +190,22 @@ function normalizeOptions(options: RenderOptions): {
   if (typeof exitOnCtrlC !== "boolean") {
     throw new TypeError('render option "exitOnCtrlC" must be a boolean.');
   }
+  const retainFrames = retainFramesOption === undefined ? true : retainFramesOption;
+  if (typeof retainFrames !== "boolean") {
+    throw new TypeError('render option "retainFrames" must be a boolean.');
+  }
   if (propsOption !== undefined) assertObject(propsOption, "render props");
 
   return {
     props: propsOption as Record<string, unknown> | undefined,
+    retainFrames,
     host: {
       mode,
       stdin,
       stdout: { kind, columns, rows },
       patchConsole,
       exitOnCtrlC,
+      color: normalizeColorOption(colorOption),
       emulatorRows,
     },
   };
@@ -220,7 +248,7 @@ export async function render(
   options: RenderOptions = {},
 ): Promise<RenderResult> {
   const normalized = normalizeOptions(options);
-  const { host } = normalized;
+  const { host, retainFrames } = normalized;
   const stdout = makeFakeWritable({
     isTTY: host.stdout.kind === "tty",
     columns: host.stdout.columns,
@@ -242,7 +270,9 @@ export async function render(
 
   const frames: ContentFrame[] = [];
   const publicFrames = readonly(frames) as readonly ContentFrame[];
-  const bridge = createTestHostBridge({ onFrame: (frame) => frames.push(frame) });
+  const bridge = createTestHostBridge(
+    retainFrames ? { onFrame: (frame) => frames.push(frame) } : {},
+  );
 
   const app: TuiApp = createApp(component, normalized.props);
   let resourcesDisposed = false;
@@ -343,6 +373,7 @@ export async function render(
         stdin,
         stderr,
         mode: host.mode,
+        color: host.color,
         patchConsole: host.patchConsole,
         exitOnCtrlC: host.exitOnCtrlC,
       });
@@ -401,7 +432,7 @@ export async function render(
       stderr.columns = nextColumns;
       if (host.stdout.kind === "tty") stderr.rows = nextRows;
       if (unmounted) return;
-      (stdout as unknown as PassThrough).emit("resize");
+      stdout.emit("resize");
       await nextTick();
       if (unmounted) return;
       await settleRuntimeRender();

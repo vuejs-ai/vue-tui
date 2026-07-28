@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "check:type": "vue-tsc --noEmit",
     "build": "tsdown",
     "preview": "tsdown && node dist/main.mjs"
   },
   "dependencies": {
     "@vue-tui/runtime": "workspace:*",
-    "vue": "^3.4.0"
+    "vue": "^3.5.0"
   },
   "devDependencies": {
     "@types/node": "catalog:",
@@ -18,6 +19,7 @@
     "@vue-tui/vite": "workspace:*",
     "tsdown": "catalog:",
     "unplugin-vue-jsx": "catalog:",
-    "vite": "catalog:"
+    "vite": "catalog:",
+    "vue-tsc": "catalog:"
   }
 }

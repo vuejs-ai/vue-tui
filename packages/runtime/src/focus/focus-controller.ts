@@ -158,8 +158,8 @@ export function createInternalFocusController(
     createTarget(targetOptions = {}) {
       if (disposed) throw new Error("Focus controller is disposed");
       // Publish ownership directly instead of deriving it with a setup-scoped
-      // computed. Vue 3.4 stops that computed before component disposal and a
-      // retained handle can otherwise keep its final cached `true`.
+      // computed. Disposal and retained-handle reads do not share one lifetime,
+      // so a cached computed could otherwise preserve a stale final `true`.
       let record!: TargetRecord;
       const isFocusedRef = shallowRef(false);
       const handle: InternalFocusTargetHandle = Object.freeze({

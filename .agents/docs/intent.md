@@ -14,15 +14,13 @@ Coding agents are a major application scenario, not the definition of the whole 
 
 ## What makes it an application framework
 
-[VOUCHED @hyfdev 2026-07-10]
-
 vue-tui combines:
 
 - a mature renderer that the project owns and evolves;
 - Vue-native authoring through components, SFCs or JSX, reactivity, lifecycle, props, slots, events, `v-model`, and composables;
 - terminal foundations for layout, paint, input, focus, cursor, mouse, resize, streaming updates, scrolling, process lifecycle, and terminal restoration;
 - useful first-party APIs, components, and composables for interaction patterns that recur across supported applications;
-- a complete authoring and verification loop: HMR, component tests, interaction tests, real-PTY visual verification, examples, starter material, and a documented production build path.
+- a complete authoring and verification loop: HMR, component tests, interaction tests, real-PTY tests, examples, starter material, and a documented production build path.
 
 Owning a renderer is an implementation responsibility, not the product value on its own. The product value is that a Vue developer can build and ship a reliable interactive terminal application without assembling those layers by hand.
 
@@ -31,7 +29,7 @@ Owning a renderer is an implementation responsibility, not the product value on 
 - **Vue-native authoring.** Public APIs should feel like Vue rather than a translation of a React or imperative API.
 - **Mature terminal behavior.** Visible output, input, focus, cursor, mouse, resize, asynchronous updates, errors, interruption, non-TTY behavior, and cleanup should be predictable under real terminal conditions.
 - **Useful building blocks.** Repeated interaction behavior should become a generic first-party API, component, or composable when supported by a representative journey or a real consumer.
-- **A complete feedback loop.** Authors should be able to develop quickly, test behavior deterministically, inspect the final emulated terminal screen, and verify a clean packaged consumer.
+- **A complete feedback loop.** Authors should be able to develop quickly, test behavior deterministically under real terminal conditions, and verify a clean packaged consumer.
 - **Stable generic contracts.** Public APIs and user-consumable types should mature toward a dependable 1.0 surface without freezing weak early designs.
 - **Clear package boundaries.** Terminal rendering and I/O, reusable interaction logic, and composed UI pieces stay in their recorded layers; application-specific data and business behavior stay in the application.
 
@@ -40,6 +38,10 @@ Owning a renderer is an implementation responsibility, not the product value on 
 [VOUCHED @hyfdev 2026-07-11]
 
 vue-tui is currently experimental. Until a future stability milestone is explicitly accepted, existing public APIs are not backward-compatibility constraints. Treat each shipped API as evidence about the current implementation, then decide from the target product and terminal model whether to retain it, redesign it, or delete it. Design work should prefer one coherent target contract over aliases, deprecation windows, precedence rules, or compatibility shims whose only purpose is to preserve current releases.
+
+## Vue compatibility
+
+Version 0.3 starts at Vue 3.5. All public package peers, examples, tests, and the starter use `^3.5.0`; the project does not retain a separate external consumer matrix solely for older Vue minors. The cloneable starter's packed-package smoke remains the external installation, type-check, build, and development-flow check. Supporting an older Vue line again requires a concrete consumer need and a focused compatibility test.
 
 ## Rendering modes
 
@@ -102,7 +104,7 @@ Public framework APIs stay generic. Provider protocols, Git models, database sch
 - A Vue developer can build a reliable application in each active scenario without implementing terminal escape handling, layout, repaint coordination, focus, input decoding, resize, and restoration from scratch.
 - Repeated workflow, finder, and viewer behavior is available through coherent generic APIs, components, and composables instead of being copied between applications.
 - Inline and full-screen behavior is explicit, tested under a real PTY, and faithful to each screen model.
-- Representative journeys are deterministic enough for CI and also support agent-driven visual inspection of the final emulated screen. Several journeys may share an example application; the product does not require one showcase per scenario.
+- Representative journeys are deterministic enough for CI. Several journeys may share one example application; the product does not require one showcase per scenario.
 - Published examples and a clean tarball consumer exercise the documented development and production paths without importing private runtime internals.
 - Common author mistakes are rejected by template and TSX types when possible and otherwise fail with a clear, recoverable runtime error.
 

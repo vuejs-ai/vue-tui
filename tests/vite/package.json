@@ -1,0 +1,26 @@
+{
+  "name": "tests-vite",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vp test",
+    "check:type": "tsc --noEmit && vp run check:fixtures",
+    "check:fixtures": "vue-tsc -p e2e/fixtures/tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@vitejs/plugin-vue-jsx": "catalog:",
+    "@vue-tui/runtime": "workspace:*",
+    "@vue-tui/vite": "workspace:*",
+    "@xterm/addon-unicode11": "catalog:",
+    "@xterm/headless": "catalog:",
+    "node-pty": "catalog:",
+    "typescript": "catalog:",
+    "unplugin-vue": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "vue": "^3.5.0",
+    "vue-tsc": "catalog:"
+  }
+}

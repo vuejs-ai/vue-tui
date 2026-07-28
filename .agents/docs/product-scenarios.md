@@ -56,13 +56,11 @@ Conversation can use all three: editable prompt and approval are workflow behavi
 
 ## Terminal-workspace responsibility boundary
 
-[VOUCHED @hyfdev 2026-07-10]
-
 | vue-tui framework responsibility                                                                                                                 | Application or specialized-engine responsibility                                                                     |
 | ------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
 | Outer layout, tabs, split-pane presentation, focus, keyboard routing, mouse targeting, status, overlays, resizing, and high-frequency UI updates | Spawning and owning PTY processes, process groups, signals, and shell lifecycle                                      |
 | Rendering normal vue-tui content and, if repeated evidence supports it, a generic view over an externally supplied styled terminal-cell grid     | Parsing and emulating ANSI/VT terminal protocols, answering terminal queries, and maintaining the emulated cell grid |
-| Vue lifecycle, reusable UI state, components, composables, HMR, tests, and visual verification of the application shell                          | Detach and reattach servers, sockets, SSH transport, session persistence, remote discovery, and recovery             |
+| Vue lifecycle, reusable UI state, components, composables, HMR, tests, and examples                                                              | Detach and reattach servers, sockets, SSH transport, session persistence, remote discovery, and recovery             |
 | Generic application-visible states and events                                                                                                    | Detecting a particular coding agent or child process and interpreting its proprietary state                          |
 
 The boundary is about responsibility, not whether a vue-tui application can deliver the whole user experience. A product can combine vue-tui with specialized libraries and application services while keeping each layer focused.

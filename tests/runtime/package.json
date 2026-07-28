@@ -1,0 +1,32 @@
+{
+  "name": "tests-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:integration": "vp test",
+    "test:pty": "vp test run --config vitest.pty.config.ts",
+    "test:examples": "vp test run --config vitest.examples.config.ts",
+    "check:type": "tsc --noEmit && vp run check:pty-fixtures && vp run check:type-fixtures",
+    "check:pty-fixtures": "vue-tsc -p e2e/pty/fixtures/tsconfig.json --noEmit",
+    "check:type-fixtures": "vue-tsc -p integration/types/fixtures/tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@vitejs/plugin-vue-jsx": "catalog:",
+    "@vue-tui/components": "workspace:*",
+    "@vue-tui/runtime": "workspace:*",
+    "@vue-tui/testing": "workspace:*",
+    "@xterm/headless": "catalog:",
+    "ansi-escapes": "catalog:",
+    "chalk": "catalog:",
+    "node-pty": "catalog:",
+    "string-width": "catalog:",
+    "strip-ansi": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:",
+    "vue": "^3.5.34",
+    "vue-tsc": "catalog:"
+  }
+}

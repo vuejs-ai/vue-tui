@@ -53,7 +53,7 @@ function isCursorVisible(terminal: InstanceType<typeof HeadlessTerminal>): boole
   // API. Its parser-owned core service is the authoritative state for CSI
   // ?25h/?25l and the reset semantics xterm actually applies. Duplicating that
   // state in this host would allow the snapshot to disagree with the emulator.
-  const hidden = (terminal as unknown as HeadlessCursorState)._core?.coreService?.isCursorHidden;
+  const hidden = (terminal as HeadlessCursorState)._core?.coreService?.isCursorHidden;
   if (typeof hidden !== "boolean") {
     throw new Error("The terminal emulator does not expose its cursor visibility state.");
   }

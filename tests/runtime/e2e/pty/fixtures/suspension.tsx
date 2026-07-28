@@ -1,0 +1,48 @@
+import process from "node:process";
+import { INTERNAL_KITTY_KEYBOARD } from "../../../../../packages/runtime/dist/internal.mjs";
+import { createInternalMountOptions } from "../../../../../packages/runtime/dist/internal.mjs";
+import { Box, createApp, Text, useApp, useInput, useLayoutSize } from "@vue-tui/runtime";
+import { defineComponent, onMounted } from "vue";
+import { inputText } from "./input-event.js";
+
+const mode = process.argv.includes("fullscreen") ? "fullscreen" : "inline";
+const marker = mode === "fullscreen" ? "FULLSCREEN_SNAPSHOT" : "INLINE_SNAPSHOT";
+
+const App = defineComponent(() => {
+  const { exit } = useApp();
+  const { width, height } = useLayoutSize();
+  useInput((event) => {
+    if (inputText(event) === "q") {
+      exit();
+    }
+  });
+
+  onMounted(() => {
+    // Announce only after mount returns so the test starts from a fully painted
+    // frame. Lifecycle handlers themselves are installed before terminal modes.
+    setTimeout(() => console.error(`__READY__:${mode}:${process.pid}`), 50);
+  });
+
+  return () => {
+    const rows = Number.isFinite(height.value) ? height.value : 1;
+    return (
+      <Box flexDirection="column" width="100%">
+        <Text>{`${marker}:${width.value}x${Number.isFinite(height.value) ? height.value : "unbounded"}`}</Text>
+        {Array.from({ length: Math.max(0, rows - 1) }, (_, index) => (
+          <Text key={index}>{`row-${String(index + 2).padStart(2, "0")}`}</Text>
+        ))}
+      </Box>
+    );
+  };
+});
+
+const app = createApp(App);
+app.mount(
+  createInternalMountOptions({
+    mode,
+    maxFps: 0,
+    [INTERNAL_KITTY_KEYBOARD]: { mode: "enabled" },
+  }),
+);
+
+await app.waitUntilExit();

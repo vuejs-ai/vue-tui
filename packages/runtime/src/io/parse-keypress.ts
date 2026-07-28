@@ -501,7 +501,7 @@ export function parseKeypress(s: Uint8Array | string = ""): Keypress {
 
   if (s instanceof Uint8Array) {
     if (s[0]! > 127 && s[1] === undefined) {
-      (s[0] as unknown as number) -= 128;
+      s[0] = s[0]! - 128;
       s = "\x1b" + textDecoder.decode(s);
     } else {
       s = textDecoder.decode(s);

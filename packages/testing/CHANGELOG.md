@@ -12,7 +12,7 @@ Measured against the published `0.0.3`, whose render options were `columns`,
 
 ### Added
 
-- **Host modeling** — `mode`, `stdin`, `stdout`, and `patchConsole` render options, resolved by the production resolver. Omission still models an Inline TTY.
+- **Host modeling** — `mode`, `stdin`, `stdout`, `color`, and `patchConsole` render options, resolved by the production resolver. Omission still models an Inline truecolor TTY.
 - **`screen()`** — the cell surface after stdout and stderr pass through a terminal emulator.
 - **`dispose()`** — releases every test-host resource, idempotently. `unmount()` keeps the restored emulator readable for teardown assertions.
 - **`terminal.suspend()` / `resume()`** — job-control behavior.
@@ -20,8 +20,10 @@ Measured against the published `0.0.3`, whose render options were `columns`,
 
 ### Changed
 
+- **Vue baseline** — requires Vue 3.5 or newer within the Vue 3 major line.
 - **Observations** — `frames` and `lastFrame()` read renderer commits directly, so they carry rendered content and styling but no cursor, erase, or alternate-screen sequences. Those belong to `screen()`.
 - **Runtime surface** — migrated to `useLayoutSize()`, direct-Box `useBoxMetrics()`, and the tagged `useInput()` contract.
+- **Runtime ownership** — requires the exact matching Runtime as a peer, so the test host and application cannot silently use different renderer instances.
 
 ### Removed
 

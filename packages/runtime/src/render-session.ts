@@ -1,4 +1,5 @@
 import { inject, readonly, shallowReactive, type DeepReadonly, type InjectionKey } from "vue";
+import type { TerminalStyle } from "./paint/terminal-style.ts";
 import { MAX_LAYOUT_VALUE } from "./numeric-limits.ts";
 import type { TerminalSizeProbeResult } from "./terminal-size-probe.ts";
 
@@ -221,6 +222,7 @@ type MutableLiveRenderSession = {
 
 interface InternalRenderSessionServiceBase {
   readonly session: DeepReadonly<InternalRenderSessionSnapshot>;
+  readonly terminalStyle: TerminalStyle;
   dispose(): void;
 }
 
@@ -246,6 +248,7 @@ function frozenDimensions(dimensions: RenderDimensions): RenderDimensions {
 
 export function createLiveRenderSessionService(
   surface: ResolvedLiveSurface,
+  terminalStyle: TerminalStyle,
 ): InternalLiveRenderSessionService {
   const state = shallowReactive<MutableLiveRenderSession>({
     dimensions: frozenDimensions(surface.session.dimensions),
@@ -254,6 +257,7 @@ export function createLiveRenderSessionService(
 
   return {
     session: readonly(state) as DeepReadonly<InternalLiveRenderSessionSnapshot>,
+    terminalStyle,
     updateDimensions(next) {
       if (disposed) return;
       state.dimensions = frozenDimensions(next);
@@ -268,6 +272,7 @@ export function createStringRenderSessionService(options: {
   readonly columns: number;
   /** `null` is Runtime's private unbounded vertical layout representation. */
   readonly rows: number | null;
+  readonly terminalStyle: TerminalStyle;
 }): InternalStringRenderSessionService {
   const state = shallowReactive<InternalStringRenderSessionSnapshot>({
     dimensions: Object.freeze({
@@ -277,6 +282,7 @@ export function createStringRenderSessionService(options: {
   });
   return {
     session: readonly(state) as DeepReadonly<InternalStringRenderSessionSnapshot>,
+    terminalStyle: options.terminalStyle,
     dispose() {
       // The readonly snapshot remains valid after the synchronous tree is gone.
     },

@@ -12,15 +12,7 @@ export interface DirectBoxTarget {
 }
 
 function owningRuntimeApp(target: PublicBoxInstance): AppContext | undefined {
-  return (
-    target as unknown as {
-      readonly $?: {
-        readonly appContext?: {
-          readonly provides?: Record<PropertyKey, unknown>;
-        };
-      };
-    }
-  ).$?.appContext?.provides?.[AppContextKey] as AppContext | undefined;
+  return target.$.appContext.provides[AppContextKey] as AppContext | undefined;
 }
 
 /** Shared author-ref validation for public composables that target one direct Box. */

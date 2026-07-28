@@ -8,7 +8,7 @@ High-level Vue components for [vue-tui](https://github.com/vuejs-ai/vue-tui), co
 
 ```sh
 npm install @vue-tui/components
-# peer deps: @vue-tui/runtime, vue ^3.4
+# peer deps: @vue-tui/runtime, vue ^3.5
 ```
 
 ## Visibility

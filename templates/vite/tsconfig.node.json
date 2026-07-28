@@ -1,0 +1,15 @@
+{
+  "extends": "@tsconfig/node22/tsconfig.json",
+  "include": ["vite.config.*", "tsdown.config.*"],
+  "compilerOptions": {
+    // vite.config.ts is bundled by Vite, so use bundler module resolution.
+    "module": "preserve",
+    "moduleResolution": "bundler",
+
+    // Node types only; type-check without emitting.
+    "types": ["node"],
+    "noEmit": true,
+
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo"
+  }
+}

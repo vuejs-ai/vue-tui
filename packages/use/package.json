@@ -1,6 +1,6 @@
 {
   "name": "@vue-tui/use",
-  "version": "0.0.1",
+  "version": "0.3.0",
   "description": "Reusable Vue composables and renderless helpers for vue-tui.",
   "license": "MIT",
   "files": [
@@ -30,14 +30,14 @@
     "@vitejs/plugin-vue-jsx": "catalog:",
     "@vue-tui/runtime": "workspace:*",
     "@vue-tui/testing": "workspace:*",
-    "typescript": "^6.0.3",
+    "typescript": "catalog:",
     "unplugin-vue": "catalog:",
     "vite-plus": "catalog:",
-    "vue": "^3.4.0",
+    "vue": "^3.5.0",
     "vue-tsc": "catalog:"
   },
   "peerDependencies": {
     "@vue-tui/runtime": "workspace:^",
-    "vue": "^3.4.0"
+    "vue": "^3.5.0"
   }
 }

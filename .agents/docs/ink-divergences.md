@@ -615,7 +615,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   invariant. The fix is minimal (one `markDirty`) and matches the layout Ink ALREADY produces
   whenever its measure func happens to be invalidated. KEEP. [VOUCHED @hyfdev] Tests:
   `text-wrap-remeasure.test.tsx` (both directions; RED without the fix, reproducing Ink's stale
-  frame) and [`text-wrap-remeasure-matrix.test.tsx`](../../packages/runtime-tests/integration/layout/text-wrap-remeasure-matrix.test.tsx) (the two public modes plus a private raw-host Vue-reactive suite covering the full retained 6-mode / 30-transition internal matrix; 16 transitions go RED without the fix).
+  frame) and [`text-wrap-remeasure-matrix.test.tsx`](../../tests/runtime/integration/layout/text-wrap-remeasure-matrix.test.tsx) (the two public modes plus a private raw-host Vue-reactive suite covering the full retained 6-mode / 30-transition internal matrix; 16 transitions go RED without the fix).
 
 ### Historical second-mount policy: an inert no-op on a live stdout
 
@@ -657,6 +657,12 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 - **Ink:** public `debug: true` changes stdout behavior: every commit writes complete current content, Static history can be replayed, clear and console-patching behavior changes, and final-stream teardown follows a distinct diagnostic path.
 - **vue-tui:** own `debug` keys on live mounts and `@vue-tui/testing` render options are removed programming errors and fail before terminal or component mutation. The testing package installs a symbol-keyed internal render observer that receives structured `{ dynamic, staticOutput }` commits without selecting a host, changing stdout, disabling console handling, or changing scheduling. Terminal-visible assertions use an independent xterm emulator; `maxFps: 0` remains an unthrottled scheduler choice rather than an output mode.
 - **Why:** output policy and observation have different consumers. Making tests alter application bytes produced sessions that claimed production cadence while stdout followed an append-only diagnostic branch, and content frames had to be inferred from a stream containing terminal controls. Orthogonal observation lets the deterministic host exercise the real Inline, Fullscreen, live-stream, and final-stream paths while exposing both semantic commits and the resulting terminal screen. Direct removal is appropriate while vue-tui is experimental. Implemented and verified in F1.5.
+
+### Terminal text styling belongs to each render session
+
+- **Ink:** pinned v7.0.4 uses Chalk's default process-global instance. Its level is captured from process stdout and environment when Chalk is imported, and `renderToString()` has no override. A fresh-process harness against commit `40b3a7578811fd616341ca4e31cc7748aeeff12f` produced plain `"x"` both under non-TTY automatic detection and under `NO_COLOR=1`, including loss of `bold`; `FORCE_COLOR=3` produced the expected nested bold/red SGR bytes.
+- **vue-tui:** every render owns one fixed paint capability. `MountOptions.color` and `RenderToStringOptions.color` accept `boolean | ColorProfile`, where `ColorProfile` is exactly `"ansi16" | "ansi256" | "truecolor"`. `true` means automatic detection, `false` removes every SGR attribute, and a profile forces its named capability. Mount defaults to automatic against its selected stdout; `renderToString()` defaults to plain but an explicit `true` invokes the same resolver against process stdout. Paint, Static, borders, backgrounds, Text caches, and SGR authored directly in Text content all pass through the resulting session capability; higher authored colors are reduced rather than leaked. Non-empty `NO_COLOR` suppresses colors on an automatic capable TTY but retains non-color attributes, as required by the [NO_COLOR convention](https://no-color.org/). The official test host defaults to automatic against its modeled truecolor-TTY or plain-stream capability instead of inheriting its worker's environment.
+- **Why:** a renderer library can mount applications against different streams in one process, so process stdout at module-import time is not the output capability of every app. Environment variables remain useful defaults for a final CLI user, while per-render booleans and profiles let library callers and tests select deliberate behavior without mutating global process state. One resolver and session-owned capability make the target stream authoritative when automatic, keep detached output plain unless requested otherwise, prevent color-dependent paint caches from crossing sessions, and avoid spawning workers with conflicting `NO_COLOR` / `FORCE_COLOR` solely to make assertions pass. This clean-slate divergence followed Yunfei's 2026-08-01 direction to prefer the correct design over compatibility.
 
 > **Implementation checkpoint, 2026-07-24:** the vouched `useStdin` section below is now implemented. Its final historical bullet still records the earlier pending state and is preserved verbatim because the vouch covers the whole section.
 
@@ -845,14 +851,14 @@ different runtime behavior, ownership rule, or out-of-contract handling.
 - **vue-tui:** drops the same straddling grapheme whole but advances the write origin to the first retained grapheme's original source column. The same example renders `" x"`: column 0 stays blank and `x` remains at column 1.
 - **Why:** clipping decides which source cells are visible; it must not change the layout coordinates of cells that remain visible. Reflowing retained text would move surviving cells away from their layout positions. Preserving the gap keeps one stable surface coordinate for each painted source cell.
 - **Boundary:** ordinary narrow-character clipping is unchanged, and a wide grapheme that straddles the right edge is still omitted whole. The private Transform mechanism whose clip-then-transform ordering was previously recorded here was removed entirely.
-- **Evidence:** [`overflow.test.tsx`](../../packages/runtime-tests/integration/layout/overflow.test.tsx) covers plain wide and ZWJ graphemes at both viewport edges. The `horizontal-left-wide` Fullscreen fixture is also exercised through a real PTY in [`fullscreen-origin.test.ts`](../../packages/runtime-tests/integration/pty/fullscreen-origin.test.ts) and is available to the visual review controller. The Ink result above was previously run-verified against the pinned v7.0.4 build; this entry deliberately chooses the spatially stable behavior instead.
+- **Evidence:** [`overflow.test.tsx`](../../tests/runtime/integration/layout/overflow.test.tsx) covers plain wide and ZWJ graphemes at both viewport edges. The `horizontal-left-wide` Fullscreen fixture is also exercised through a real PTY in [`fullscreen-origin.test.ts`](../../tests/runtime/e2e/pty/fullscreen-origin.test.ts). The Ink result above was previously run-verified against the pinned v7.0.4 build; this entry deliberately chooses the spatially stable behavior instead.
 
 ### Nested overflow keeps every ancestor clip active
 
 - **Ink:** Output replay uses only the most recently pushed component clip, then applies `Transform` without clipping the callback result again. A larger inner `overflow:hidden` region or an expanding transform can therefore reopen cells already excluded by a narrower outer overflow ancestor.
 - **vue-tui:** Output replay intersects the complete active overflow stack, then intersects the terminal viewport boundary. A descendant can narrow its visible region but cannot expand an ancestor-owned region. (Before its removal, the private Transform received the pre-clipped source span and its result was contained by the same intersection.)
 - **Why:** overflow is a containment boundary. A descendant must not repaint cells an ancestor excluded; otherwise visible output disagrees with layout containment. This retained paint rule no longer depends on the removed semantic-geometry or pointer mechanisms.
-- **Evidence:** [`overflow.test.tsx`](../../packages/runtime-tests/integration/layout/overflow.test.tsx) covers the retained public vertical ancestor intersection.
+- **Evidence:** [`overflow.test.tsx`](../../tests/runtime/integration/layout/overflow.test.tsx) covers the retained public vertical ancestor intersection.
 
 ### Historical: `measureElement` coerced a non-finite pre-layout dimension to `0`
 
@@ -886,7 +892,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   raw `tui-box` host still keeps broader defensive renderer mechanics for existing internal
   paths, but those mechanics are not a public input contract. This entry is historical rather
   than a current divergence; the exact current evidence is
-  [`public-prop-contract.test.tsx`](../../packages/runtime-tests/integration/components/public-prop-contract.test.tsx).
+  [`public-prop-contract.test.tsx`](../../tests/runtime/integration/components/public-prop-contract.test.tsx).
 
 ### Composables throw outside a render tree
 
@@ -907,7 +913,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   the two public Text wrap modes. Undeclared attributes are rejected instead of falling through
   to a raw host. Visual-only colors and border style are validated when a visual frame can use
   them. The exact accepted and rejected values are locked by
-  [`public-prop-contract.test.tsx`](../../packages/runtime-tests/integration/components/public-prop-contract.test.tsx).
+  [`public-prop-contract.test.tsx`](../../tests/runtime/integration/components/public-prop-contract.test.tsx).
 - **Layer:** `box-validate.ts`, `text-validate.ts`, and `unsupported-attrs.ts` run from the
   `Box` / `Text` component render before Vue patches a host node. A bad value therefore follows
   Vue's ordinary component-error path through user `onErrorCaptured` and
@@ -937,7 +943,7 @@ different runtime behavior, ownership rule, or out-of-contract handling.
   makes the more reliable library choice here: reject the same invalid input with a
   recoverable, prop-specific error instead of preserving Ink's lower-level paint crash and
   chalk implementation message. The current exact evidence is
-  [`public-prop-contract.test.tsx`](../../packages/runtime-tests/integration/components/public-prop-contract.test.tsx).
+  [`public-prop-contract.test.tsx`](../../tests/runtime/integration/components/public-prop-contract.test.tsx).
 - **Current error channel:** eager component-layer validation remains useful because it keeps invalid public props out of paint and on Vue's component-error path. The old claim that Runtime necessarily renders an overview and rejects `waitUntilExit()` is superseded; user `onErrorCaptured`, `app.config.errorHandler`, and Vue now determine the component-error result.
 - **Current Text color rule:** `<Text>` validates `color` and `backgroundColor` on every render,
   not only when its content is non-empty — matching `<Box>`, which validates its colors

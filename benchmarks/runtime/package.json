@@ -1,0 +1,19 @@
+{
+  "name": "benchmarks-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bench": "vp test bench --run",
+    "check:type": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@vitejs/plugin-vue-jsx": "catalog:",
+    "@vue-tui/runtime": "workspace:*",
+    "@vue-tui/testing": "workspace:*",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:",
+    "vue": "^3.5.34"
+  }
+}

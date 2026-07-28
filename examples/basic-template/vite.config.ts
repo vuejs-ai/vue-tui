@@ -1,5 +1,5 @@
 import { defineConfig } from "vite";
-import vue from "@vitejs/plugin-vue";
+import vue from "unplugin-vue/vite";
 import { vueTui } from "@vue-tui/vite";
 
 export default defineConfig({

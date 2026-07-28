@@ -1,13 +1,15 @@
 import { PassThrough } from "node:stream";
 
+type FakeWritableStream = PassThrough & NodeJS.WriteStream;
+
 export interface FakeWritableOptions {
   columns?: number;
   rows?: number;
   isTTY?: boolean;
 }
 
-export function makeFakeWritable(options: FakeWritableOptions = {}): NodeJS.WriteStream {
-  const s = new PassThrough() as unknown as NodeJS.WriteStream;
+export function makeFakeWritable(options: FakeWritableOptions = {}): FakeWritableStream {
+  const s = new PassThrough() as FakeWritableStream;
   Object.assign(s, {
     columns: options.columns ?? 100,
     isTTY: options.isTTY ?? true,
@@ -26,6 +28,8 @@ export function makeFakeStdin(options: { isTTY?: boolean } = {}): {
   rawMode: RawModeState;
 } {
   const rawMode = { current: false, history: [] as boolean[] };
+  // PassThrough supplies the real stream behavior; the test host installs the
+  // TTY-only ReadStream surface immediately below.
   const s = new PassThrough() as unknown as NodeJS.ReadStream;
   Object.assign(s, {
     isTTY: options.isTTY ?? true,
@@ -39,8 +43,12 @@ export function makeFakeStdin(options: { isTTY?: boolean } = {}): {
     setEncoding(this: NodeJS.ReadStream) {
       return this;
     },
+    ref() {
+      return s;
+    },
+    unref() {
+      return s;
+    },
   });
-  (s as any).ref = () => {};
-  (s as any).unref = () => {};
   return { stream: s, rawMode };
 }

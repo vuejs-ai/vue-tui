@@ -3,6 +3,9 @@ export {
   connectDevtools,
   disconnectDevtools,
   isDevConnected,
+  isVueTuiDevSessionConflictError,
+  invalidateDevHmrUpdate,
   getDevtoolsSessionId,
+  VueTuiDevSessionConflictError,
   type ConnectDevtoolsOptions,
 } from "../hmr.ts";

@@ -15,7 +15,6 @@ Vue 3 terminal renderer with Yoga flexbox layout — build rich TUI apps with th
 - **Explicit focus ownership** — targetless or component-bound identities with one current owner and no public manager
 - **Small public foundation** — renderer-owned facts stay public only when application code cannot derive them safely
 - **Terminal-native** — renders directly to stdout, purpose-built for stateful interactive terminal applications
-- **Coding-agent visual development guide** — a version-matched method for running the real application, inspecting the screen after terminal control sequences are applied, operating it, and iterating from what the agent sees
 
 `@vue-tui/runtime` is a terminal platform renderer parallel to `@vue/runtime-dom`, comparable to [React Ink](https://github.com/vadimdemedes/ink) but adapted for Vue's reactivity model.
 
@@ -24,20 +23,6 @@ Vue 3 terminal renderer with Yoga flexbox layout — build rich TUI apps with th
 ```bash
 npm install @vue-tui/runtime vue
 ```
-
-## Develop with a coding agent
-
-If a coding agent changes visible terminal behavior, tell it to read the version-matched visual development guide shipped in this package before editing or accepting the result. Run this from the application directory:
-
-```sh
-node -p "require('node:path').join(require.resolve('@vue-tui/runtime/package.json'), '../docs/visual-development-feedback-loops.md')"
-```
-
-The guide defines a browser-independent loop built around a real PTY, an emulated active screen, a rendered image that the agent actually inspects, incremental user-path actions, deterministic tests, and terminal-restoration checks. [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing) provides fast content-frame and modeled-screen assertions, while the visual loop exercises the built application through the real PTY path.
-
-`@vue-tui/runtime` ships the guide, not a controller, PTY library, terminal emulator, or image renderer. The coding-agent environment or application project supplies those capabilities.
-
-For reliable discovery, copy the [provided instruction](./docs/visual-development-feedback-loops.md#tell-an-agent-to-use-this-guide) into the application's root `AGENTS.md`, `CLAUDE.md`, or equivalent agent-instruction file.
 
 ## Quick Start
 
@@ -312,7 +297,7 @@ fullscreen.mount({
 });
 ```
 
-`createApp()` returns a `TuiApp` that projects the public Vue `App` surface from the consumer's installed Vue version, excludes underscore-prefixed renderer fields and `TuiNode`, replaces Vue's DOM-oriented `mount()`, and returns the actual user root component instance. The six mount options are `stdout`, `stdin`, `stderr`, `mode`, `patchConsole`, and `exitOnCtrlC`: stdin accepts a Node `Readable`, stdout and stderr accept Node `Writable` streams, and omission selects the corresponding `process` stream. Output cadence, frame-rate tuning, renderer observation, terminal protocols, accessibility presentation, and clipboard transports are not mount policy. `patchConsole` defaults to true and `exitOnCtrlC` defaults to false.
+`createApp()` returns a `TuiApp` that projects the public Vue `App` surface from the consumer's installed Vue version, excludes underscore-prefixed renderer fields and `TuiNode`, replaces Vue's DOM-oriented `mount()`, and returns the actual user root component instance. The seven mount options are `stdout`, `stdin`, `stderr`, `mode`, `color`, `patchConsole`, and `exitOnCtrlC`: stdin accepts a Node `Readable`, stdout and stderr accept Node `Writable` streams, and omission selects the corresponding `process` stream. `color` accepts `boolean | ColorProfile`, where `ColorProfile` is `"ansi16" | "ansi256" | "truecolor"`. Omission and `true` automatically resolve styling once against the selected stdout: explicit `FORCE_COLOR` wins, non-empty `NO_COLOR` / `NODE_DISABLE_COLORS` suppress colors while retaining non-color attributes on a capable TTY, and otherwise Runtime uses that stream's TTY color depth. `false` emits no SGR styling, while an explicit profile forces that capability and ignores environment, TTY state, and detected depth. The result applies to component props and SGR already present in Text content: plain output strips it, `NO_COLOR` strips only its colors, and lower profiles reduce higher color forms. Output cadence, frame-rate tuning, renderer observation, terminal protocols, accessibility presentation, and clipboard transports are not mount policy. `patchConsole` defaults to true and `exitOnCtrlC` defaults to false.
 
 The returned app handle owns two barriers. `waitUntilRenderFlush()` is always callable: it resolves immediately before mount and after completed exit, waits for the accepted render and output snapshot while mounted, and waits for already-started teardown output without reporting the exit result or implicitly including a later application update. `waitUntilExit()` resolves with no value after normal rollback, restoration, and accepted output, or rejects at that point with the first fatal `Error` by identity; a later stream or cleanup failure does not replace an earlier real cause, including a genuine `AggregateError`. `unmount()` starts teardown but remains synchronous; await `waitUntilExit()` when later process work depends on restoration being complete.
 
@@ -353,7 +338,7 @@ const document = renderToString(App, { width: 80, height: 24 });
 const full = renderToString(App, { width: 80, height: Infinity });
 ```
 
-Defaults are modeled 80×24. The TypeScript surface is exactly `readonly width?: number` and `readonly height?: number`. Width must be a positive integer through 65,535. Height must be a positive integer through 65,535 or positive `Infinity` (mapped to Runtime's private unbounded representation, never passed to Yoga). Finite height bounds ordinary dynamic paint without padding shorter output. At runtime, `renderToString()` reads only those two options and ignores unrelated keys without reading their values. A document whose final visual surface exceeds 1,048,576 cells fails before Runtime allocates its paint grid. Shared components observe the same values through `useLayoutSize()` and receive isolated inert streams; `useApp().exit()` is an inert no-op. Runtime owns the root VNode and tracks host Yoga allocations for this render, so an error during the initial Vue patch still disposes every created Vue scope and inert stream, frees the render's Yoga nodes, and rethrows the original error.
+Defaults are modeled 80×24 with plain styling. The TypeScript surface is exactly `readonly width?: number`, `readonly height?: number`, and `readonly color?: boolean | ColorProfile`. Width must be a positive integer through 65,535. Height must be a positive integer through 65,535 or positive `Infinity` (mapped to Runtime's private unbounded representation, never passed to Yoga). `false` is the default and emits no SGR styling, including SGR authored directly in Text content. A profile selects and enforces the same fixed capability as mounted rendering; explicit `true` uses the same automatic resolver as mount against `process.stdout` and `process.env`. The string host still writes nothing to that stream and exposes only isolated inert streams to components. Finite height bounds ordinary dynamic paint without padding shorter output. At runtime, `renderToString()` reads only the three public options and ignores unrelated keys without reading their values. A document whose final visual surface exceeds 1,048,576 cells fails before Runtime allocates its paint grid. Shared components observe the same dimensions through `useLayoutSize()` and receive isolated inert streams; `useApp().exit()` is an inert no-op. Runtime owns the root VNode and tracks host Yoga allocations for this render, so an error during the initial Vue patch still disposes every created Vue scope and inert stream, frees the render's Yoga nodes, and rethrows the original error.
 
 Mounted non-TTY stdout is the supported secondary counterpart of this document model: Inline and Fullscreen requests share one fixed 80×24 document host with no terminal-management controls, no intermediate dynamic frames, inert `useInput()`, and a single final dynamic write on clean teardown.
 
@@ -363,7 +348,7 @@ Mounted non-TTY stdout is the supported secondary counterpart of this document m
 - `@vue-tui/runtime/inline` contains only `Static`, because terminal history is meaningful only for Inline applications.
 - `@vue-tui/runtime/internal/devtools` is an unsupported, version-coupled bridge used only by the official `@vue-tui/vite` package (`connectDevtools(hot)`). It is not a supported public or third-party extension contract.
 - `@vue-tui/runtime/internal/testing` is an unsupported, version-coupled bridge used only by the official `@vue-tui/testing` package (`createTestHostBridge()` and bridge-only types). It is not a supported public or third-party extension contract.
-- `@vue-tui/runtime/package.json` is an explicit metadata export. It supports ordinary manifest resolution, including locating the version-matched visual-development guide shipped beside it, without promising that every JSON field is an independent stable API.
+- `@vue-tui/runtime/package.json` is an explicit metadata export for ordinary manifest resolution without promising that every JSON field is an independent stable API.
 
 There is no supported broad `/internal` barrel and no `/devtools`, `/testing`, or `/fullscreen` public import. Fullscreen is selected with `mount({ mode: "fullscreen" })`; parser, renderer, and terminal-protocol mechanisms are private, while the withdrawn mouse, selection, and clipboard implementations are absent rather than hidden package contracts.
 

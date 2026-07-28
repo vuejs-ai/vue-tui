@@ -1,5 +1,10 @@
-import chalk, { type ChalkInstance } from "chalk";
+import { Chalk, type ChalkInstance } from "chalk";
 import type { TextProps } from "../host/nodes.ts";
+import type { TerminalStyle } from "./terminal-style.ts";
+
+// Validation is grammar-only. It must not inherit the process's terminal or
+// color environment just because Chalk was imported in this module.
+const chalkGrammar = new Chalk({ level: 1 });
 
 // Mirror Ink's colorize.ts (commit 40b3a75) EXACTLY for the accepted color
 // forms and its "no match -> bare text (no codes)" fallback. The regexes below
@@ -10,6 +15,15 @@ import type { TextProps } from "../host/nodes.ts";
 // must fall through to bare text.
 const rgbRegex = /^rgb\(\s?(\d+),\s?(\d+),\s?(\d+)\s?\)$/;
 const ansi256Regex = /^ansi256\(\s?(\d+)\s?\)$/;
+
+function chalkProperty(instance: ChalkInstance, key: string): unknown {
+  // Chalk is a callable proxy with dynamic named-color properties that its
+  // public type cannot enumerate. Keep that dynamic lookup in one read-only
+  // boundary and validate every result before use.
+  const property: unknown = Reflect.get(instance, key);
+  return property;
+}
+
 export function isForegroundResetColor(color: unknown): boolean {
   return color === "default";
 }
@@ -18,21 +32,27 @@ export function isBackgroundResetColor(color: unknown): boolean {
   return color === "default";
 }
 
-function resetForeground(text: string): string {
-  return chalk.level > 0 ? `\x1b[39m${text}\x1b[39m` : text;
+function resetForeground(text: string, style: TerminalStyle): string {
+  return style.colorLevel > 0 ? `\x1b[39m${text}\x1b[39m` : text;
 }
 
-function resetBackground(text: string): string {
-  return chalk.level > 0 ? `\x1b[49m${text}\x1b[49m` : text;
+function resetBackground(text: string, style: TerminalStyle): string {
+  return style.colorLevel > 0 ? `\x1b[49m${text}\x1b[49m` : text;
 }
 
-export function applyColor(c: ChalkInstance, color: unknown, bg: boolean): ChalkInstance {
+export function applyColor(
+  style: TerminalStyle,
+  c: ChalkInstance,
+  color: unknown,
+  bg: boolean,
+): ChalkInstance {
+  if (style.colorLevel === 0) return c;
   if (typeof color !== "string") return c;
   // Named chalk color (validated by presence of the method, like Ink's
   // `color in chalk`): apply when known, otherwise fall through to bare text.
   const key = bg ? bgKey(color) : color;
-  const named = (c as never as Record<string, ChalkInstance>)[key];
-  if (typeof named === "function") return named;
+  const named = chalkProperty(c, key);
+  if (typeof named === "function") return named as ChalkInstance;
   if (color.startsWith("#")) return bg ? c.bgHex(color) : c.hex(color);
   if (color.startsWith("ansi256")) {
     const m = ansi256Regex.exec(color);
@@ -77,9 +97,9 @@ export function isInvalidBackgroundColor(color: unknown): boolean {
   // Only a non-empty string can be a chalk name. Non-strings, undefined, null,
   // hex/ansi256/rgb strings (not `in chalk`) all fall through to `false`.
   if (typeof color !== "string" || color.length === 0) return false;
-  const isInChalk = color in (chalk as unknown as Record<string, unknown>);
+  const isInChalk = color in chalkGrammar;
   if (!isInChalk) return false;
-  const bgMethod = (chalk as unknown as Record<string, unknown>)[bgKey(color)];
+  const bgMethod = chalkProperty(chalkGrammar, bgKey(color));
   return typeof bgMethod !== "function";
 }
 
@@ -92,8 +112,8 @@ export function isInvalidBackgroundColor(color: unknown): boolean {
  */
 export function isInvalidForegroundColor(color: unknown): boolean {
   if (typeof color !== "string" || color.length === 0) return false;
-  const method = (chalk as unknown as Record<string, unknown>)[color];
-  return color in (chalk as unknown as Record<string, unknown>) && typeof method !== "function";
+  const method = chalkProperty(chalkGrammar, color);
+  return color in chalkGrammar && typeof method !== "function";
 }
 
 /**
@@ -122,7 +142,7 @@ export function assertValidForegroundColor(color: unknown, label = "color"): voi
   }
 }
 
-export function applyChalk(text: string, props: TextProps): string {
+export function applyChalk(style: TerminalStyle, text: string, props: TextProps): string {
   // Mirror Ink's Text.tsx `transform` (commit 40b3a75): apply each enabled
   // style as its OWN nested chalk call, in the exact order
   // dim -> color -> backgroundColor -> bold -> italic -> underline ->
@@ -130,17 +150,18 @@ export function applyChalk(text: string, props: TextProps): string {
   // pairs (e.g. dim+bold re-opens bold after dim's SGR-22 reset), which is
   // byte-identical to Ink. A single chained ChalkInstance would emit a
   // different, non-Ink byte sequence for any multi-style Text (G68).
+  const chalk = style.chalk;
   let s = text;
   if (props.dimColor) s = chalk.dim(s);
   if (props.color) {
     s = isForegroundResetColor(props.color)
-      ? resetForeground(s)
-      : applyColor(chalk, props.color, false)(s);
+      ? resetForeground(s, style)
+      : applyColor(style, chalk, props.color, false)(s);
   }
   if (props.backgroundColor) {
     s = isBackgroundResetColor(props.backgroundColor)
-      ? resetBackground(s)
-      : applyColor(chalk, props.backgroundColor, true)(s);
+      ? resetBackground(s, style)
+      : applyColor(style, chalk, props.backgroundColor, true)(s);
   }
   if (props.bold) s = chalk.bold(s);
   if (props.italic) s = chalk.italic(s);

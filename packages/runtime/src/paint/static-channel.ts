@@ -1,5 +1,6 @@
 import { NESTED_STATIC_ERROR, type TuiNode, type TuiStatic } from "../host/nodes.ts";
 import { paintIsolated } from "./paint.ts";
+import type { TerminalStyle } from "./terminal-style.ts";
 
 export function findStatics(root: TuiNode, out: TuiStatic[] = []): TuiStatic[] {
   if (root.type === "tui-static") out.push(root);
@@ -49,11 +50,15 @@ export interface PreparedStaticOutput {
 }
 
 /** Paint one open <Static> host without changing its write-once state. */
-function prepareStaticNode(stat: TuiStatic, columns: number): PreparedStaticBatch {
+function prepareStaticNode(
+  stat: TuiStatic,
+  columns: number,
+  terminalStyle: TerminalStyle,
+): PreparedStaticBatch {
   const paintableChildren = stat.children.filter((child) => !isInertStaticAnchor(child));
   let frame = "";
   if (paintableChildren.length > 0) {
-    frame = paintIsolated(paintableChildren, columns, stat);
+    frame = paintIsolated(paintableChildren, columns, terminalStyle, stat);
   }
   return { stat, frame };
 }
@@ -62,12 +67,13 @@ function prepareStaticNode(stat: TuiStatic, columns: number): PreparedStaticBatc
 export function prepareStaticOutput(
   root: TuiNode,
   columns: number,
+  terminalStyle: TerminalStyle,
   statics = findStatics(root),
 ): PreparedStaticOutput {
   validateStaticPlacement(statics);
   const batches = statics
     .filter((stat) => stat.commitState === "open")
-    .map((stat) => prepareStaticNode(stat, columns));
+    .map((stat) => prepareStaticNode(stat, columns, terminalStyle));
   // An output-free instance is still a producer: it remains open until a later
   // eligible render produces bytes, or ordinary Vue unmount removes it. Only
   // blocks represented in this transaction may be accepted or abandoned.

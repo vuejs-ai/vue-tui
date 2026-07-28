@@ -1,7 +1,10 @@
 import type { Plugin } from "vite";
 import { randomUUID } from "node:crypto";
+import { normalizeDevEntry } from "./entry-match.ts";
 import { devVmodPlugin } from "./dev-vmod.ts";
 import { devPlugin } from "./dev.ts";
+import { hmrErrorForwardingPlugin } from "./hmr-error-forwarding.ts";
+import { createWatcherUpdateTracker } from "./watcher-update.ts";
 
 export interface VueTuiOptions {
   entry?: string;
@@ -11,29 +14,26 @@ export function vueTui(options: VueTuiOptions = {}): Plugin[] {
   // vueTui() is a DEV-only toolkit: an in-terminal dev server with HMR. It does NOT touch the
   // production build — `vite build` is browser-first and the wrong tool for a Node program. Bundle
   // the app into a self-contained Node file with tsdown + unplugin-vue instead (see the
-  // vue-tui-starter template and examples/*/tsdown.config.ts).
+  // templates/vite and examples/*/tsdown.config.ts).
   //
-  // Bring your own SFC/JSX compiler alongside vueTui() — `[vue(), vueTui()]` for SFCs, or
-  // `[vueJsx(), vueTui()]` for JSX. devPlugin's configResolved finds whichever is present (by
-  // plugin name) and force-client-compiles it, so it emits CLIENT render functions for the
-  // terminal renderer even in Vite's SSR dev environment. vueTui deliberately does NOT bundle
-  // @vitejs/plugin-vue: the app's authoring format is the consumer's choice, kept explicit.
+  // Bring your own compiler alongside vueTui() — `[vueSfc(), vueTui()]` from
+  // unplugin-vue/vite for SFCs, or `[vueJsx(), vueTui()]` from
+  // @vitejs/plugin-vue-jsx for JSX. unplugin-vue has a supported client-output
+  // option and defaults it on. The JSX compiler does not, so devPlugin narrowly
+  // supplies its missing client-mode hook argument. Exact peer pins and real
+  // compilation journeys define the supported compiler matrix; generated output
+  // is deliberately not pattern-matched. The authoring format stays explicit
+  // instead of being bundled into vueTui().
   //
   // One session id is shared by the entry injector and the virtual dev module so full reload
   // reconnects the same privileged Runtime session while a concurrent second server fails.
   const session = { sessionId: randomUUID() };
-  return [devPlugin({ entry: normalizeDevEntry(options.entry), session }), devVmodPlugin(session)];
-}
-
-// Normalize the dev entry for the SSR runner import id and for later absolute resolution
-// against config.root. Anything already ROOTED passes through unchanged — a leading "/"
-// (root-relative "/src/main.ts", a POSIX-absolute "/Users/x/…", or a UNC "//server/share/…")
-// or a Windows drive-letter "C:/x". Only the RELATIVE forms ("src/main.ts", "./src/main.ts")
-// get a leading slash added. Backslashes are normalized first.
-function normalizeDevEntry(entry?: string): string {
-  const e = (entry ?? "src/main.ts").replace(/\\/g, "/");
-  if (e.startsWith("/") || /^[a-zA-Z]:\//.test(e)) return e;
-  return `/${e.replace(/^(?:\.\/)+/, "")}`;
+  const watcherUpdates = createWatcherUpdateTracker();
+  return [
+    hmrErrorForwardingPlugin({ watcherUpdates }),
+    devPlugin({ entry: normalizeDevEntry(options.entry), session, watcherUpdates }),
+    devVmodPlugin(session),
+  ];
 }
 
 export default vueTui;

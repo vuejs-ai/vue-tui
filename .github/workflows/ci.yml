@@ -41,12 +41,8 @@ jobs:
           node-version: "22.18.0"
           cache: true
 
-      # `ci` is the parallel verification graph defined in vite.config.ts
-      # (run.tasks). The vp task runner fans out independent branches
-      # concurrently — fmt starts immediately, while lint, check:type, and the
-      # test suites wait on build (the type-aware lint rules and the tests
-      # resolve @vue-tui/runtime from the built dist) — so the wall-clock
-      # critical path is build -> test:pty rather than the sum of every check.
-      # `vp run --last-details` (or the run summary) shows which sub-task failed.
-      - name: Verify (vp run ci)
-        run: vp run ci
+      # `check` enters the parallel verification graph defined in
+      # vite.config.ts with the repository's conservative task/worker
+      # heuristic. The graph summary identifies the exact failing sub-task.
+      - name: Verify (vp run check)
+        run: vp run check

@@ -65,35 +65,41 @@ The test host exposes two intentionally different views of one run:
 
 Content frames are not screenshots. They retain renderer-emitted SGR styling, such as text colors, but deliberately exclude cursor movement, erase commands, alternate-screen commands, patched-console side output, and all teardown-phase observer commits. Use `screen()` when the assertion is about what a terminal would contain.
 
+Set `retainFrames: false` for a long-running screen-only workload that should not retain every renderer commit. `frames` then stays empty and `lastFrame()` returns an empty string; `screen()` and terminal behavior are unchanged.
+
 The test host deliberately does not republish Runtime's internal mode resolution, output policy, or capability objects. Configure a production-like host through `RenderOptions`, then assert what the application renders, what the modeled terminal contains, and how terminal ownership changes through suspension or teardown.
 
 ## `render(component, options?)`
 
-`render()` mounts the root component and waits for its initial render. Omission models a visual Inline application with TTY stdin, TTY stdout, live updates, and a `100 × 100` terminal.
+`render()` mounts the root component and waits for its initial render. Omission models a visual Inline application with TTY stdin, TTY stdout, live updates, a `100 × 100` terminal, and deterministic truecolor output. A modeled stream emits plain document output instead. Neither host inherits the test worker's terminal color environment.
 
 ```ts
 interface RenderOptions {
   readonly mode?: "inline" | "fullscreen";
   readonly stdin?: "tty" | "non-tty";
   readonly stdout?: "tty" | "stream";
+  readonly color?: boolean | ColorProfile;
   readonly patchConsole?: boolean;
   readonly exitOnCtrlC?: boolean;
+  readonly retainFrames?: boolean;
   readonly columns?: number;
   readonly rows?: number;
   readonly props?: Record<string, unknown>;
 }
 ```
 
-| Render field   | Default    | Meaning                                                                |
-| -------------- | ---------- | ---------------------------------------------------------------------- |
-| `mode`         | `"inline"` | Requested production screen model                                      |
-| `stdin`        | `"tty"`    | Whether input supports TTY behavior such as raw mode                   |
-| `stdout`       | `"tty"`    | Whether output can acquire a terminal surface and dimensions           |
-| `patchConsole` | `false`    | Whether `console.*` output uses Runtime's modeled frame-safe writer    |
-| `exitOnCtrlC`  | `false`    | Whether exact Ctrl+C exits before reaching managed input subscriptions |
-| `columns`      | `100`      | Layout and emulator width                                              |
-| `rows`         | `100`      | Emulator height and TTY height                                         |
-| `props`        | —          | Props passed to the root component                                     |
+| Render field   | Default    | Meaning                                                                                       |
+| -------------- | ---------- | --------------------------------------------------------------------------------------------- |
+| `mode`         | `"inline"` | Requested production screen model                                                             |
+| `stdin`        | `"tty"`    | Whether input supports TTY behavior such as raw mode                                          |
+| `stdout`       | `"tty"`    | Whether output can acquire a terminal surface and dimensions                                  |
+| `color`        | `true`     | Automatic modeled capability; `false` strips SGR and a named profile enforces that capability |
+| `patchConsole` | `false`    | Whether `console.*` output uses Runtime's modeled frame-safe writer                           |
+| `exitOnCtrlC`  | `false`    | Whether exact Ctrl+C exits before reaching managed input subscriptions                        |
+| `retainFrames` | `true`     | Whether `frames` and `lastFrame()` retain renderer commits                                    |
+| `columns`      | `100`      | Layout and emulator width                                                                     |
+| `rows`         | `100`      | Emulator height and TTY height                                                                |
+| `props`        | —          | Props passed to the root component                                                            |
 
 `columns` and `rows` must be positive safe integers no greater than 65535. They set both the modeled output dimensions and the emulator dimensions. Because the xterm test emulator allocates the complete viewport, their product must also be no greater than 1048576 cells; use direct Runtime streams when testing a larger Inline terminal whose rendered region is small. `rows` still controls the emulator when `host.stdout` is `"stream"`, while the Runtime layout remains row-unbounded because a stream does not own a finite visual viewport.
 

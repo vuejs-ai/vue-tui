@@ -15,11 +15,10 @@ Build with components, develop with HMR, test with confidence.
 
 - **Vue SFC & JSX** — write terminal interfaces with `<template>`, TSX, or both
 - **Flexbox layout** — powered by Yoga, the same engine behind React Native
-- **Dev toolkit** _(experimental)_ — **HMR** in the terminal via the `@vue-tui/vite` plugin (`npm run dev`)
+- **Dev toolkit** _(experimental)_ — **HMR** in the terminal via the `@vue-tui/vite` plugin (`pnpm dev`)
 - **Input and focus primitives** — normalized text, paste, and key facts with managed terminal ownership, plus explicit unique focus handles that compose with input subscriptions
 - **Small public foundation** — renderer-owned facts stay public only when application code cannot derive them safely
 - **Testing harness** — out-of-the-box component-level terminal testing — render, simulate input, assert frames
-- **Coding-agent visual development guide** — a version-matched method for running the real app, inspecting the screen after terminal control sequences are applied, operating it, and iterating from what the agent sees ([guide](./packages/runtime/docs/visual-development-feedback-loops.md))
 
 <p align="center">
   <a href="./examples/flappy-bird"><em>Flappy Bird</em></a> — one of the <a href="#examples">examples</a> included in the repo
@@ -38,10 +37,10 @@ There are two ways to use vue-tui — scaffold a full project, or drop the runti
 A ready-to-develop setup: Vue SFCs and a terminal HMR dev server via the `@vue-tui/vite` plugin.
 
 ```bash
-npx tiged vuejs-ai/vue-tui-starter/vite my-app
+pnpm dlx tiged vuejs-ai/vue-tui/templates/vite my-app
 cd my-app
-npm install
-npm run dev      # in-process terminal dev server with HMR
+pnpm install
+pnpm dev      # in-process terminal dev server with HMR
 ```
 
 Edit `src/app.vue` and watch the terminal update instantly.
@@ -88,8 +87,9 @@ import App from "./app.vue";
 createApp(App).mount({ exitOnCtrlC: true });
 ```
 
-- Compile the SFCs with [`@vitejs/plugin-vue`](https://www.npmjs.com/package/@vitejs/plugin-vue), or use JSX with [`@vitejs/plugin-vue-jsx`](https://www.npmjs.com/package/@vitejs/plugin-vue-jsx).
-- For hot-reload (HMR) support while developing, add the `@vue-tui/vite` plugin: `plugins: [vue(), vueTui()]`.
+- For Vite development, compile SFCs with [`unplugin-vue/vite`](https://www.npmjs.com/package/unplugin-vue), whose default client output is what the terminal renderer needs; JSX uses the HMR-capable [`@vitejs/plugin-vue-jsx`](https://www.npmjs.com/package/@vitejs/plugin-vue-jsx).
+- For a production Node bundle, use `unplugin-vue/rolldown` with `tsdown` for SFCs, or `unplugin-vue-jsx/rolldown` for JSX.
+- For hot-reload (HMR) support while developing, add the `@vue-tui/vite` plugin: `plugins: [vueSfc(), vueTui()]`.
 
 ## Table of Contents
 
@@ -107,13 +107,13 @@ createApp(App).mount({ exitOnCtrlC: true });
 
 ## Packages
 
-| Package                                                                    | Description                                                                                                                                                                                                                                                                                                        |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime)       | The core framework — Vue 3 renderer for the terminal with common components (`Box`, `Text`, etc.), an explicit Inline-history subpath, narrow public layout and Box facts, normalized input, explicit unique focus ownership, lifecycle, and yoga-based flexbox layout. _API stabilizing._                         |
-| [`@vue-tui/use`](https://www.npmjs.com/package/@vue-tui/use)               | Reusable public-Runtime-only behavior — lifecycle-scoped input as a function-ref composable or renderless component.                                                                                                                                                                                               |
-| [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite)             | Vite plugin — add `vueTui()` to `vite.config.ts` for an in-process terminal dev server with HMR (`npm run dev`). Dev only; the production build is a plain `tsdown` config that bundles the app into one self-contained Node file (see the starter and `examples/*/tsdown.config.ts`). _Experimental; may change._ |
-| [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing)       | Deterministic test host — model terminal or stream conditions, inspect content commits, and assert the terminal-emulated screen                                                                                                                                                                                    |
-| [`@vue-tui/components`](https://www.npmjs.com/package/@vue-tui/components) | High-level components built on the runtime primitives — `<ScrollBox>`, `<Spinner>`, `<Newline>`, and `<Spacer>`.                                                                                                                                                                                                   |
+| Package                                                                    | Description                                                                                                                                                                                                                                                                                                     |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime)       | The core framework — Vue 3 renderer for the terminal with common components (`Box`, `Text`, etc.), an explicit Inline-history subpath, narrow public layout and Box facts, normalized input, explicit unique focus ownership, lifecycle, and yoga-based flexbox layout. _API stabilizing._                      |
+| [`@vue-tui/use`](https://www.npmjs.com/package/@vue-tui/use)               | Reusable public-Runtime-only behavior — lifecycle-scoped input as a function-ref composable or renderless component.                                                                                                                                                                                            |
+| [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite)             | Vite plugin — add `vueTui()` to `vite.config.ts` for an in-process terminal dev server with HMR (`pnpm dev`). Dev only; the production build is a plain `tsdown` config that bundles the app into one self-contained Node file (see the starter and `examples/*/tsdown.config.ts`). _Experimental; may change._ |
+| [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing)       | Deterministic test host — model terminal or stream conditions, inspect content commits, and assert the terminal-emulated screen                                                                                                                                                                                 |
+| [`@vue-tui/components`](https://www.npmjs.com/package/@vue-tui/components) | High-level components built on the runtime primitives — `<ScrollBox>`, `<Spinner>`, `<Newline>`, and `<Spacer>`.                                                                                                                                                                                                |
 
 ## Examples
 
@@ -290,18 +290,16 @@ See the [`@vue-tui/testing` package guide](./packages/testing) for the complete 
 
 ## Development
 
-Requires [pnpm](https://pnpm.io/) and Node.js 22+.
+Requires [Vite+](https://viteplus.dev/) (`vp`) and Node.js 22+.
 
 ```bash
-pnpm install          # install dependencies
-vp run ready          # lint, typecheck, test, and build (the full check)
-vp run -r test        # run tests across all packages
-vp run -r build       # build all packages
+vp install            # install dependencies
+vp run check          # lint, typecheck, test, and build (the full check)
+vp run test           # run all test suites with bounded parallelism
+vp run build          # build all packages
 ```
 
-For terminal-visible changes, this repository has a TUI visual review tool: `vp run visual:basic-template` (or `vp run visual:fullscreen-origin`) starts an interactive session where the agent inspects rendered screenshots. See [`tools/tui-visual-review`](./tools/tui-visual-review).
-
-To run an example with terminal HMR, use vanilla `vite@8` (the recommended setup): `cd examples/basic-template && npm run dev`. See that example's `README.md` for the in-monorepo caveat.
+To run the SFC example with terminal HMR through the repository's Vite+ workflow, use `vp run @vue-tui/example-basic-template#dev`.
 
 ## Contributing
 

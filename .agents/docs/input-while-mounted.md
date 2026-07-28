@@ -41,7 +41,6 @@ The paired identifiers would not collide at the language level because JavaScrip
 
 ## Evidence
 
-- `packages/use/src/input-while-mounted/input-while-mounted.test.tsx` proves activation, teardown, remount, `v-show`, renderless output, component lifetime, and the exact root value surface.
-- `packages/use/src/public-api.test-d.tsx` and `input-while-mounted-types.vue` compile real TSX and template function-ref/event usage and reject wrong handlers and props.
-- `packages/runtime-tests/scripts/verify-clean-consumer.mjs` packs the public package and compiles the API against both supported Vue minors.
-- `packages/runtime-tests/integration/public-layer-imports.test.ts` enforces that `@vue-tui/use` imports only supported Runtime entries and never Runtime source or internals.
+- `packages/use/tests/input-while-mounted/use-input-while-mounted.test.tsx` proves function-ref activation, teardown, remount, and `v-show`; `packages/use/tests/input-while-mounted/use-input-while-mounted.vue.test.tsx` proves the renderless companion's output and mounted lifetime.
+- `packages/use/tests/public-api.test.ts`, `packages/use/tests/public-api.test-d.tsx`, and `packages/use/tests/input-while-mounted/public-api.test.vue` pin the exact value surface and compile real TSX and template function-ref/event usage, rejecting wrong handlers and props.
+- `tests/runtime/integration/public-layer-imports.test.ts` enforces that `@vue-tui/use` imports only supported Runtime entries and never Runtime source or internals.

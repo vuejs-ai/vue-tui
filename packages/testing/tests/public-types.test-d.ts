@@ -2,6 +2,7 @@
 // `*.test-d.ts` name keeps the file out of the runtime Vitest suite.
 import { expectTypeOf } from "vite-plus/test";
 import { defineComponent } from "vue";
+import type { ColorProfile } from "@vue-tui/runtime";
 // @ts-expect-error The test package no longer aliases Runtime's broad session contract.
 import type { TestRenderSession } from "../src/index.ts";
 import {
@@ -20,8 +21,10 @@ const inlineTtyOptions: RenderOptions = {
   mode: "inline",
   stdin: "tty",
   stdout: "tty",
+  color: "ansi256",
   patchConsole: false,
   exitOnCtrlC: true,
+  retainFrames: true,
 };
 const fullscreenOptions: RenderOptions = { mode: "fullscreen" };
 const streamOptions: RenderOptions = {
@@ -35,9 +38,20 @@ expectTypeOf(inlineTtyOptions).toMatchTypeOf<RenderOptions>();
 expectTypeOf(fullscreenOptions).toMatchTypeOf<RenderOptions>();
 expectTypeOf(streamOptions).toMatchTypeOf<RenderOptions>();
 expectTypeOf<keyof RenderOptions>().toEqualTypeOf<
-  "mode" | "stdin" | "stdout" | "patchConsole" | "exitOnCtrlC" | "columns" | "rows" | "props"
+  | "mode"
+  | "stdin"
+  | "stdout"
+  | "color"
+  | "patchConsole"
+  | "exitOnCtrlC"
+  | "retainFrames"
+  | "columns"
+  | "rows"
+  | "props"
 >();
+expectTypeOf<RenderOptions["color"]>().toEqualTypeOf<boolean | ColorProfile | undefined>();
 expectTypeOf<RenderOptions["exitOnCtrlC"]>().toEqualTypeOf<boolean | undefined>();
+expectTypeOf<RenderOptions["retainFrames"]>().toEqualTypeOf<boolean | undefined>();
 expectTypeOf<RenderOptions["stdout"]>().toEqualTypeOf<"tty" | "stream" | undefined>();
 
 const TestComponent = defineComponent(() => () => null);
@@ -57,8 +71,12 @@ const removedPresentation: RenderOptions = { presentation: undefined };
 const invalidStdin: RenderOptions = { stdin: "pipe" };
 // @ts-expect-error Only TTY and stream output hosts are modeled.
 const invalidStdout: RenderOptions = { stdout: "file" };
+// @ts-expect-error Only booleans and named terminal color profiles are accepted.
+const invalidColor: RenderOptions = { color: "none" };
 // @ts-expect-error Modeled Ctrl+C policy must be boolean.
 const invalidExitOnCtrlC: RenderOptions = { exitOnCtrlC: "yes" };
+// @ts-expect-error Frame retention must be boolean.
+const invalidRetainFrames: RenderOptions = { retainFrames: "yes" };
 void removedLiveUpdates;
 void removedDebug;
 void removedHostGroup;
@@ -66,7 +84,9 @@ void invalidMode;
 void removedPresentation;
 void invalidStdin;
 void invalidStdout;
+void invalidColor;
 void invalidExitOnCtrlC;
+void invalidRetainFrames;
 void (null as unknown as TestRenderSession);
 
 declare const result: RenderResult;

@@ -1,5 +1,3 @@
-import type { ExtractPublicPropTypes, PropType } from "vue";
-
 const rejectedMouseListenerNames = ["onMousedown", "onMouseup", "onClick", "onWheel"] as const;
 
 /**
@@ -9,10 +7,12 @@ const rejectedMouseListenerNames = ["onMousedown", "onMouseup", "onClick", "onWh
  * deliberately ships no built-in input handling (see the decision record).
  */
 export const scrollBoxProps = {
-  onMousedown: null as unknown as PropType<never>,
-  onMouseup: null as unknown as PropType<never>,
-  onClick: null as unknown as PropType<never>,
-  onWheel: null as unknown as PropType<never>,
+  // Runtime accepts these keys so ScrollBox can throw one targeted diagnostic;
+  // the public type below rejects them before an application can pass a value.
+  onMousedown: null,
+  onMouseup: null,
+  onClick: null,
+  onWheel: null,
 };
 
 export function assertNoRejectedMouseListeners(rawProps: Record<string, unknown> | null): true {
@@ -28,7 +28,12 @@ export function assertNoRejectedMouseListeners(rawProps: Record<string, unknown>
 }
 
 /** Props accepted by `<ScrollBox>`. */
-export type ScrollBoxProps = ExtractPublicPropTypes<typeof scrollBoxProps>;
+export interface ScrollBoxProps {
+  readonly onMousedown?: never;
+  readonly onMouseup?: never;
+  readonly onClick?: never;
+  readonly onWheel?: never;
+}
 
 /**
  * Imperative handle exposed by `<ScrollBox>` via `defineExpose`. Grab it with a

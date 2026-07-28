@@ -77,12 +77,13 @@ async function submit() {
 
     messages.length = 0;
     messages.push(...updated);
-  } catch (err: any) {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     const errParts: Message[] = [];
     if (streamingText.value) {
       errParts.push({ role: "assistant", content: streamingText.value });
     }
-    errParts.push({ role: "assistant", content: `Error: ${err.message}` });
+    errParts.push({ role: "assistant", content: `Error: ${message}` });
     appendCompletedMessages(...errParts);
   }
 

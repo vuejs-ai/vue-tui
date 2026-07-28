@@ -1,6 +1,6 @@
 # Autonomous iteration
 
-> **Status:** unstamped operating contract. Its work-selection and verification rules remain current. The completed minimum Runtime public foundation is recorded in the [current re-audit](./runtime-public-foundation-reaudit.md) and [decision ledger](./runtime-public-api-decisions.md); F1 through F8 and R1 through R17 remain historical implementation evidence rather than accepted public contracts. This file does not authorize a push, PR mutation, GitHub Actions run, merge, release, or publication.
+> **Status:** unstamped operating contract. Its work-selection and verification rules remain current. The completed minimum Runtime public foundation is recorded in the [public API contract](./api-contract.md) and [decision ledger](./runtime-public-api-decisions.md); F1 through F8 and R1 through R17 remain historical implementation evidence rather than accepted public contracts. This file does not authorize a push, PR mutation, GitHub Actions run, merge, release, or publication.
 
 ## Objective
 
@@ -63,10 +63,9 @@ Every proposal should state:
 3. State the affected application scenario, user-visible failure, and objective before/after criterion: a failing test, type error, active-screen predicate, process result, package failure, or measured reopen trigger.
 4. Demonstrate the red state before implementing when practical, using the strongest fitting layer: unit logic, component rendering, real PTY screen, clean packed consumer, or committed capacity workload.
 5. Implement the smallest coherent change and update affected examples, public documentation, and unstamped records in the same change.
-6. Run focused checks during development and `vp run ready` for a coherent final batch. A broad local CI suite is proportional only at a genuinely environment-sensitive boundary; GitHub Actions is never triggered merely to confirm a local checkpoint.
-7. For terminal-visible changes, use the repository visual controller one observed action at a time and inspect the important PNGs. Check every affected mode and exact terminal restoration.
-8. Commit coherent units locally. Do not push, merge, release, publish, close external work, or send issue or PR comments without the applicable human gate.
-9. Update the current objective and evidence as truth changes. A checkpoint is a reporting boundary, not proof that a new foundation should start.
+6. Run focused checks during development and `vp run check` for a coherent final batch. A broad local CI suite is proportional only at a genuinely environment-sensitive boundary; GitHub Actions is never triggered merely to confirm a local checkpoint.
+7. Commit coherent units locally. Do not push, merge, release, publish, close external work, or send issue or PR comments without the applicable human gate.
+8. Update the current objective and evidence as truth changes. A checkpoint is a reporting boundary, not proof that a new foundation should start.
 
 ## Verification rules
 
@@ -74,7 +73,6 @@ Every proposal should state:
 - Public API additions, replacements, moves, and removals include applicable SFC/template and TSX type checks, exact public-surface guards, user documentation, repository consumers, and a clean tarball consumer.
 - Input, paste, focus, layout, paint, streaming, scroll, cursor, resize, external output, and teardown changes include real-PTY evidence. Raw bytes alone are insufficient for visible-screen claims.
 - The PTY path declares one terminal profile. Start with `xterm-256color`; do not generalize one Unicode-width, keyboard, or color result to every terminal.
-- The visual loop exposes the active viewport, structured cells and styles, cursor, terminal modes, named actions, explicit waits, raw transcript, exit result, termios restoration, and post-exit shell input.
 - Silence is not a settled state. Success is an expected screen predicate, process exit, or other explicit event before a deadline.
 - Preserve durable evidence as tests, fixtures, commands, committed harnesses, stable URLs, commit hashes, or checksum-identified local artifacts. State the scope and portability limits of local artifacts.
 - A gate may be strengthened autonomously. Weakening or deleting a correctness, lifecycle, type-safety, or terminal-restoration check, or changing a test merely to accept new output, requires explicit review.
@@ -119,7 +117,7 @@ The comparison should record which behavior shares one public abstraction and wh
 
 ## Work after the foundation review
 
-The earlier [API foundation roadmap](./removed-experiments.md#api-foundation-roadmap) is historical evidence; the [Runtime public API decision ledger](./runtime-public-api-decisions.md) records only Yunfei's expressed judgments, while the [current re-audit](./runtime-public-foundation-reaudit.md) records implementation results and evidence. Independent bugs and external contributions continue to use the evidence rules above, but neither they nor the earlier roadmap silently reopen or settle a public contract.
+The earlier [API foundation roadmap](./removed-experiments.md#api-foundation-roadmap) is historical evidence; the [Runtime public API decision ledger](./runtime-public-api-decisions.md) records only Yunfei's expressed judgments, while the [public API contract](./api-contract.md), code, and tests record the implemented result. Independent bugs and external contributions continue to use the evidence rules above, but neither they nor the earlier roadmap silently reopen or settle a public contract.
 
 ## Distillation returned after each run
 
