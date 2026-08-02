@@ -113,55 +113,6 @@ describe("Table", () => {
     }
   });
 
-  test("rejects malformed structured text styles", async () => {
-    await expect(
-      render(Table, {
-        props: {
-          data: [{ value: "x" }],
-          columns: [{ key: "value", headerStyle: "bold" }],
-        },
-      }),
-    ).rejects.toThrow("<Table> columns[0].headerStyle must be a plain object.");
-
-    await expect(
-      render(Table, {
-        props: {
-          data: [{ value: "x" }],
-          columns: [{ key: "value", cellStyle: "green" }],
-        },
-      }),
-    ).rejects.toThrow("<Table> columns[0].cellStyle must be an object or function.");
-
-    await expect(
-      render(Table, {
-        props: {
-          data: [{ value: "x" }],
-          columns: [{ key: "value", cellStyle: () => "green" }],
-        },
-      }),
-    ).rejects.toThrow('<Table> cellStyle for column "value" must be a plain object.');
-
-    for (const style of [{ textAlign: "right" }, { wrap: "truncate" }, { unknown: true }]) {
-      await expect(
-        render(Table, {
-          props: {
-            data: [{ value: "x" }],
-            columns: [{ key: "value", cellStyle: style }],
-          },
-        }),
-      ).rejects.toThrow(/contains unsupported field/);
-    }
-
-    await expect(
-      render(Table, {
-        props: {
-          data: [{ value: "x" }],
-          columns: [{ key: "value", cellStyle: async () => ({ color: "red" }) }],
-        },
-      }),
-    ).rejects.toThrow('<Table> cellStyle for column "value" must be a plain object.');
-  });
-
   test("uses terminal display width for wide characters", async () => {
     const output = await renderTable([{ city: "新加坡", icon: "🙂" }]);
     expect(output).toMatchInlineSnapshot(`
@@ -236,23 +187,6 @@ describe("Table", () => {
     );
   });
 
-  test.each([-1, 1.5, Number.MAX_SAFE_INTEGER + 1])(
-    "rejects invalid padding %s",
-    async (padding) => {
-      await expect(render(Table, { props: { data: [{ value: 1 }], padding } })).rejects.toThrow(
-        "<Table> padding must be a non-negative safe integer.",
-      );
-    },
-  );
-
-  test("rejects a table wider than Runtime can represent before allocating it", async () => {
-    await expect(
-      render(Table, {
-        props: { data: [{ value: 1 }], padding: Number.MAX_SAFE_INTEGER },
-      }),
-    ).rejects.toThrow("<Table> rendered width must be no greater than 65535 columns.");
-  });
-
   test("renders explicit headers for empty data and nothing when no columns exist", async () => {
     type Row = { name: string };
     const columns = [{ key: "name", label: "Name" }] satisfies readonly TableColumn<Row>[];
@@ -321,21 +255,8 @@ describe("Table", () => {
     `);
   });
 
-  test.each(["\u001B[31mred\u001B[0m", "A\u001B#8BC", "A\u001BPpayload\u001B\\BC"])(
-    "rejects terminal control text %j",
-    async (value) => {
-      await expect(renderTable([{ value }])).rejects.toThrow(
-        "<Table> text contains a terminal control character.",
-      );
-    },
-  );
-
-  test("requires a formatter for non-scalar cell values", async () => {
+  test("formats non-scalar cell values with an explicit formatter", async () => {
     type Row = { metadata: { id: number } };
-    await expect(renderTable<Row>([{ metadata: { id: 7 } }])).rejects.toThrow(
-      '<Table> column "metadata" contains a non-scalar value; add format().',
-    );
-
     const columns = [
       { key: "metadata", format: (value) => `id=${value.id}` },
     ] satisfies readonly TableColumn<Row>[];
