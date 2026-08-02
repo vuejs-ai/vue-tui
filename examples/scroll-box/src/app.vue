@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { computed, shallowRef, onMounted, onUnmounted } from "vue";
+import { computed, onMounted, onUnmounted, shallowRef, useTemplateRef } from "vue";
 import { Box, Text, useApp, useBoxMetrics, useInput, useLayoutSize } from "@vue-tui/runtime";
-import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
+import { ScrollBox } from "@vue-tui/components";
 
 const { exit } = useApp();
 const { height: layoutHeight } = useLayoutSize();
 const rootHeight = computed(() => layoutHeight.value);
 
-const box = shallowRef<ScrollBoxExpose>();
-const scrollTarget = shallowRef<InstanceType<typeof Box> | null>(null);
+const box = useTemplateRef("box");
+const scrollTarget = useTemplateRef("scrollTarget");
 const scrollTargetMetrics = useBoxMetrics(scrollTarget);
 const lastScroll = shallowRef("ready");
 

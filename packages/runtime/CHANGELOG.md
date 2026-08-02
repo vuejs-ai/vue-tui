@@ -7,6 +7,8 @@ This project adheres to [Semantic Versioning](https://semver.org/). While on
 
 ## Unreleased
 
+## 0.3.0 - 2026-08-02
+
 A clean-slate reduction of the public surface. The root now exports only what
 requires Runtime ownership; several experiments were removed rather than kept
 behind flags.

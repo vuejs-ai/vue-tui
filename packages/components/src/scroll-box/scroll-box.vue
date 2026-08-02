@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, getCurrentInstance, shallowRef, watch } from "vue";
+import { computed, getCurrentInstance, shallowRef, useTemplateRef, watch } from "vue";
 import { Box, useBoxMetrics } from "@vue-tui/runtime";
 import {
   assertNoRejectedMouseListeners,
@@ -14,10 +14,10 @@ const instance = getCurrentInstance();
 if (!instance) throw new Error("<ScrollBox> must be created inside a Vue component instance");
 const componentInstance = instance;
 
-const viewportRef = shallowRef<InstanceType<typeof Box> | null>(null);
-const contentRef = shallowRef<InstanceType<typeof Box> | null>(null);
-const viewportMetrics = useBoxMetrics(viewportRef);
-const contentMetrics = useBoxMetrics(contentRef);
+const viewport = useTemplateRef("viewport");
+const content = useTemplateRef("content");
+const viewportMetrics = useBoxMetrics(viewport);
+const contentMetrics = useBoxMetrics(content);
 const viewportHeight = shallowRef(0);
 const contentHeight = shallowRef(0);
 const scrollTop = shallowRef(0);
@@ -105,8 +105,8 @@ watch(
 
 <template>
   <template v-if="assertNoRejectedMouseListeners(componentInstance.vnode.props)">
-    <Box ref="viewportRef" v-bind="viewportStyle">
-      <Box ref="contentRef" v-bind="contentStyle">
+    <Box ref="viewport" v-bind="viewportStyle">
+      <Box ref="content" v-bind="contentStyle">
         <slot />
       </Box>
     </Box>

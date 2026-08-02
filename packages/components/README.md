@@ -90,11 +90,11 @@ A bounded viewport that follows the bottom of its content. The core behavior —
 
 ```vue
 <script setup lang="ts">
-import { shallowRef } from "vue";
-import { ScrollBox, type ScrollBoxExpose } from "@vue-tui/components";
+import { useTemplateRef } from "vue";
+import { ScrollBox } from "@vue-tui/components";
 import { Box, Text, useInput } from "@vue-tui/runtime";
 
-const box = shallowRef<ScrollBoxExpose | null>(null);
+const box = useTemplateRef("box");
 
 useInput((event) => {
   if (event.type !== "key") return;

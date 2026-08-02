@@ -6,6 +6,8 @@ This project adheres to [Semantic Versioning](https://semver.org/). While on `0.
 
 ## Unreleased
 
+## 0.3.0 - 2026-08-02
+
 ### Changed
 
 - **Vue baseline** — requires Vue 3.5 or newer within the Vue 3 major line.

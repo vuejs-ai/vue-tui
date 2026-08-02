@@ -7,6 +7,8 @@ This project adheres to [Semantic Versioning](https://semver.org/). While on
 
 ## Unreleased
 
+## 0.3.0 - 2026-08-02
+
 Measured against the published `0.0.3`, whose render options were `columns`,
 `rows`, `props`, and `exitOnCtrlC`.
 

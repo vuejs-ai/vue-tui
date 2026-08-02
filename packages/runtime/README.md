@@ -181,14 +181,14 @@ Raw-only use does not attach Runtime's normalized parser, change the stream enco
 
 Every `useFocus()` call creates a distinct opaque identity in one private controller owned by the mounted app. A valid `focus()` call synchronously makes that identity the only owner and replaces the previous owner; `blur()` releases it only when it is current. Both methods return `void`, and ownership is observed through the readonly `isFocused` ref.
 
-The targetless overload creates a logical identity whose validity follows the calling Vue scope. The targeted overload accepts `FocusTarget`, a `Readonly<Ref<ComponentPublicInstance | null | undefined>>`, and additionally follows that current-app stateful component's rendered boundary. A `shallowRef()`, computed ref, or `useTemplateRef()` on Vue versions that provide it can supply the target; raw component instances and getters cannot. `null` and `undefined` are ordinary template-ref lifecycle states; a non-null value that is not a stateful component in the current app is a `TypeError`. Removing the boundary, changing its root to a Comment, detaching it, or hiding it through rendered ancestry clears ownership. A direct valid-to-valid boundary replacement in one accepted render preserves ownership. Later availability never restores either that handle or a previous owner.
+The targetless overload creates a logical identity whose validity follows the calling Vue scope. The targeted overload accepts `FocusTarget`, a `Readonly<Ref<ComponentPublicInstance | null | undefined>>`, and additionally follows that current-app stateful component's rendered boundary. In an SFC, use Vue's `useTemplateRef()` so the target type is inferred from the template; render functions may instead supply a `shallowRef()`, computed ref, or another compatible readonly ref. Raw component instances and getters are not targets. `null` and `undefined` are ordinary template-ref lifecycle states; a non-null value that is not a stateful component in the current app is a `TypeError`. Removing the boundary, changing its root to a Comment, detaching it, or hiding it through rendered ancestry clears ownership. A direct valid-to-valid boundary replacement in one accepted render preserves ownership. Later availability never restores either that handle or a previous owner.
 
 ```vue
 <script setup lang="ts">
-import { onMounted, shallowRef, type ComponentPublicInstance } from "vue";
+import { onMounted, useTemplateRef } from "vue";
 import { Box, Text, useFocus, useInput } from "@vue-tui/runtime";
 
-const editor = shallowRef<ComponentPublicInstance | null>(null);
+const editor = useTemplateRef("editor");
 const editorFocus = useFocus(editor);
 const commandMode = useFocus();
 
@@ -225,12 +225,12 @@ Use the narrow fact that matches the application task:
 
 ```vue
 <script setup lang="ts">
-import { computed, shallowRef } from "vue";
+import { computed, useTemplateRef } from "vue";
 import { Box, Text, useBoxMetrics, useLayoutSize } from "@vue-tui/runtime";
 
 const { width: layoutWidth, height: layoutHeight } = useLayoutSize();
 
-const panel = shallowRef<InstanceType<typeof Box> | null>(null);
+const panel = useTemplateRef("panel");
 const panelMetrics = useBoxMetrics(panel);
 
 const canCenterVertically = computed(

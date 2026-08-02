@@ -339,6 +339,15 @@ Entries without a stamp are drafts of judgments Yunfei expressed. A stamp alone 
 - **Why:** Yunfei wanted any valid Vue component template ref to be accepted and rejected Box/Text-only typing, first-descendant guessing, multi-root errors, and the more complex collected-root region model. He accepted the complete reviewed handle and host contract, including void operations, individual `blur()`, no disabled option, inert string rendering, and renderer-bound ancestor invalidation.
 - **Source:** Yunfei, 2026-07-24, acceptance of the complete [exact `useFocus` contract](./api-contract.md#usefocus); no durable session URL is available, so the linked contract section is the pinned artifact.
 
+### Render-target composables keep caller-owned, shareable Vue refs
+
+[VOUCHED @hyfdev 2026-08-02]
+
+- **Ruling:** Keep the caller-owned target parameters of `useFocus(target)` and `useBoxMetrics(target)` rather than adding composable-owned target return fields or overloads. SFC guidance defaults to Vue 3.5's `useTemplateRef()`, which infers the referenced component type from the template; one target may be shared by both composables and by application code.
+- **Limits:** Render functions may continue to supply `shallowRef()`, computed refs, or other compatible refs. Targetless `useFocus()` keeps its distinct logical-scope semantics. `useInputWhileMounted()` remains the deliberate function-ref exception because it observes only null/non-null vnode lifetime and neither exposes nor shares the referenced component. This ruling does not change ordinary component-instance refs such as a `ScrollBox` imperative handle.
+- **Why:** A real `vue-tsc` SFC fixture proves that `useTemplateRef("panel")` infers an exported `Box`, composes with both focus and metrics, and rejects a `Text` metrics target without explicit generics. Returning an owned target would save one declaration in the simple case but enlarge the API, while zero-argument `useFocus()` could not distinguish a deliberately targetless identity from a targeted identity whose vnode is not mounted yet.
+- **Source:** Yunfei, 2026-08-02, explicit acceptance of the reviewed target-ref ergonomics and instruction to implement it. The checked-in SFC type fixture and public examples are the durable implementation evidence; no durable session URL is available.
+
 ### Public focus-manager access is removed
 
 [VOUCHED @hyfdev 2026-07-24]

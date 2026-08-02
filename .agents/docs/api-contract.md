@@ -234,7 +234,7 @@ export function useBoxMetrics(
 ): UseBoxMetricsReturn;
 ```
 
-The hook replaces rather than aliases the experimental `useBoxSize()`. It accepts a readonly Vue ref bound directly to the exported `Box` in the current application. It does not accept renderer nodes, arbitrary objects, Text, another application's Box, getters, or a component whose descendants would need to be searched.
+The hook replaces rather than aliases the experimental `useBoxSize()`. It accepts a caller-owned readonly Vue ref bound directly to the exported `Box` in the current application. An SFC normally obtains that shareable ref with Vue 3.5's `useTemplateRef()` and gets its target type from the template; render functions may use `shallowRef()` or another compatible ref. The hook does not create or return a target. It does not accept renderer nodes, arbitrary objects, Text, another application's Box, getters, or a component whose descendants would need to be searched.
 
 `width` and `height` are the Box's complete outer layout size. `left` and `top` are the Box's outer-layout offsets in its direct layout parent's coordinate system; they are not terminal or root-render-surface coordinates. Together the four numeric refs describe the complete parent-relative layout rectangle that Yoga alone can determine after flex sizing, margins, siblings, and wrapping. A same-parent anchored overlay can therefore use `left`, `top + height`, and `width` without rebuilding Runtime layout.
 
@@ -265,7 +265,7 @@ export function useFocus(): UseFocusReturn;
 export function useFocus(target: FocusTarget): UseFocusReturn;
 ```
 
-`FocusTarget` accepts a `useTemplateRef()`, `shallowRef()`, computed ref, or compatible readonly Vue ref. It does not accept a raw component instance or a getter. `null` and `undefined` are ordinary template-ref lifecycle states. A non-null value that is not a stateful component instance in the current vue-tui application is a `TypeError`.
+`FocusTarget` accepts a caller-owned `useTemplateRef()`, `shallowRef()`, computed ref, or compatible readonly Vue ref. In an SFC, `useTemplateRef()` is the default authoring form because Vue infers the referenced component type and the same target can be shared with other composables. `useFocus()` does not create or return a target. It does not accept a raw component instance or a getter. `null` and `undefined` are ordinary template-ref lifecycle states. A non-null value that is not a stateful component instance in the current vue-tui application is a `TypeError`.
 
 `isFocused` uses the minimum read-only Vue `Ref` contract rather than exposing whether Runtime currently stores or computes the boolean. Both overloads return the same type because the target changes only the identity's validity, not the operations available to the caller. `focus()` and `blur()` return `void`, matching ordinary focus operations in the DOM, Ink, and OpenTUI; the resulting state is observed through `isFocused`.
 
