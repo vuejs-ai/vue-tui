@@ -20,12 +20,12 @@ onMounted(() => {
 onUnmounted(() => clearTimeout(timer));
 
 useInput((event) => {
-  if (event.type !== "text") return;
-  // Accept "=" as well as "+": on most keyboards "+" is Shift+"=", so taking the
-  // bare "=" key too makes incrementing friction-free.
-  if (event.text === "+" || event.text === "=") count.value++;
-  if (event.text === "-") count.value--;
-  if (event.text === "q") exit();
+  if (event.type === "key") {
+    if (event.key.name === "up") count.value++;
+    else if (event.key.name === "down") count.value--;
+    return;
+  }
+  if (event.type === "text" && event.text === "q") exit();
 });
 </script>
 
@@ -37,7 +37,7 @@ useInput((event) => {
       <Text
         >Count: <Text bold color="cyan">{{ count }}</Text></Text
       >
-      <Text dimColor>Press + (or =) to add, - to subtract, q to quit.</Text>
+      <Text dimColor>Press ↑/↓ to change the count, q to quit.</Text>
       <Text dimColor>Edit src/app.vue and save to see HMR.</Text>
     </template>
   </Box>

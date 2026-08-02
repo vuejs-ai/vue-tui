@@ -6,10 +6,9 @@ import { assertTextValid } from "./text-validate.ts";
 import { assertNoUnsupportedAttrs } from "./unsupported-attrs.ts";
 import { explicitHostProps } from "./explicit-host-props.ts";
 
-// Renders the `<tui-text>` / `<tui-virtual-text>` host primitives. The `tui-` prefix
-// keeps the host tags out of the component namespace, so the component can take its
-// real name "Text" with no vue-tsc self-recursion. Public export wired in index.ts.
-defineOptions({ name: "Text", inheritAttrs: false });
+// The `tui-` prefix keeps these internal host primitives out of the public
+// component namespace, avoiding vue-tsc self-recursion.
+defineOptions({ inheritAttrs: false });
 const props = defineProps(textProps);
 const slots = defineSlots<{ default?: () => unknown }>();
 const attrs = useAttrs();

@@ -24,13 +24,12 @@ const Counter = defineComponent(() => {
   const count = shallowRef(0);
 
   useInput((event) => {
-    if (event.type !== "text") return;
-    if (event.text === "+") {
-      count.value++;
-      return;
-    }
-    if (event.text === "-") {
-      count.value--;
+    if (event.type === "key") {
+      if (event.key.name === "up") {
+        count.value++;
+      } else if (event.key.name === "down") {
+        count.value--;
+      }
     }
   });
 
@@ -46,7 +45,7 @@ test("the counter responds to input", async () => {
   try {
     expect(result.lastFrame()).toBe("Count: 0");
 
-    await result.stdin.write("+");
+    await result.stdin.write("\x1b[A"); // Up arrow
     expect(result.lastFrame()).toBe("Count: 1");
   } finally {
     result.dispose();

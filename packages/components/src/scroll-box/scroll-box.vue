@@ -7,7 +7,7 @@ import {
   type ScrollBoxExpose,
 } from "./scroll-box-props.ts";
 
-defineOptions({ name: "ScrollBox", inheritAttrs: false });
+defineOptions({ inheritAttrs: false });
 defineProps(scrollBoxProps);
 defineSlots<{ default?: () => unknown }>();
 const instance = getCurrentInstance();

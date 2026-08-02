@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { shallowRef } from "vue";
 
-// Renders the `<tui-static>` host primitive. The host tag's `tui-` prefix keeps it out
-// of the component namespace, so the component can take its real name "Static" with no
-// vue-tsc self-recursion on the tag. Public export wired in inline.ts.
-defineOptions({ name: "Static", inheritAttrs: false });
+// The `tui-` prefix keeps this internal host primitive out of the public
+// component namespace, avoiding vue-tsc self-recursion.
+defineOptions({ inheritAttrs: false });
 defineSlots<{ default?: () => unknown }>();
 
 // The component instance is the public write-once identity. Once Runtime has

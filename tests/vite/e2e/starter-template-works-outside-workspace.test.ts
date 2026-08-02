@@ -259,9 +259,9 @@ test("the starter installs and works outside the workspace", { timeout: 300_000 
           timeoutMs: 20_000,
         });
 
-        child.write("=");
+        child.write("\x1b[A");
         await child.expectFrame((frame) => frame.includes("Count: 1"), { timeoutMs: 20_000 });
-        child.write("=");
+        child.write("\x1b[A");
         await child.expectFrame((frame) => frame.includes("Count: 2"), { timeoutMs: 20_000 });
 
         const updateAfter = child.events.length;

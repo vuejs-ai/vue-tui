@@ -68,12 +68,12 @@ and fixed at the root:
 - **Host primitive tags are `tui-`-prefixed** (`tui-box`/`tui-text`/`tui-virtual-text`/
   `tui-static`), mirroring Ink's `ink-box`/`ink-text`. The prefix keeps the
   renderer's intrinsic elements in their own namespace, so a template `<tui-box>` never
-  resolves to the public `<Box>` component — the components keep their real `name`
-  (`Box`/`Text`/`Static`) with no vue-tsc self-recursion. (Earlier the tags were bare
-  `box`/`text`/…, which collided with the same-named components and forced an `*Impl` internal
-  rename to dodge it; the prefix removed that workaround. vue-tsc has no `isCustomElement` at
-  the type layer, so a bare lowercase tag would PascalCase-resolve to the component — the
-  hyphenated `tui-` name sidesteps that entirely.)
+  resolves to the public `<Box>` component. Earlier the tags were bare `box`/`text`/…, which
+  collided with the same-named components and forced an `*Impl` internal name to dodge it; the
+  prefix removed that workaround. vue-tsc has no `isCustomElement` at the type layer, so a bare
+  lowercase tag would PascalCase-resolve to the component — the hyphenated `tui-` name sidesteps
+  that entirely. Component names otherwise use Vue's filename inference; do not add
+  `defineOptions({ name })` unless runtime behavior genuinely consumes a custom name.
 - **Don't reintroduce parent-walking or `parent.type.name` matching for context** — use
   provide/inject (`.name` is also fragile under minification).
 - **Don't force child-vnode inspection into a template** (the double-materialization wart). If

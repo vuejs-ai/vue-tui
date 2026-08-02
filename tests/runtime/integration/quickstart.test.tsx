@@ -7,9 +7,10 @@ test("README quickstart code runs to a Count: 0 frame", async () => {
   const Counter = defineComponent(() => {
     const count = shallowRef(0);
     useInput((event) => {
-      if (event.type !== "text") return;
-      if (event.text === "+") count.value++;
-      else if (event.text === "-") count.value--;
+      if (event.type === "key") {
+        if (event.key.name === "up") count.value++;
+        else if (event.key.name === "down") count.value--;
+      }
     });
     return () => (
       <Box>

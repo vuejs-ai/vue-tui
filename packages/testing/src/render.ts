@@ -231,7 +231,7 @@ function trimFrame(raw: string): string {
  * @example Drive a component through input
  * ```ts
  * const result = await render(Counter);
- * await result.stdin.write("+");
+ * await result.stdin.write("\x1b[A"); // Up arrow
  * expect(result.lastFrame()).toContain("Count: 1");
  * result.dispose();
  * ```

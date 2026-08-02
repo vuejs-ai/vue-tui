@@ -26,7 +26,7 @@ export type { Color } from "./components/color.ts";
  * ```tsx
  * <Text>
  *   Count: <Text bold color="green">{count}</Text>
- *   <Text dimColor> (+/- to change)</Text>
+ *   <Text dimColor> (↑/↓ to change)</Text>
  * </Text>
  * ```
  *

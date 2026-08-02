@@ -21,7 +21,7 @@ Press `q` to quit the app.
 ```
 src/
   main.ts    # mount the app, wait for its exit, then close the process
-  app.vue    # your UI — a <Spinner> loads, then a +/- counter (press + or =, and -)
+  app.vue    # your UI — a <Spinner> loads, then an arrow-key counter
 vite.config.ts    # dev server (HMR): unplugin-vue + vueTui()
 tsdown.config.ts  # production build: bundle into one self-contained dist/main.mjs
 ```

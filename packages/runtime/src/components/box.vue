@@ -5,10 +5,9 @@ import { assertBoxValid } from "./box-validate.ts";
 import { assertNoUnsupportedAttrs } from "./unsupported-attrs.ts";
 import { explicitHostProps } from "./explicit-host-props.ts";
 
-// Renders the `<tui-box>` host primitive. The host tag's `tui-` prefix keeps it out
-// of the component namespace, so the component can take its real name "Box" with no
-// vue-tsc self-recursion on the tag. Public export wired in index.ts.
-defineOptions({ name: "Box", inheritAttrs: false });
+// The `tui-` prefix keeps this internal host primitive out of the public
+// component namespace, avoiding vue-tsc self-recursion.
+defineOptions({ inheritAttrs: false });
 const props = defineProps(boxProps);
 defineSlots<{ default?: () => unknown }>();
 const attrs = useAttrs();

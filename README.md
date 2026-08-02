@@ -58,14 +58,12 @@ import { Box, Text, useInput } from "@vue-tui/runtime";
 const count = shallowRef(0);
 
 useInput((event) => {
-  if (event.type !== "text") return;
-  // "+" is Shift+"=" on most keyboards, so accept the bare "=" too.
-  if (event.text === "+" || event.text === "=") {
-    count.value++;
-    return;
-  }
-  if (event.text === "-") {
-    count.value--;
+  if (event.type === "key") {
+    if (event.key.name === "up") {
+      count.value++;
+    } else if (event.key.name === "down") {
+      count.value--;
+    }
   }
 });
 </script>
@@ -74,7 +72,7 @@ useInput((event) => {
   <Box>
     <Text>Count: </Text>
     <Text bold color="green">{{ count }}</Text>
-    <Text dimColor> (+/= and - to change)</Text>
+    <Text dimColor> (↑/↓ to change)</Text>
   </Box>
 </template>
 ```
@@ -228,17 +226,16 @@ import { expect, test } from "vitest";
 import { render } from "@vue-tui/testing";
 import { Box, Text, useInput } from "@vue-tui/runtime";
 
-test("counter responds to + and - keys", async () => {
+test("counter responds to arrow keys", async () => {
   const Counter = defineComponent(() => {
     const count = shallowRef(0);
     useInput((event) => {
-      if (event.type !== "text") return;
-      if (event.text === "+") {
-        count.value++;
-        return;
-      }
-      if (event.text === "-") {
-        count.value--;
+      if (event.type === "key") {
+        if (event.key.name === "up") {
+          count.value++;
+        } else if (event.key.name === "down") {
+          count.value--;
+        }
       }
     });
     return () => (
@@ -251,10 +248,10 @@ test("counter responds to + and - keys", async () => {
   const result = await render(Counter);
   expect(result.lastFrame()).toContain("Count: 0");
 
-  await result.stdin.write("+");
+  await result.stdin.write("\x1b[A"); // Up arrow
   expect(result.lastFrame()).toContain("Count: 1");
 
-  await result.stdin.write("-");
+  await result.stdin.write("\x1b[B"); // Down arrow
   expect(result.lastFrame()).toContain("Count: 0");
 
   result.dispose();
