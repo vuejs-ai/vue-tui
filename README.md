@@ -187,17 +187,17 @@ Reusable behavior composed only from public Runtime APIs. [Package guide](./pack
 
 ### Composables
 
-| Composable                                                                                           | Returns     | Description                                                      |
-| ---------------------------------------------------------------------------------------------------- | ----------- | ---------------------------------------------------------------- |
-| [`useInputWhileMounted(handler)`](./packages/use/src/input-while-mounted/use-input-while-mounted.ts) | `targetRef` | Global input while one directly referenced vnode remains mounted |
+| Composable                                                                                                  | Returns     | Description                                                                                           |
+| ----------------------------------------------------------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------- |
+| [`useInputWhileMounted(handler, opts?)`](./packages/use/src/input-while-mounted/use-input-while-mounted.ts) | `targetRef` | Global input, optionally filtered by `opts.type`, while one directly referenced vnode remains mounted |
 
 ### Components
 
-| Component                                                                                      | Import from               | Description                                                        |
-| ---------------------------------------------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------ |
-| [`<UseInputWhileMounted>`](./packages/use/src/input-while-mounted/use-input-while-mounted.vue) | `@vue-tui/use/components` | Emits global input while mounted and renders only its default slot |
+| Component                                                                                            | Import from               | Description                                                                                        |
+| ---------------------------------------------------------------------------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------- |
+| [`<UseInputWhileMounted type?>`](./packages/use/src/input-while-mounted/use-input-while-mounted.vue) | `@vue-tui/use/components` | Emits global input, optionally filtered by `type`, while mounted and renders only its default slot |
 
-Both forms retain `useInput()`'s broadcast semantics. The bound ref is a lifecycle signal rather than a focus or routing target; `v-show` remains mounted and active.
+Both forms retain `useInput()`'s broadcast semantics. A literal `type` narrows the handler or emitted event to the selected `text`, `key`, or `paste` member. The bound ref is a lifecycle signal rather than a focus or routing target; `v-show` remains mounted and active.
 
 ## `@vue-tui/components`
 
