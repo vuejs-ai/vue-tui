@@ -1,20 +1,48 @@
 import type { TuiInputEvent } from "@vue-tui/runtime";
 import UseInputWhileMountedSfc from "./input-while-mounted/use-input-while-mounted.vue";
-import type { PublicEventComponent } from "./public-component.ts";
+import type { PublicEventComponentInstance } from "./public-component.ts";
+
+type InputType = TuiInputEvent["type"];
+type InputEventOf<Type extends InputType> = Extract<TuiInputEvent, { readonly type: Type }>;
 
 /**
  * Public event-listener inputs accepted by `UseInputWhileMounted`.
+ *
+ * Supplying an input `type` narrows `onInput` to the selected event member.
+ * Without a type argument, this describes every accepted prop combination.
  */
-export interface UseInputWhileMountedProps {
-  onInput?: (event: TuiInputEvent) => void;
-}
+export type UseInputWhileMountedProps<Type extends InputType | undefined = InputType | undefined> =
+  undefined extends Type
+    ? {
+        readonly type?: Type;
+        onInput?: (event: TuiInputEvent) => void;
+      }
+    : {
+        readonly type: Type;
+        onInput?: (event: InputEventOf<Extract<Type, InputType>>) => void;
+      };
 
-type UseInputWhileMountedEmit = (event: "input", value: TuiInputEvent) => void;
+type UseInputWhileMountedComponent = {
+  new <Type extends InputType>(
+    props: UseInputWhileMountedProps<Type>,
+  ): PublicEventComponentInstance<
+    UseInputWhileMountedProps<Type>,
+    (event: "input", value: InputEventOf<Type>) => void
+  >;
+
+  new (
+    props: UseInputWhileMountedProps,
+  ): PublicEventComponentInstance<
+    UseInputWhileMountedProps,
+    (event: "input", value: TuiInputEvent) => void
+  >;
+};
 
 /**
  * Subscribe to input for exactly the mounted lifetime of this renderless component.
  *
- * - Emits every normalized input fact through `input`; events are still global and broadcast.
+ * - Without `type`, emits every normalized input event through `input`.
+ * - A `type` prop filters delivery and narrows the emitted event to that exact member.
  * - Renders only its default slot and adds no host node or layout.
  * - Keeping this component mounted while changing or hiding its slot keeps input active.
  *
@@ -23,12 +51,10 @@ type UseInputWhileMountedEmit = (event: "input", value: TuiInputEvent) => void;
  *
  * @example Scope input declaratively
  * ```vue
- * <UseInputWhileMounted v-if="open" @input="handleInput">
+ * <UseInputWhileMounted v-if="open" type="key" @input="handleKey">
  *   <Panel />
  * </UseInputWhileMounted>
  * ```
  */
-export const UseInputWhileMounted = UseInputWhileMountedSfc as unknown as PublicEventComponent<
-  UseInputWhileMountedProps,
-  UseInputWhileMountedEmit
->;
+export const UseInputWhileMounted =
+  UseInputWhileMountedSfc as unknown as UseInputWhileMountedComponent;

@@ -4,12 +4,21 @@ import { useInput, type TuiInputEvent } from "@vue-tui/runtime";
 
 defineOptions({ inheritAttrs: false });
 
+const props = defineProps<{
+  readonly type?: TuiInputEvent["type"];
+}>();
 const emit = defineEmits<{
   input: [event: TuiInputEvent];
 }>();
 const mounted = shallowRef(false);
 
-useInput((event) => emit("input", event), { isActive: mounted });
+useInput(
+  (event) => {
+    if (props.type !== undefined && event.type !== props.type) return;
+    emit("input", event);
+  },
+  { isActive: mounted },
+);
 onMounted(() => {
   mounted.value = true;
 });
