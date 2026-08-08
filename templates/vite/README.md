@@ -2,7 +2,7 @@
 
 A [vue-tui](https://github.com/vuejs-ai/vue-tui) app — a Vue interface that runs in the terminal.
 
-> Requires Node.js 22.18+.
+> Requires Node.js 22.18 or later. Building an executable requires Node.js 26 or later.
 
 ## Scripts
 
@@ -11,8 +11,11 @@ pnpm install
 pnpm dev         # terminal dev server with HMR (experimental) — edit src/app.vue, watch it update
 pnpm type-check  # type-check .ts + .vue with vue-tsc
 pnpm build       # bundle src/main.ts -> a self-contained dist/main.mjs
+pnpm build:exe   # run Vite, then create build/main (build/main.exe on Windows)
 pnpm preview     # build, then run the production output
 ```
+
+`build:exe` uses tsdown to package the Vite output as a single executable. The executable runs without a separate Node.js installation.
 
 Press `q` to quit the app.
 

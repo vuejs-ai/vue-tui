@@ -8,6 +8,7 @@
     "check:type": "vue-tsc --build",
     "type-check": "pnpm run check:type",
     "build": "vite build",
+    "build:exe": "pnpm run build && tsdown dist/main.mjs --exe --out-dir build",
     "preview": "pnpm run build && node dist/main.mjs"
   },
   "dependencies": {
@@ -20,6 +21,7 @@
     "@types/node": "^22.18.0",
     "@vue-tui/vite": "0.3.0",
     "@vue/tsconfig": "^0.9.1",
+    "tsdown": "^0.22.14",
     "typescript": "~6.0.0",
     "unplugin-vue": "7.2.0",
     "vite": "8.2.1",

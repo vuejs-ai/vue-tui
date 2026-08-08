@@ -13,8 +13,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# Least privilege: this job only builds, type-checks and tests — it never
-# deploys, releases or comments — so read-only contents (for checkout) is all
+# Least privilege: these jobs only build, type-check and test — they never
+# deploy, release or comment — so read-only contents (for checkout) is all
 # GITHUB_TOKEN needs.
 permissions:
   contents: read
@@ -46,3 +46,22 @@ jobs:
       # heuristic. The graph summary identifies the exact failing sub-task.
       - name: Verify (vp run check)
         run: vp run check
+
+  executable:
+    name: Build starter executable
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Vite+ (vp) and Node
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version: "26"
+          cache: true
+
+      - name: Build local packages
+        run: vp run build:packages
+
+      - name: Verify the isolated starter and executable
+        run: vp run tests-vite#test -- starter-template-works-outside-workspace.test.ts --maxWorkers 1

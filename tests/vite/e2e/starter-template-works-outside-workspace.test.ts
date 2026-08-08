@@ -119,7 +119,14 @@ test("the starter manifest matches the branch-local Vite contract", () => {
   expect(viteConfig).not.toContain("build:");
   expect(viteConfig).not.toContain("resolve:");
   expect(existsSync(`${templateRoot}/tsdown.config.ts`)).toBe(false);
-  expect(templateManifest.devDependencies).not.toHaveProperty("tsdown");
+
+  const scripts = templateManifest.scripts;
+  if (!isRecord(scripts)) {
+    throw new TypeError("Template package.json scripts must contain an object");
+  }
+  expect(scripts.build).toBe("vite build");
+  expect(scripts["build:exe"]).toBe("pnpm run build && tsdown dist/main.mjs --exe --out-dir build");
+  expect(dependencyRange(templateManifest, "devDependencies", "tsdown")).toMatch(/^\^0\.22\./);
 
   for (const [field, name, localManifest] of [
     ["dependencies", "@vue-tui/runtime", runtimeManifest],
@@ -144,15 +151,19 @@ test("the starter manifest matches the branch-local Vite contract", () => {
   }
 });
 
-function runPnpm(root: string, ...args: string[]): string {
+function spawnPnpm(root: string, ...args: string[]) {
   const command = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-  const result = spawnSync(command, args, {
+  return spawnSync(command, args, {
     cwd: root,
     encoding: "utf8",
-    env: plainChildEnvironment(),
+    env: plainChildEnvironment({ VP_NODE_VERSION: process.versions.node }),
     maxBuffer: 10 * 1024 * 1024,
     timeout: 180_000,
   });
+}
+
+function runPnpm(root: string, ...args: string[]): string {
+  const result = spawnPnpm(root, ...args);
   if (result.error === undefined && result.status === 0) {
     return result.stdout;
   }
@@ -255,6 +266,30 @@ test("the starter installs and works outside the workspace", { timeout: 300_000 
     runPnpm(scratch.root, "run", "build");
     expect(existsSync(scratch.file("dist/main.mjs"))).toBe(true);
     expect(readdirSync(scratch.file("dist")).sort()).toEqual(["main.mjs"]);
+
+    const [nodeMajor = 0, nodeMinor = 0] = process.versions.node.split(".").map(Number);
+    if (nodeMajor >= 26) {
+      runPnpm(scratch.root, "run", "build:exe");
+      const executable = scratch.file(`build/main${process.platform === "win32" ? ".exe" : ""}`);
+      expect(existsSync(executable)).toBe(true);
+      const result = spawnSync(executable, [], {
+        cwd: scratch.root,
+        encoding: "utf8",
+        env: plainChildEnvironment(),
+        input: "q",
+        timeout: 20_000,
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("Starting up");
+    } else if (nodeMajor < 25 || (nodeMajor === 25 && nodeMinor < 7)) {
+      const result = spawnPnpm(scratch.root, "run", "build:exe");
+      expect(result.status).not.toBe(0);
+      const output = `${result.stdout}\n${result.stderr}`;
+      expect(output).toContain("does not support `exe` option");
+      expect(output).toMatch(/Please upgrade to Node\.js .* or later\./);
+    }
+
     const installedViteBin = resolveViteBin(scratch.file("package.json"));
     expect(relative(realpathSync(scratch.root), realpathSync(installedViteBin)).split(sep)[0]).toBe(
       "node_modules",

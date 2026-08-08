@@ -39,12 +39,15 @@ Use this scaffold for a standalone TUI application that controls the Node proces
 pnpm dlx tiged vuejs-ai/vue-tui/templates/vite my-app
 cd my-app
 pnpm install
-pnpm dev      # in-process terminal dev server with HMR
-pnpm build    # Vite builds dist/main.mjs
-pnpm preview  # build, then run the production bundle
+pnpm dev        # in-process terminal dev server with HMR
+pnpm build      # Vite builds dist/main.mjs
+pnpm build:exe  # Vite builds first, then tsdown creates build/main (requires Node.js 26 or later)
+pnpm preview    # build, then run the production bundle
 ```
 
 Edit `src/app.vue` and watch the terminal update instantly.
+
+Building an executable requires Node.js 26 or later. On Windows, the executable is `build/main.exe`.
 
 ### 2. Embed the runtime
 
