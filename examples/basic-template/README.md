@@ -1,32 +1,30 @@
 # basic-template
 
-A minimal vue-tui app written with Vue SFC `<template>` syntax. It is the canonical reference for wiring up the `@vue-tui/vite` development plugin and the separate production build.
+This example is a small standalone vue-tui application that uses Vue SFC `<template>` syntax. It uses one Vite config for development and production.
 
 ## Setup
 
-Development uses `unplugin-vue/vite`: its default client output is required by the terminal renderer even though `vueTui()` evaluates the app through Vite's SSR module runner.
+`unplugin-vue/vite` compiles the SFC during development and production. Vite's top-level `input` defines the application entry. `vueTui()` starts this entry during development and supplies the production build defaults. The build creates one Node file that runs without `node_modules`. The Vue compiler creates client render functions instead of SSR render functions.
 
 ```ts
-// vite.config.ts
 import { defineConfig } from "vite";
 import vue from "unplugin-vue/vite";
 import { vueTui } from "@vue-tui/vite";
 
 export default defineConfig({
+  input: "src/main.ts",
   plugins: [vue(), vueTui()],
 });
 ```
 
-Production is intentionally separate: `tsdown.config.ts` uses `unplugin-vue/rolldown` to bundle the app into the self-contained Node entry `dist/main.mjs`. `vueTui()` is dev-only, and `vite build` is not used for the Node application.
-
 ## Running it with Vite+
 
-From the repository root:
+Run these commands from the repository root:
 
 ```bash
 vp run @vue-tui/example-basic-template#dev      # terminal dev server with HMR
-vp run @vue-tui/example-basic-template#build    # produce dist/main.mjs with tsdown
+vp run @vue-tui/example-basic-template#build    # produce dist/main.mjs with Vite
 vp run @vue-tui/example-basic-template#preview  # rebuild, then run the production bundle
 ```
 
-From this directory, the equivalent commands are `vp run dev`, `vp run build`, and `vp run preview`.
+From this directory, run `vp run dev`, `vp run build`, or `vp run preview`.

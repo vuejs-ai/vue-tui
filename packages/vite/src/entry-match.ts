@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
+import type { ResolvedConfig } from "vite";
 import { resolvePhysicalPath } from "./physical-path.ts";
 
 const DEFAULT_DEV_ENTRY = "src/main.ts";
@@ -23,6 +24,26 @@ export function normalizeDevEntry(entry?: string): string {
   const e = (entry ?? DEFAULT_DEV_ENTRY).replace(/\\/g, "/");
   if (e.startsWith("/") || /^[a-zA-Z]:\//.test(e)) return e;
   return `/${e.replace(/^(?:\.\/)+/, "")}`;
+}
+
+/**
+ * Select the one process entry that the terminal dev server can launch. Vite's
+ * top-level `input` is the source of truth for both app development and builds;
+ * omitting it retains the historical `src/main.ts` development default.
+ */
+export function devEntryFromViteInput(input: ResolvedConfig["input"]): string {
+  if (input === undefined) return normalizeDevEntry();
+  if (typeof input === "string") return normalizeDevEntry(input);
+
+  const entries = Array.isArray(input) ? input : Object.values(input);
+  if (entries.length !== 1) {
+    const error = new Error(
+      `[vue-tui] Vite's top-level input must contain exactly one app entry; received ${entries.length}.`,
+    );
+    error.name = "VueTuiInvalidInputError";
+    throw error;
+  }
+  return normalizeDevEntry(entries[0]);
 }
 
 /**

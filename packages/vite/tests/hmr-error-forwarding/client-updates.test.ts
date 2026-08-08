@@ -5,7 +5,7 @@ test("the observer fails by name when Vite lacks the required per-update HMR sea
   expect(() => createObserverHarness({ withoutFetchUpdate: true })).toThrowError(
     expect.objectContaining({
       name: "VueTuiViteHmrCompatibilityError",
-      message: expect.stringMatching(/Vite 8\.1\.0.*fetchUpdate/),
+      message: expect.stringMatching(/Vite 8\.2\.1.*fetchUpdate/),
     }),
   );
 });

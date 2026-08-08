@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "check:type": "vue-tsc --noEmit",
-    "build": "tsdown",
-    "preview": "tsdown && node dist/game.mjs"
+    "build": "vite build",
+    "preview": "pnpm run build && node dist/game.mjs"
   },
   "dependencies": {
     "@vue-tui/runtime": "workspace:*",
@@ -15,8 +15,8 @@
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "tsdown": "catalog:",
     "unplugin-vue": "catalog:",
+    "vite": "catalog:",
     "vue-tsc": "catalog:"
   }
 }

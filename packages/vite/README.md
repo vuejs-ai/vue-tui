@@ -1,6 +1,6 @@
 # @vue-tui/vite
 
-Vite plugin for [vue-tui](https://github.com/vuejs-ai/vue-tui): an in-process terminal dev server with HMR, for Vue apps that render to the terminal via `@vue-tui/runtime`.
+`@vue-tui/vite` provides development and build support for standalone applications that use `@vue-tui/runtime`. It runs the development server in the application process, provides HMR in the terminal, and supplies defaults for a single-file Node bundle.
 
 ## Install
 
@@ -11,7 +11,7 @@ npm install -D @vue-tui/vite unplugin-vue vite
 
 ## Usage
 
-`vueTui()` adds the terminal dev server (HMR). Bring your own compiler alongside it: `unplugin-vue/vite` for SFCs, or `@vitejs/plugin-vue-jsx` for JSX. The SFC compiler's default `ssr: false` setting emits the client render functions required by the terminal renderer even though Vite evaluates the app through its SSR module runner.
+Use `unplugin-vue/vite` to compile SFCs. Use `@vitejs/plugin-vue-jsx` to compile JSX. The compilers create client render functions for Vue. During development, `vueTui()` starts the application with Vite's module runner and provides HMR.
 
 ```ts
 // vite.config.ts
@@ -20,56 +20,42 @@ import vue from "unplugin-vue/vite";
 import { vueTui } from "@vue-tui/vite";
 
 export default defineConfig({
+  input: "src/main.ts",
   plugins: [vue(), vueTui()],
 });
 ```
 
-- `vite` (or `vp run dev` through a package script) — boots the app in-process through Vite's SSR module runner and renders it to the terminal, with state-preserving HMR.
+Run `vite` directly, or run the package script with `vp run dev`. Both commands start the application and enable HMR. An SFC template edit keeps component state. An SFC script edit or a JSX edit recreates the affected component instance.
 
-### Options
+`vueTui()` uses Vite's top-level `input`. It has no separate entry option. If the config does not set `input`, the development server uses `src/main.ts`. A standalone application must set `input`. Otherwise, Vite searches for an HTML entry during the production build. `vueTui()` supports one application entry and reports an error if `input` contains multiple entries.
 
-```ts
-vueTui({
-  entry: "src/main.ts", // default; the app entry (a .ts/.tsx file, not an index.html)
-});
-```
-
-`entry` accepts a path relative to the Vite root (with or without a leading `/`) or an existing absolute filesystem path.
-
-For a JSX/TSX entry, install `@vitejs/plugin-vue-jsx`, use it for development, and point `entry` at the `.tsx` file. Production JSX builds use `unplugin-vue-jsx/rolldown` in the separate `tsdown` config.
+For JSX or TSX, install `@vitejs/plugin-vue-jsx`. Set `input` to the `.tsx` file.
 
 ```ts
 import vueJsx from "@vitejs/plugin-vue-jsx";
 
 export default defineConfig({
-  plugins: [vueJsx(), vueTui({ entry: "/src/main.tsx" })],
+  input: "src/main.tsx",
+  plugins: [vueJsx(), vueTui()],
 });
 ```
+
+Use the same JSX compiler during development and production. Do not set `build.ssr`. See the [JSX example](https://github.com/vuejs-ai/vue-tui/tree/main/examples/basic-jsx).
 
 ## Production build
 
-`vueTui()` is **dev only** — it does not touch the production build. `vite build` is browser-first and the wrong tool for a Node program, so build with [`tsdown`](https://tsdown.dev) instead: it bundles the whole app into one self-contained Node file that runs with no `node_modules` present.
+For a production build, `vueTui()` uses the same top-level `input` and supplies these defaults:
 
-```ts
-// tsdown.config.ts
-import { defineConfig } from "tsdown";
-import Vue from "unplugin-vue/rolldown"; // or unplugin-vue-jsx/rolldown for a .tsx entry
+- Target Node 22.
+- Resolve package exports and main fields for Node.
+- Keep Node built-in modules external.
+- Set `NODE_ENV` at build time and preserve other `process.env` values for runtime.
+- Create `dist/main.mjs` as one ESM file.
+- Disable module preload, public directory copies, and code splitting.
 
-export default defineConfig({
-  entry: ["src/main.ts"],
-  platform: "node", // keep Node builtins external; real createRequire for CJS deps
-  format: "esm",
-  deps: { alwaysBundle: [/./], onlyBundle: false }, // inline every dep into the one file
-  plugins: [Vue()],
-});
-```
+The plugin sets a field only when the application has not set it. For example, an application can set only `build.rolldownOptions.output.entryFileNames` and keep all other defaults.
 
-```sh
-npm install -D tsdown unplugin-vue
-tsdown # → dist/main.mjs, self-contained
-```
-
-See the [starter](https://github.com/vuejs-ai/vue-tui/tree/main/templates/vite) and this repo's `examples/` for complete setups.
+An embedded application keeps its host compiler, build, entry, and process lifecycle without this plugin.
 
 ## License
 

@@ -72,7 +72,7 @@ export function eventKind(event: TestEvent): string | undefined {
  * path again.
  *
  * These tests can repair a fixture much faster than a person can save it.
- * Vite 8.1's watcher suppresses another `change` for the same path for 50ms,
+ * Vite 8.2's watcher suppresses another `change` for the same path for 50ms,
  * even when the file contents changed, so an immediate synthetic recovery can
  * be invisible to Vite. Start this wait only after observing the first update's
  * result; paint traffic is unrelated and may continue indefinitely.

@@ -4,9 +4,9 @@ How a source edit reaches a running terminal application, which component owns w
 
 How these claims are proven is in [testing the dev server and HMR](./hmr-testing.md).
 
-Not covered here: production builds (applications bundle with `tsdown`; the plugin is dev-only), the rendering-mode semantics of a reload (see [Development-reload modifier](./rendering-mode-matrix.md#development-reload-modifier)), and layer/dependency direction (see [package layers](./package-layers.md)).
+Not covered here: production builds (`vueTui()` supplies standalone defaults, while embedded applications omit the plugin and use their host build), the rendering-mode semantics of a reload (see [Development-reload modifier](./rendering-mode-matrix.md#development-reload-modifier)), and layer/dependency direction (see [package layers](./package-layers.md)).
 
-Version-pinned claims below were checked against Vite 8.1.0, `@vitejs/plugin-vue-jsx` 5.1.5, and `unplugin-vue` 7.2.0. These are exact compatibility pins, not minimums; re-check the compiler configuration and HMR seams before any of them move.
+Version-pinned claims below were checked against Vite 8.2.1, `@vitejs/plugin-vue-jsx` 5.1.5, and `unplugin-vue` 7.2.0. These are exact compatibility pins, not minimums; re-check the compiler configuration and HMR seams before any of them move.
 
 ## The constraint everything follows from
 
@@ -58,6 +58,10 @@ Three things, each replaced on a different cadence. Which layer something belong
 ```
 
 There is deliberately no fourth layer carrying view positions across replacements.
+
+**Ruling:** vue-tui follows Vue's HMR state semantics. An SFC template edit keeps the affected component instance and its local state. An SFC script edit recreates the affected component instance, and every JSX edit does the same because JSX has no separate template-only update. This is not a vue-tui gap; revisit it only if Vue changes these semantics or vue-tui diverges from them. [VOUCHED @hyfdev 2026-08-09]
+
+The ruling matches the official Vue tooling and runtime: the [SFC plugin](https://github.com/vitejs/vite-plugin-vue/blob/b5702344785833a5a3129571db63b2f537b85aba/packages/plugin-vue/src/main.ts) uses `rerender` only for a template-only change and otherwise uses `reload`; the [JSX plugin](https://github.com/vitejs/vite-plugin-vue/blob/b5702344785833a5a3129571db63b2f537b85aba/packages/plugin-vue-jsx/src/index.ts) always uses `reload`; and Vue's [HMR runtime](https://github.com/vuejs/core/blob/8f89be88faaadd9e1025f7dc1430b3854341fb72/packages/runtime-core/src/hmr.ts) implements `reload` by replacing the component instance. The local SFC paths are enforced by [`template-edit-keeps-instance.test.ts`](../../tests/vite/e2e/template-edit-keeps-instance.test.ts) and [`script-edit-recreates-instance.test.ts`](../../tests/vite/e2e/script-edit-recreates-instance.test.ts).
 
 The bottom row is a property of the authoring format, not of this design. A `.tsx` file has no separate template block to diff, so `@vitejs/plugin-vue-jsx` only ever emits `__VUE_HMR_RUNTIME__.reload` — **every JSX edit is a script edit and recreates the instance**. Measured: a counter goes 3 → 0 on a JSX edit and 3 → 5 on an SFC template edit. The same is true on the web; it is not a gap to close.
 
@@ -133,7 +137,7 @@ Rejected. The stated benefits did not hold: Vite's module runner already clears 
 
 ### A custom Vite environment with `consumer: "client"`
 
-Rejected. Vite 8.1.0 binds three separate concerns to that one switch. The `resolve.builtins` escape is gated on `consumer === "server"`, so `node:fs` becomes a browser stub with no configuration able to prevent it; the same switch injects Vite's browser HMR client into the module graph, so `import.meta.hot` binds to a websocket transport while the plugin forwards events on the runner's channel. A probe that only inspected generated text looked like it worked; running the suite showed the application does not boot.
+Rejected. Vite 8.2.1 binds three separate concerns to that one switch. The `resolve.builtins` escape is gated on `consumer === "server"`, so `node:fs` becomes a browser stub with no configuration able to prevent it; the same switch injects Vite's browser HMR client into the module graph, so `import.meta.hot` binds to a websocket transport while the plugin forwards events on the runner's channel. A probe that only inspected generated text looked like it worked; running the suite showed the application does not boot.
 
 ### A table of view positions surviving a replacement
 

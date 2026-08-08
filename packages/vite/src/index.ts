@@ -1,20 +1,22 @@
 import type { Plugin } from "vite";
 import { randomUUID } from "node:crypto";
-import { normalizeDevEntry } from "./entry-match.ts";
+import { buildPlugin } from "./build.ts";
 import { devVmodPlugin } from "./dev-vmod.ts";
 import { devPlugin } from "./dev.ts";
 import { hmrErrorForwardingPlugin } from "./hmr-error-forwarding.ts";
 import { createWatcherUpdateTracker } from "./watcher-update.ts";
 
-export interface VueTuiOptions {
-  entry?: string;
-}
-
-export function vueTui(options: VueTuiOptions = {}): Plugin[] {
-  // vueTui() is a DEV-only toolkit: an in-terminal dev server with HMR. It does NOT touch the
-  // production build — `vite build` is browser-first and the wrong tool for a Node program. Bundle
-  // the app into a self-contained Node file with tsdown + unplugin-vue instead (see the
-  // templates/vite and examples/*/tsdown.config.ts).
+export function vueTui(): Plugin[] {
+  if (arguments.length > 1 || arguments[0] !== undefined) {
+    const error = new Error(
+      "[vue-tui] vueTui() no longer accepts options. Set Vite's top-level input instead.",
+    );
+    error.name = "VueTuiInvalidOptionsError";
+    throw error;
+  }
+  // vueTui() supplies production defaults for standalone applications and an in-terminal
+  // development server with HMR. Embedded applications use @vue-tui/runtime without this plugin
+  // and keep their host build.
   //
   // Bring your own compiler alongside vueTui() — `[vueSfc(), vueTui()]` from
   // unplugin-vue/vite for SFCs, or `[vueJsx(), vueTui()]` from
@@ -30,8 +32,9 @@ export function vueTui(options: VueTuiOptions = {}): Plugin[] {
   const session = { sessionId: randomUUID() };
   const watcherUpdates = createWatcherUpdateTracker();
   return [
+    buildPlugin(),
     hmrErrorForwardingPlugin({ watcherUpdates }),
-    devPlugin({ entry: normalizeDevEntry(options.entry), session, watcherUpdates }),
+    devPlugin({ session, watcherUpdates }),
     devVmodPlugin(session),
   ];
 }
