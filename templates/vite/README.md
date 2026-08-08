@@ -25,4 +25,4 @@ src/
 vite.config.ts    # Vue compiler, terminal HMR, and production Node bundle
 ```
 
-Built with [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime), [`@vue-tui/components`](https://www.npmjs.com/package/@vue-tui/components), and the development-only [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite) plugin. The application-owned Vite config also produces the production bundle.
+Built with [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime), [`@vue-tui/components`](https://www.npmjs.com/package/@vue-tui/components), and [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite). The plugin provides terminal HMR and the default production bundle settings.

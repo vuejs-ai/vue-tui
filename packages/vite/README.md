@@ -1,6 +1,6 @@
 # @vue-tui/vite
 
-`@vue-tui/vite` starts a development server for Vue applications that use `@vue-tui/runtime`. The server runs in the application process and provides HMR in the terminal.
+`@vue-tui/vite` provides development and build support for standalone applications that use `@vue-tui/runtime`. It runs the development server in the application process, provides HMR in the terminal, and supplies defaults for a single-file Node bundle.
 
 ## Install
 
@@ -11,7 +11,7 @@ npm install -D @vue-tui/vite unplugin-vue vite
 
 ## Usage
 
-`vueTui()` starts the development server. Use `unplugin-vue/vite` to compile SFCs. Use `@vitejs/plugin-vue-jsx` to compile JSX. The SFC compiler creates client render functions for Vue by default. During development, Vite evaluates application modules with its SSR module runner.
+Use `unplugin-vue/vite` to compile SFCs. Use `@vitejs/plugin-vue-jsx` to compile JSX. The compilers create client render functions for Vue. During development, `vueTui()` starts the application with Vite's module runner and provides HMR.
 
 ```ts
 // vite.config.ts
@@ -19,10 +19,8 @@ import { defineConfig } from "vite";
 import vue from "unplugin-vue/vite";
 import { vueTui } from "@vue-tui/vite";
 
-const input = "src/main.ts";
-
 export default defineConfig({
-  input,
+  input: "src/main.ts",
   plugins: [vue(), vueTui()],
 });
 ```
@@ -36,19 +34,26 @@ For JSX or TSX, install `@vitejs/plugin-vue-jsx`. Set `input` to the `.tsx` file
 ```ts
 import vueJsx from "@vitejs/plugin-vue-jsx";
 
-const input = "src/main.tsx";
-
 export default defineConfig({
-  input,
+  input: "src/main.tsx",
   plugins: [vueJsx(), vueTui()],
 });
 ```
 
-Use the same JSX compiler during development and production. Configure Rolldown for Node. Do not set `build.ssr`. See the [JSX example](https://github.com/vuejs-ai/vue-tui/tree/main/examples/basic-jsx).
+Use the same JSX compiler during development and production. Do not set `build.ssr`. See the [JSX example](https://github.com/vuejs-ai/vue-tui/tree/main/examples/basic-jsx).
 
 ## Production build
 
-`vueTui()` affects only development. It does not change production builds. A standalone application uses Vite and the same top-level `input` for its production build. The [starter](https://github.com/vuejs-ai/vue-tui/tree/main/templates/vite) shows the complete config. `vite build` creates one Node file that runs without `node_modules`. An embedded application uses its existing compiler, build, entry, and process lifecycle without this plugin.
+For a production build, `vueTui()` uses the same top-level `input` and supplies these defaults:
+
+- Target Node 22.
+- Keep Node built-in modules external.
+- Create `dist/main.mjs` as one ESM file.
+- Disable module preload, public directory copies, and code splitting.
+
+The plugin sets a field only when the application has not set it. For example, an application can set only `build.rolldownOptions.output.entryFileNames` and keep all other defaults.
+
+An embedded application does not use this plugin. Its host keeps its compiler, build, entry, and process lifecycle.
 
 ## License
 

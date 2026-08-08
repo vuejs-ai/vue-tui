@@ -1,22 +1,16 @@
 import { isBuiltin } from "node:module";
-import { defaultServerConditions, defaultServerMainFields, defineConfig } from "vite";
+import { defineConfig } from "vite";
 import vue from "unplugin-vue/vite";
 
 const input = "src/main.ts";
 
-// This application intentionally builds without @vue-tui/vite. The plugin is optional dev/HMR
-// tooling; Vite and the Vue compiler are sufficient for a production Node bundle.
+// This app shows that @vue-tui/runtime does not depend on @vue-tui/vite.
+// Without the plugin, the app owns its Vite build settings.
 export default defineConfig({
   input,
   plugins: [vue()],
-  resolve: {
-    conditions: [...defaultServerConditions],
-    mainFields: [...defaultServerMainFields],
-  },
   build: {
     target: "node22",
-    modulePreload: false,
-    copyPublicDir: false,
     rolldownOptions: {
       platform: "node",
       external: isBuiltin,

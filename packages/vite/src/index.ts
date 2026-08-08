@@ -1,5 +1,6 @@
 import type { Plugin } from "vite";
 import { randomUUID } from "node:crypto";
+import { buildPlugin } from "./build.ts";
 import { devVmodPlugin } from "./dev-vmod.ts";
 import { devPlugin } from "./dev.ts";
 import { hmrErrorForwardingPlugin } from "./hmr-error-forwarding.ts";
@@ -13,9 +14,9 @@ export function vueTui(): Plugin[] {
     error.name = "VueTuiInvalidOptionsError";
     throw error;
   }
-  // vueTui() is a dev-only toolkit: an in-terminal dev server with HMR. Production builds belong
-  // to the application or its host, so @vue-tui/runtime can be embedded without this plugin. The
-  // standalone starter uses ordinary Vite app configuration for both its entry and Node bundle.
+  // vueTui() supplies production defaults for standalone applications and an in-terminal
+  // development server with HMR. Embedded applications use @vue-tui/runtime without this plugin
+  // and keep their host build.
   //
   // Bring your own compiler alongside vueTui() — `[vueSfc(), vueTui()]` from
   // unplugin-vue/vite for SFCs, or `[vueJsx(), vueTui()]` from
@@ -31,6 +32,7 @@ export function vueTui(): Plugin[] {
   const session = { sessionId: randomUUID() };
   const watcherUpdates = createWatcherUpdateTracker();
   return [
+    buildPlugin(),
     hmrErrorForwardingPlugin({ watcherUpdates }),
     devPlugin({ session, watcherUpdates }),
     devVmodPlugin(session),

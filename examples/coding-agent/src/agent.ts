@@ -1,4 +1,5 @@
 import { exec } from "node:child_process";
+import { env } from "node:process";
 import OpenAI from "openai";
 
 export interface Message {
@@ -27,7 +28,7 @@ let client: OpenAI | undefined;
 function getClient(): OpenAI {
   if (!client) {
     client = new OpenAI({
-      apiKey: process.env["DEEPSEEK_API_KEY"],
+      apiKey: env["DEEPSEEK_API_KEY"],
       baseURL: "https://api.deepseek.com",
     });
   }

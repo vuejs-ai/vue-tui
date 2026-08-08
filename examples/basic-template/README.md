@@ -1,37 +1,19 @@
 # basic-template
 
-This example is a small standalone vue-tui application that uses Vue SFC `<template>` syntax. It uses one Vite config for development and production. `@vue-tui/vite` affects only development.
+This example is a small standalone vue-tui application that uses Vue SFC `<template>` syntax. It uses one Vite config for development and production.
 
 ## Setup
 
-`unplugin-vue/vite` compiles the SFC during development and production. Vite's top-level `input` defines the application entry. `vueTui()` starts this entry during development. Vite uses the same entry for the production build. The build creates one Node file that runs without `node_modules`. The Vue compiler creates client render functions instead of SSR render functions.
+`unplugin-vue/vite` compiles the SFC during development and production. Vite's top-level `input` defines the application entry. `vueTui()` starts this entry during development and supplies the production build defaults. The build creates one Node file that runs without `node_modules`. The Vue compiler creates client render functions instead of SSR render functions.
 
 ```ts
-// vite.config.ts
-import { isBuiltin } from "node:module";
-import { defaultServerConditions, defaultServerMainFields, defineConfig } from "vite";
+import { defineConfig } from "vite";
 import vue from "unplugin-vue/vite";
 import { vueTui } from "@vue-tui/vite";
 
-const input = "src/main.ts";
-
 export default defineConfig({
-  input,
+  input: "src/main.ts",
   plugins: [vue(), vueTui()],
-  resolve: {
-    conditions: [...defaultServerConditions],
-    mainFields: [...defaultServerMainFields],
-  },
-  build: {
-    target: "node22",
-    modulePreload: false,
-    copyPublicDir: false,
-    rolldownOptions: {
-      platform: "node",
-      external: isBuiltin,
-      output: { format: "esm", entryFileNames: "main.mjs", codeSplitting: false },
-    },
-  },
 });
 ```
 

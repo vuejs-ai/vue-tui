@@ -33,7 +33,7 @@ Choose the method that matches your application.
 
 ### 1. Create a standalone TUI application (recommended)
 
-Use this scaffold for a standalone TUI application that controls the Node process and terminal. The Vite config defines the application entry. During development, `@vue-tui/vite` starts the same entry and provides HMR. The Vue compiler creates client render functions. Vite uses Rolldown to create the Node bundle.
+Use this scaffold for a standalone TUI application that controls the Node process and terminal. The Vite config defines the application entry. During development, `@vue-tui/vite` starts this entry and provides HMR. During a production build, it configures Vite to create one Node file. The Vue compiler creates client render functions in both modes.
 
 ```bash
 pnpm dlx tiged vuejs-ai/vue-tui/templates/vite my-app
@@ -102,13 +102,13 @@ createApp(App).mount({ exitOnCtrlC: true });
 
 ## Packages
 
-| Package                                                                    | Description                                                                                                                                                                                                                                              |
-| -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime)       | `@vue-tui/runtime` is a Vue 3 renderer for terminal applications. It provides core components, layout, input, focus, and lifecycle APIs. _Its API is stabilizing._                                                                                       |
-| [`@vue-tui/use`](https://www.npmjs.com/package/@vue-tui/use)               | `@vue-tui/use` provides composables and components that use only public Runtime APIs.                                                                                                                                                                    |
-| [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite)             | `vueTui()` starts a development server in the application process and provides terminal HMR. Standalone applications use Vite for production builds. Embedded applications use their existing build without this plugin. _This package is experimental._ |
-| [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing)       | `@vue-tui/testing` provides a deterministic host for component tests. Tests can inspect renderer frames or the emulated terminal screen.                                                                                                                 |
-| [`@vue-tui/components`](https://www.npmjs.com/package/@vue-tui/components) | `@vue-tui/components` provides `<ScrollBox>`, `<Spinner>`, `<Table>`, `<Newline>`, and `<Spacer>`.                                                                                                                                                       |
+| Package                                                                    | Description                                                                                                                                                                                  |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`@vue-tui/runtime`](https://www.npmjs.com/package/@vue-tui/runtime)       | `@vue-tui/runtime` is a Vue 3 renderer for terminal applications. It provides core components, layout, input, focus, and lifecycle APIs. _Its API is stabilizing._                           |
+| [`@vue-tui/use`](https://www.npmjs.com/package/@vue-tui/use)               | `@vue-tui/use` provides composables and components that use only public Runtime APIs.                                                                                                        |
+| [`@vue-tui/vite`](https://www.npmjs.com/package/@vue-tui/vite)             | `vueTui()` provides terminal HMR and default Vite settings for a standalone Node bundle. Embedded applications use their existing build without this plugin. _This package is experimental._ |
+| [`@vue-tui/testing`](https://www.npmjs.com/package/@vue-tui/testing)       | `@vue-tui/testing` provides a deterministic host for component tests. Tests can inspect renderer frames or the emulated terminal screen.                                                     |
+| [`@vue-tui/components`](https://www.npmjs.com/package/@vue-tui/components) | `@vue-tui/components` provides `<ScrollBox>`, `<Spinner>`, `<Table>`, `<Newline>`, and `<Spacer>`.                                                                                           |
 
 ## Examples
 

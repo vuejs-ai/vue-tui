@@ -4,7 +4,7 @@ How a source edit reaches a running terminal application, which component owns w
 
 How these claims are proven is in [testing the dev server and HMR](./hmr-testing.md).
 
-Not covered here: production builds (standalone applications use their own Vite Node-build configuration, embedded applications use their host build, and the plugin stays dev-only), the rendering-mode semantics of a reload (see [Development-reload modifier](./rendering-mode-matrix.md#development-reload-modifier)), and layer/dependency direction (see [package layers](./package-layers.md)).
+Not covered here: production builds (`vueTui()` supplies standalone defaults, while embedded applications omit the plugin and use their host build), the rendering-mode semantics of a reload (see [Development-reload modifier](./rendering-mode-matrix.md#development-reload-modifier)), and layer/dependency direction (see [package layers](./package-layers.md)).
 
 Version-pinned claims below were checked against Vite 8.2.1, `@vitejs/plugin-vue-jsx` 5.1.5, and `unplugin-vue` 7.2.0. These are exact compatibility pins, not minimums; re-check the compiler configuration and HMR seams before any of them move.
 

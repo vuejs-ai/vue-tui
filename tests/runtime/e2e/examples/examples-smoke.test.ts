@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import stripAnsi from "strip-ansi";
 import { test, expect, afterEach } from "vite-plus/test";
 import { exampleDir, launch, viteBin, type Launched } from "./helpers/run-example.ts";
 
@@ -9,7 +10,7 @@ import { exampleDir, launch, viteBin, type Launched } from "./helpers/run-exampl
 // self-contained Node file (dist/*.mjs), which `node` runs with NO node_modules present. The 0.1.0
 // crash — `Calling \`require\` for "node:module" in an environment that doesn't expose \`require\``
 // — came from folding a CJS dependency's require() into an ESM bundle. Building through Vite's
-// Node environment must remain free of that throwing shim. Development journeys live in tests/vite.
+// Node bundle must remain free of that throwing shim. Development journeys live in tests/vite.
 //
 // Why a real PTY: a TUI paints live frames only on a TTY surface (a piped/non-TTY
 // child is the final-stream document host), so a non-PTY smoke test would be a
@@ -29,12 +30,12 @@ const TITLE_TOKEN = "vue-tui basic";
 
 // The fingerprint #212 leaves in a built bundle: rolldown couldn't externalize a CJS `require`, so
 // it emitted the runtime shim that throws on call. Asserting the bundle is free of this is a fast,
-// deterministic #212 guard that needs no PTY and no API key — usable even for examples we can't run.
+// deterministic #212 guard that needs no PTY and runs before each application starts.
 const CJS_REQUIRE_SHIM = /doesn't expose the `require` function|Calling `require` for/;
 
 // Build an example with its Vite config and assert it produced exactly the intended bundle with no
-// #212 shim — the single home for that invariant, shared by the runnable apps (before they launch)
-// and the build-only coding-agent guard. Vite needs no TTY; execFileSync blocks synchronously
+// #212 shim — the single home for that invariant, shared by all apps before they launch. Vite
+// needs no TTY; execFileSync blocks synchronously
 // (vitest's testTimeout can't preempt it), so it is bounded. Returns the bundle path.
 function buildSelfContained(dir: string, outName: string): string {
   execFileSync("node", [viteBin(dir), "build"], {
@@ -58,18 +59,26 @@ afterEach(async () => {
 // Launch a self-contained bundle from a fresh dir holding ONLY that file and NO node_modules — the
 // property that actually matters (the single file runs standalone). Running from the example's own
 // dir couldn't catch a re-externalized dep (still present in its node_modules); an empty sandbox can.
-async function expectSelfContainedPaints(bundle: string, token: string): Promise<void> {
+async function expectSelfContainedStarts(
+  bundle: string,
+  verify: (application: Launched) => Promise<void>,
+  env: Record<string, string> = {},
+): Promise<void> {
   const sandbox = mkdtempSync(path.join(tmpdir(), "vue-tui-selfcontained-"));
   try {
     const name = path.basename(bundle);
     copyFileSync(bundle, path.join(sandbox, name));
-    running = launch("node", [name], sandbox);
-    await running.waitForRenderOrCrash(token);
+    running = launch("node", [name], sandbox, env);
+    await verify(running);
   } finally {
     await running?.dispose();
     running = undefined;
     rmSync(sandbox, { recursive: true, force: true });
   }
+}
+
+async function expectSelfContainedPaints(bundle: string, token: string): Promise<void> {
+  await expectSelfContainedStarts(bundle, (application) => application.waitForRenderOrCrash(token));
 }
 
 // Deterministic, key-free apps get the self-contained-build launch check.
@@ -86,14 +95,22 @@ for (const ex of SELF_CONTAINED_EXAMPLES) {
   });
 }
 
-// coding-agent needs a live LLM key only after the user submits a prompt. Its initial dev screen
-// above is safe with a fake key; the production build stays a key-free static bundle check because
-// launching it would add no coverage beyond the same idle screen.
-test("coding-agent: self-contained build succeeds with no bundled CJS require (#212)", () => {
-  buildSelfContained(exampleDir("coding-agent"), "main.mjs");
+// coding-agent contacts the LLM only after the user submits a prompt, so a fake key is sufficient
+// to verify that the bundled OpenAI runtime starts and the idle prompt paints.
+test("coding-agent: self-contained build starts with no node_modules", async () => {
+  const bundle = buildSelfContained(exampleDir("coding-agent"), "main.mjs");
+  await expectSelfContainedStarts(
+    bundle,
+    (application) =>
+      application.waitForOutputOrCrash(
+        (output) => stripAnsi(output).includes("> █"),
+        "the coding-agent prompt",
+      ),
+    { DEEPSEEK_API_KEY: "sk-fake" },
+  );
 });
 
-// flappy-bird builds a self-contained dist/game.mjs and runs standalone, same as the pair above.
+// flappy-bird uses a different output name but follows the same standalone launch check.
 test("flappy-bird: self-contained game.mjs runs with no node_modules", async () => {
   const bundle = buildSelfContained(exampleDir("flappy-bird"), "game.mjs");
   await expectSelfContainedPaints(bundle, "press space to start");
