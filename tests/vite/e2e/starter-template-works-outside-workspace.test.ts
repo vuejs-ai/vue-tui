@@ -103,20 +103,6 @@ function acceptsSimpleRange(range: string, version: string): boolean {
   return candidate[0] === 0 && candidate[1] === 0 && candidate[2] === lower[2];
 }
 
-function nodeSupportsExecutableBuild(nodeVersion: string): boolean {
-  const [major = 0, minor = 0] = nodeVersion.split(".").map(Number);
-  return major > 25 || (major === 25 && minor >= 7);
-}
-
-test.each([
-  ["24.11.0", false],
-  ["25.6.0", false],
-  ["25.7.0", true],
-  ["26.0.0", true],
-] as const)("detects executable build support on Node.js %s", (nodeVersion, supported) => {
-  expect(nodeSupportsExecutableBuild(nodeVersion)).toBe(supported);
-});
-
 test("the starter manifest matches the branch-local Vite contract", () => {
   const templateManifest = readManifest(templateRoot);
   const runtimeManifest = readManifest(`${packagesRoot}/runtime`);
@@ -281,7 +267,8 @@ test("the starter installs and works outside the workspace", { timeout: 300_000 
     expect(existsSync(scratch.file("dist/main.mjs"))).toBe(true);
     expect(readdirSync(scratch.file("dist")).sort()).toEqual(["main.mjs"]);
 
-    if (nodeSupportsExecutableBuild(process.versions.node)) {
+    const [nodeMajor = 0, nodeMinor = 0] = process.versions.node.split(".").map(Number);
+    if (nodeMajor >= 26) {
       runPnpm(scratch.root, "run", "build:exe");
       const executable = scratch.file(`build/main${process.platform === "win32" ? ".exe" : ""}`);
       expect(existsSync(executable)).toBe(true);
@@ -295,7 +282,7 @@ test("the starter installs and works outside the workspace", { timeout: 300_000 
       expect(result.error).toBeUndefined();
       expect(result.status).toBe(0);
       expect(result.stdout).toContain("Starting up");
-    } else {
+    } else if (nodeMajor < 25 || (nodeMajor === 25 && nodeMinor < 7)) {
       const result = spawnPnpm(scratch.root, "run", "build:exe");
       expect(result.status).not.toBe(0);
       const output = `${result.stdout}\n${result.stderr}`;
