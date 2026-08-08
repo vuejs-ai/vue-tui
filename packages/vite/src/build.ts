@@ -1,13 +1,47 @@
 import { isBuiltin } from "node:module";
-import type { BuildEnvironmentOptions, Plugin, Rolldown } from "vite";
+import {
+  defaultServerConditions,
+  defaultServerMainFields,
+  type BuildEnvironmentOptions,
+  type Plugin,
+  type Rolldown,
+} from "vite";
 
-function applyOutputDefaults(output: Rolldown.OutputOptions): Rolldown.OutputOptions {
+function defaultEntryFileName(
+  format: Rolldown.OutputOptions["format"],
+  reservedNames: Set<string>,
+): string {
+  const extension = format === "cjs" || format === "commonjs" ? "cjs" : "mjs";
+  let sequence = 1;
+  let name = `main.${extension}`;
+  while (reservedNames.has(name)) {
+    sequence += 1;
+    name = `main-${sequence}.${extension}`;
+  }
+  reservedNames.add(name);
+  return name;
+}
+
+function applyOutputDefaults(
+  output: Rolldown.OutputOptions,
+  reservedNames: Set<string>,
+): Rolldown.OutputOptions {
+  const format = output.format ?? "esm";
   return {
     ...output,
-    format: output.format ?? "esm",
-    entryFileNames: output.entryFileNames ?? "main.mjs",
+    format,
+    entryFileNames: output.entryFileNames ?? defaultEntryFileName(format, reservedNames),
     codeSplitting: output.codeSplitting ?? false,
   };
+}
+
+function applyOutputListDefaults(outputs: Rolldown.OutputOptions[]): Rolldown.OutputOptions[] {
+  const reservedNames = new Set(
+    outputs.flatMap((output) =>
+      typeof output.entryFileNames === "string" ? [output.entryFileNames] : [],
+    ),
+  );
+  return outputs.map((output) => applyOutputDefaults(output, reservedNames));
 }
 
 function applyBuildDefaults(build: BuildEnvironmentOptions): BuildEnvironmentOptions {
@@ -24,8 +58,8 @@ function applyBuildDefaults(build: BuildEnvironmentOptions): BuildEnvironmentOpt
       platform: rolldownOptions.platform ?? "node",
       external: rolldownOptions.external ?? isBuiltin,
       output: Array.isArray(output)
-        ? output.map(applyOutputDefaults)
-        : applyOutputDefaults(output ?? {}),
+        ? applyOutputListDefaults(output)
+        : applyOutputDefaults(output ?? {}, new Set()),
     },
   };
 }
@@ -47,6 +81,11 @@ export function buildPlugin(): Plugin {
           define["global.process.env.NODE_ENV"] ??= nodeEnv;
           define["globalThis.process.env.NODE_ENV"] ??= nodeEnv;
         }
+        config.resolve = {
+          ...config.resolve,
+          conditions: config.resolve?.conditions ?? [...defaultServerConditions],
+          mainFields: config.resolve?.mainFields ?? [...defaultServerMainFields],
+        };
         config.build = applyBuildDefaults(config.build ?? {});
       },
     },

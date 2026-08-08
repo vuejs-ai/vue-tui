@@ -416,7 +416,7 @@ importers:
         specifier: ^22.18.0
         version: 22.20.1
       '@vue-tui/vite':
-        specifier: 0.3.0
+        specifier: 0.3.1
         version: link:../../packages/vite
       '@vue/tsconfig':
         specifier: ^0.9.1

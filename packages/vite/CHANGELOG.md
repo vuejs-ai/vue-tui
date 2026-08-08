@@ -7,9 +7,11 @@ This project adheres to [Semantic Versioning](https://semver.org/). While on
 
 ## Unreleased
 
+## 0.3.1 - 2026-08-08
+
 ### Changed
 
-- **Vite-only application builds** — the standalone starter and examples now declare their only entry with Vite 8.2's top-level `input`. `vueTui()` supplies single-file Node build defaults for fields that the application does not set. Embedded Runtime applications omit the plugin and keep their host build.
+- **Vite-only application builds** — the standalone starter and examples now declare their only entry with Vite 8.2's top-level `input`. `vueTui()` supplies Node resolution and single-file build defaults for fields that the application does not set. Embedded Runtime applications omit the plugin and keep their host build.
 - **Breaking: one Vite entry** — `vueTui({ entry })` is replaced by `vueTui()`, which reads Vite's top-level `input`; the plugin rejects multiple development entries because one terminal session launches one app process.
 - **Vite compatibility** — the exact tested Vite pin moves from 8.1.0 to 8.2.1.
 

@@ -1,17 +1,29 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { expect, test } from "vite-plus/test";
-import { build, resolveConfig, type EnvironmentOptions, type UserConfig } from "vite";
+import {
+  build,
+  defaultServerConditions,
+  defaultServerMainFields,
+  resolveConfig,
+  type EnvironmentOptions,
+  type InlineConfig,
+  type UserConfig,
+} from "vite";
 import { buildPlugin } from "../src/build.ts";
 
 function applyBuildDefaults(config: UserConfig): UserConfig {
   const hook = buildPlugin().configEnvironment!;
   const handler = typeof hook === "function" ? hook : hook.handler;
-  const environment: EnvironmentOptions = { build: config.build };
+  const environment: EnvironmentOptions = { build: config.build, resolve: config.resolve };
   Reflect.apply(handler, undefined, [
     "client",
     environment,
     { command: "build", mode: "production" },
   ]);
   config.build = environment.build;
+  config.resolve = environment.resolve;
   return config;
 }
 
@@ -33,11 +45,30 @@ test("provides a standalone Node bundle by default", () => {
   expect(external("node:fs")).toBe(true);
   expect(external("fs")).toBe(true);
   expect(external("vue")).toBe(false);
-  expect(config.resolve).toBeUndefined();
+  expect(config.resolve).toMatchObject({
+    conditions: defaultServerConditions,
+    mainFields: defaultServerMainFields,
+  });
   expect(output).toMatchObject({
     format: "esm",
     entryFileNames: "main.mjs",
     codeSplitting: false,
+  });
+});
+
+test("fills missing resolver fields without replacing explicit fields", () => {
+  const conditions = ["custom-condition"];
+  const mainFields = ["custom-main"];
+  const conditionsConfig = applyBuildDefaults({ resolve: { conditions } });
+  const mainFieldsConfig = applyBuildDefaults({ resolve: { mainFields } });
+
+  expect(conditionsConfig.resolve).toMatchObject({
+    conditions,
+    mainFields: defaultServerMainFields,
+  });
+  expect(mainFieldsConfig.resolve).toMatchObject({
+    conditions: defaultServerConditions,
+    mainFields,
   });
 });
 
@@ -101,8 +132,25 @@ test("fills each output without replacing explicit fields", () => {
   });
 
   expect(config.build!.rolldownOptions!.output).toEqual([
-    { format: "cjs", entryFileNames: "main.mjs", codeSplitting: false },
+    { format: "cjs", entryFileNames: "main.cjs", codeSplitting: false },
     { format: "esm", entryFileNames: "worker.mjs", codeSplitting: true },
+  ]);
+});
+
+test("gives missing output names compatible extensions without collisions", () => {
+  const config = applyBuildDefaults({
+    build: {
+      rolldownOptions: {
+        output: [{}, {}, { format: "cjs" }, { format: "commonjs" }],
+      },
+    },
+  });
+
+  expect(config.build!.rolldownOptions!.output).toEqual([
+    { format: "esm", entryFileNames: "main.mjs", codeSplitting: false },
+    { format: "esm", entryFileNames: "main-2.mjs", codeSplitting: false },
+    { format: "cjs", entryFileNames: "main.cjs", codeSplitting: false },
+    { format: "commonjs", entryFileNames: "main-2.cjs", codeSplitting: false },
   ]);
 });
 
@@ -135,10 +183,65 @@ test("fills config from other plugins after Vite merges it", async () => {
   const client = config.environments.client;
   const build = client.build;
   expect(client.keepProcessEnv).toBe(true);
+  expect(client.resolve.conditions).toEqual(defaultServerConditions);
+  expect(client.resolve.mainFields).toEqual(defaultServerMainFields);
   expect(build.rolldownOptions.external).toEqual(external);
   expect(build.rolldownOptions.output).toEqual([
     { format: "esm", entryFileNames: "cli.mjs", codeSplitting: true },
   ]);
+});
+
+test("resolves conditional exports for Node during production builds", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "vue-tui-vite-node-conditions-"));
+  const packageRoot = path.join(root, "node_modules", "conditional-runtime");
+  mkdirSync(packageRoot, { recursive: true });
+  writeFileSync(
+    path.join(packageRoot, "package.json"),
+    JSON.stringify({
+      name: "conditional-runtime",
+      type: "module",
+      exports: {
+        ".": {
+          browser: "./browser.js",
+          node: "./node.js",
+          default: "./default.js",
+        },
+      },
+    }),
+  );
+  writeFileSync(path.join(packageRoot, "browser.js"), 'export default "browser-runtime";');
+  writeFileSync(path.join(packageRoot, "node.js"), 'export default "node-runtime";');
+  writeFileSync(path.join(packageRoot, "default.js"), 'export default "default-runtime";');
+  writeFileSync(
+    path.join(root, "entry.js"),
+    'import runtime from "conditional-runtime"; console.log(runtime);',
+  );
+
+  let outputCode: string | undefined;
+  try {
+    await build({
+      root,
+      configFile: false,
+      logLevel: "silent",
+      input: "entry.js",
+      build: { minify: false, write: false },
+      plugins: [
+        buildPlugin(),
+        {
+          name: "capture-output",
+          generateBundle(_options, bundle) {
+            const chunk = Object.values(bundle).find((output) => output.type === "chunk");
+            outputCode = chunk?.code;
+          },
+        },
+      ],
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+
+  expect(outputCode).toContain("node-runtime");
+  expect(outputCode).not.toContain("browser-runtime");
 });
 
 test("keeps runtime environment values without keeping NODE_ENV", async () => {
@@ -225,21 +328,30 @@ test("adds NODE_ENV definitions only to the client environment", async () => {
 test("adds build defaults only to the client environment", async () => {
   const rootOutput = { entryFileNames: "root.mjs" };
   const rootBuild = { rolldownOptions: { output: rootOutput } };
-  const config = await resolveConfig(
-    {
-      configFile: false,
-      logLevel: "silent",
-      build: rootBuild,
-      environments: { worker: {} },
-      plugins: [buildPlugin()],
+  const workerConditions = ["worker-condition"];
+  const workerMainFields = ["worker-main"];
+  const userConfig: InlineConfig = {
+    configFile: false,
+    logLevel: "silent",
+    build: rootBuild,
+    environments: {
+      worker: { resolve: { conditions: workerConditions, mainFields: workerMainFields } },
     },
-    "build",
-  );
+    plugins: [buildPlugin()],
+  };
+  const config = await resolveConfig(userConfig, "build");
 
   expect(rootBuild).not.toHaveProperty("target");
   expect(rootOutput).toEqual({ entryFileNames: "root.mjs" });
+  // Vite exposes the resolved client resolver through the root compatibility config.
+  expect(config.resolve.conditions).toEqual(defaultServerConditions);
+  expect(config.resolve.mainFields).toEqual(defaultServerMainFields);
   expect(config.build.target).not.toBe("node22");
+  expect(config.environments.worker.resolve.conditions).toEqual(workerConditions);
+  expect(config.environments.worker.resolve.mainFields).toEqual(workerMainFields);
   expect(config.environments.worker.build.target).not.toBe("node22");
+  expect(config.environments.client.resolve.conditions).toEqual(defaultServerConditions);
+  expect(config.environments.client.resolve.mainFields).toEqual(defaultServerMainFields);
   expect(config.environments.client.build).toMatchObject({
     target: "node22",
     rolldownOptions: {

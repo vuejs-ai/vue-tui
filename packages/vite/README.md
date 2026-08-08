@@ -47,6 +47,7 @@ Use the same JSX compiler during development and production. Do not set `build.s
 For a production build, `vueTui()` uses the same top-level `input` and supplies these defaults:
 
 - Target Node 22.
+- Resolve package exports and main fields for Node.
 - Keep Node built-in modules external.
 - Set `NODE_ENV` at build time and preserve other `process.env` values for runtime.
 - Create `dist/main.mjs` as one ESM file.
