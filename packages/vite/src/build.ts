@@ -7,41 +7,13 @@ import {
   type Rolldown,
 } from "vite";
 
-function defaultEntryFileName(
-  format: Rolldown.OutputOptions["format"],
-  reservedNames: Set<string>,
-): string {
-  const extension = format === "cjs" || format === "commonjs" ? "cjs" : "mjs";
-  let sequence = 1;
-  let name = `main.${extension}`;
-  while (reservedNames.has(name)) {
-    sequence += 1;
-    name = `main-${sequence}.${extension}`;
-  }
-  reservedNames.add(name);
-  return name;
-}
-
-function applyOutputDefaults(
-  output: Rolldown.OutputOptions,
-  reservedNames: Set<string>,
-): Rolldown.OutputOptions {
-  const format = output.format ?? "esm";
+function applyOutputDefaults(output: Rolldown.OutputOptions): Rolldown.OutputOptions {
   return {
     ...output,
-    format,
-    entryFileNames: output.entryFileNames ?? defaultEntryFileName(format, reservedNames),
+    format: output.format ?? "esm",
+    entryFileNames: output.entryFileNames ?? "main.mjs",
     codeSplitting: output.codeSplitting ?? false,
   };
-}
-
-function applyOutputListDefaults(outputs: Rolldown.OutputOptions[]): Rolldown.OutputOptions[] {
-  const reservedNames = new Set(
-    outputs.flatMap((output) =>
-      typeof output.entryFileNames === "string" ? [output.entryFileNames] : [],
-    ),
-  );
-  return outputs.map((output) => applyOutputDefaults(output, reservedNames));
 }
 
 function applyBuildDefaults(build: BuildEnvironmentOptions): BuildEnvironmentOptions {
@@ -57,9 +29,7 @@ function applyBuildDefaults(build: BuildEnvironmentOptions): BuildEnvironmentOpt
       ...rolldownOptions,
       platform: rolldownOptions.platform ?? "node",
       external: rolldownOptions.external ?? isBuiltin,
-      output: Array.isArray(output)
-        ? applyOutputListDefaults(output)
-        : applyOutputDefaults(output ?? {}, new Set()),
+      output: Array.isArray(output) ? output : applyOutputDefaults(output ?? {}),
     },
   };
 }

@@ -122,36 +122,17 @@ test("fills missing fields in an explicit output", () => {
   });
 });
 
-test("fills each output without replacing explicit fields", () => {
+test("preserves an explicit output array", () => {
+  const output = [{ format: "cjs" as const }, { entryFileNames: "worker.mjs" }];
   const config = applyBuildDefaults({
     build: {
       rolldownOptions: {
-        output: [{ format: "cjs" }, { entryFileNames: "worker.mjs", codeSplitting: true }],
+        output,
       },
     },
   });
 
-  expect(config.build!.rolldownOptions!.output).toEqual([
-    { format: "cjs", entryFileNames: "main.cjs", codeSplitting: false },
-    { format: "esm", entryFileNames: "worker.mjs", codeSplitting: true },
-  ]);
-});
-
-test("gives missing output names compatible extensions without collisions", () => {
-  const config = applyBuildDefaults({
-    build: {
-      rolldownOptions: {
-        output: [{}, {}, { format: "cjs" }, { format: "commonjs" }],
-      },
-    },
-  });
-
-  expect(config.build!.rolldownOptions!.output).toEqual([
-    { format: "esm", entryFileNames: "main.mjs", codeSplitting: false },
-    { format: "esm", entryFileNames: "main-2.mjs", codeSplitting: false },
-    { format: "cjs", entryFileNames: "main.cjs", codeSplitting: false },
-    { format: "commonjs", entryFileNames: "main-2.cjs", codeSplitting: false },
-  ]);
+  expect(config.build!.rolldownOptions!.output).toBe(output);
 });
 
 test("fills config from other plugins after Vite merges it", async () => {
@@ -169,7 +150,7 @@ test("fills config from other plugins after Vite merges it", async () => {
               build: {
                 rolldownOptions: {
                   external,
-                  output: [{ entryFileNames: "cli.mjs", codeSplitting: true }],
+                  output: { entryFileNames: "cli.mjs", codeSplitting: true },
                 },
               },
             };
@@ -186,9 +167,11 @@ test("fills config from other plugins after Vite merges it", async () => {
   expect(client.resolve.conditions).toEqual(defaultServerConditions);
   expect(client.resolve.mainFields).toEqual(defaultServerMainFields);
   expect(build.rolldownOptions.external).toEqual(external);
-  expect(build.rolldownOptions.output).toEqual([
-    { format: "esm", entryFileNames: "cli.mjs", codeSplitting: true },
-  ]);
+  expect(build.rolldownOptions.output).toEqual({
+    format: "esm",
+    entryFileNames: "cli.mjs",
+    codeSplitting: true,
+  });
 });
 
 test("resolves conditional exports for Node during production builds", async () => {
