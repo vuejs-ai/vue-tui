@@ -1,16 +1,18 @@
 import type { Plugin } from "vite";
 import { randomUUID } from "node:crypto";
-import { normalizeDevEntry } from "./entry-match.ts";
 import { devVmodPlugin } from "./dev-vmod.ts";
 import { devPlugin } from "./dev.ts";
 import { hmrErrorForwardingPlugin } from "./hmr-error-forwarding.ts";
 import { createWatcherUpdateTracker } from "./watcher-update.ts";
 
-export interface VueTuiOptions {
-  entry?: string;
-}
-
-export function vueTui(options: VueTuiOptions = {}): Plugin[] {
+export function vueTui(): Plugin[] {
+  if (arguments.length > 0) {
+    const error = new Error(
+      "[vue-tui] vueTui() no longer accepts an entry option. Set Vite's top-level input instead.",
+    );
+    error.name = "VueTuiInvalidOptionsError";
+    throw error;
+  }
   // vueTui() is a dev-only toolkit: an in-terminal dev server with HMR. Production builds belong
   // to the application or its host, so @vue-tui/runtime can be embedded without this plugin. The
   // standalone starter uses ordinary Vite app configuration for both its entry and Node bundle.
@@ -30,7 +32,7 @@ export function vueTui(options: VueTuiOptions = {}): Plugin[] {
   const watcherUpdates = createWatcherUpdateTracker();
   return [
     hmrErrorForwardingPlugin({ watcherUpdates }),
-    devPlugin({ entry: normalizeDevEntry(options.entry), session, watcherUpdates }),
+    devPlugin({ session, watcherUpdates }),
     devVmodPlugin(session),
   ];
 }

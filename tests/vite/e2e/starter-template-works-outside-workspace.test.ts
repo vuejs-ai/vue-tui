@@ -114,8 +114,11 @@ test("the starter manifest matches the branch-local Vite contract", () => {
   expect(viteConfig).not.toContain('from "@vitejs/plugin-vue"');
   expect(viteConfig).toContain('const input = "src/main.ts"');
   expect(viteConfig).toContain("  input,");
-  expect(viteConfig).toContain("vueTui({ entry: input })");
-  expect(viteConfig).toContain("ssr: input");
+  expect(viteConfig).toContain("vueTui()");
+  expect(viteConfig).not.toContain("entry:");
+  expect(viteConfig).not.toContain("ssr:");
+  expect(viteConfig).toContain('platform: "node"');
+  expect(viteConfig).toContain("external: isBuiltin");
   expect(viteConfig).toContain("codeSplitting: false");
   expect(existsSync(`${templateRoot}/tsdown.config.ts`)).toBe(false);
   expect(templateManifest.devDependencies).not.toHaveProperty("tsdown");

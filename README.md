@@ -34,7 +34,7 @@ There are two ways to use vue-tui — scaffold a full project, or drop the runti
 
 ### 1. Scaffold a standalone TUI application (recommended)
 
-Use the scaffold when the project is a TUI application that owns its Node process and terminal. One Vite config compiles the Vue SFCs, runs the development server with terminal HMR, and builds a self-contained Node bundle.
+Use the scaffold when the project is a TUI application that owns its Node process and terminal. Vite owns the app entry and production build; `@vue-tui/vite` only launches that same entry with terminal HMR during development. The production build is a regular Vue client build targeting Node, not a Vue SSR build.
 
 ```bash
 pnpm dlx tiged vuejs-ai/vue-tui/templates/vite my-app
@@ -49,7 +49,7 @@ Edit `src/app.vue` and watch the terminal update instantly.
 
 ### 2. Embed the standalone runtime
 
-Use this path when vue-tui is one part of an existing Node CLI or application. `@vue-tui/runtime` is a standalone Vue renderer: keep the host application's Vue compiler, build, and process lifecycle. The `@vue-tui/vite` development plugin is not required.
+Use this path when vue-tui is one part of an existing Node CLI or application. `@vue-tui/runtime` is a standalone Vue renderer: keep the host application's Vue compiler, build, entry, and process lifecycle. The `@vue-tui/vite` development plugin is not required.
 
 ```vue
 <!-- app.vue -->

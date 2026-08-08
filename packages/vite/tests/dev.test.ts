@@ -19,6 +19,7 @@ type ConfigResolvedFn = (
   this: unknown,
   config: {
     root: string;
+    input?: string | string[] | Record<string, string>;
     plugins: Plugin[];
     resolve: { preserveSymlinks: boolean };
   },
@@ -36,6 +37,15 @@ const injectPrefix = `import ${JSON.stringify(DEV_VMOD_ID)};\n`;
 
 test("the package root exposes only the Vite plugin", () => {
   expect(Object.keys(publicApi).sort()).toEqual(["default", "vueTui"]);
+});
+
+test("rejects the removed entry option instead of silently ignoring it in JavaScript", () => {
+  expect(() => Reflect.apply(vueTui, undefined, [{ entry: "src/legacy.ts" }])).toThrowError(
+    expect.objectContaining({
+      name: "VueTuiInvalidOptionsError",
+      message: expect.stringContaining("top-level input"),
+    }),
+  );
 });
 
 test("keeps Vite error diagnostics enabled for failures without an HMR payload", () => {
@@ -106,7 +116,6 @@ test("follows Vite's preserveSymlinks policy at both HMR path seams", async () =
     symlinkSync(physicalRoot, linkedRoot, process.platform === "win32" ? "junction" : "dir");
 
     const plugin = devPlugin({
-      entry: "/src/main.ts",
       session: { sessionId: "preserve-symlinks-session" },
     }) as unknown as {
       configResolved: ConfigResolvedFn;
@@ -115,6 +124,7 @@ test("follows Vite's preserveSymlinks policy at both HMR path seams", async () =
     };
     plugin.configResolved({
       root: linkedRoot,
+      input: "/src/main.ts",
       plugins: [],
       resolve: { preserveSymlinks: true },
     });
@@ -413,13 +423,16 @@ test("correlates an HMR error with its own overlapping file-change batch", async
   }
 });
 
-function transformOf(opts: { entry?: string; root?: string }): TransformFn {
+function transformOf(opts: {
+  input?: string | string[] | Record<string, string>;
+  root?: string;
+}): TransformFn {
   const plugin = devPlugin({
-    entry: opts.entry ?? "/src/main.ts",
     session: { sessionId: "test-session" },
   }) as unknown as { transform: TransformFn; configResolved: ConfigResolvedFn };
   plugin.configResolved({
     root: opts.root ?? "/Users/proj",
+    input: opts.input,
     plugins: [],
     resolve: { preserveSymlinks: false },
   });
@@ -427,7 +440,7 @@ function transformOf(opts: { entry?: string; root?: string }): TransformFn {
 }
 
 test("injects the dev module into a CUSTOM entry matched by absolute path", () => {
-  const transform = transformOf({ entry: "/src/app.ts" });
+  const transform = transformOf({ input: "/src/app.ts" });
   const out = transform("export const x = 1;", "/Users/proj/src/app.ts");
   expect(out?.code).toBe(`${injectPrefix}export const x = 1;`);
 });
@@ -439,7 +452,7 @@ test("injects the dev module into the DEFAULT entry", () => {
 });
 
 test("does not inject into non-entry modules", () => {
-  const transform = transformOf({ entry: "/src/app.ts" });
+  const transform = transformOf({ input: "/src/app.ts" });
   expect(transform("export const x = 1;", "/Users/proj/src/other.ts")).toBeUndefined();
 });
 
@@ -450,7 +463,7 @@ test("strips the query suffix before matching the entry", () => {
 });
 
 test("does not inject into an unrelated path that only shares the entry suffix", () => {
-  const transform = transformOf({ entry: "/src/main.ts", root: "/Users/proj/app" });
+  const transform = transformOf({ input: "/src/main.ts", root: "/Users/proj/app" });
   // endsWith("/src/main.ts") would wrongly match this vendor path
   expect(
     transform("export const x = 1;", "/Users/proj/app/vendor/pkg/src/main.ts"),
@@ -490,7 +503,7 @@ test("keeps an existing absolute entry outside the Vite root", () => {
     writeFileSync(entry, "export const external = true;\n");
 
     expect(resolveConfiguredEntry(root, entry)).toBe(entry);
-    expect(transformOf({ entry, root })("export const external = true;", entry)?.code).toBe(
+    expect(transformOf({ input: entry, root })("export const external = true;", entry)?.code).toBe(
       `${injectPrefix}export const external = true;`,
     );
   } finally {
@@ -526,7 +539,7 @@ test("matches an entry reached through an equivalent filesystem link", () => {
   }
 });
 
-// vueTui() normalizes the dev `entry` so the dev plugin injects the HMR snippet on
+// vueTui() reads and normalizes Vite's top-level `input` so the dev plugin injects the HMR snippet on
 // the exact resolved absolute path. Rooted forms — a leading "/" (root-relative /
 // POSIX-absolute / UNC) or a Windows drive-letter — pass through unchanged; relative forms
 // ("./src/x") get a leading slash.
@@ -564,16 +577,38 @@ const ENTRY_CASES = [
 ];
 
 test.each(ENTRY_CASES)(
-  "vueTui normalizes a $name entry so dev injects on the module id",
+  "vueTui normalizes a $name input so dev injects on the module id",
   ({ entry, root, id }) => {
-    const plugins = vueTui({ entry });
+    const plugins = vueTui();
     const dev = plugins.find((p) => p.name === "vue-tui:dev") as unknown as {
       transform: TransformFn;
       configResolved: ConfigResolvedFn;
     };
-    dev.configResolved({ root, plugins: [], resolve: { preserveSymlinks: false } });
+    dev.configResolved({ input: entry, root, plugins: [], resolve: { preserveSymlinks: false } });
     expect(dev.transform("export const x = 1;", id)?.code).toBe(
       `${injectPrefix}export const x = 1;`,
     );
   },
 );
+
+test("accepts Vite input arrays and maps when they contain one app entry", () => {
+  expect(
+    transformOf({ input: ["src/list-entry.ts"] })("export {};", "/Users/proj/src/list-entry.ts")
+      ?.code,
+  ).toBe(`${injectPrefix}export {};`);
+  expect(
+    transformOf({ input: { app: "src/map-entry.ts" } })(
+      "export {};",
+      "/Users/proj/src/map-entry.ts",
+    )?.code,
+  ).toBe(`${injectPrefix}export {};`);
+});
+
+test("rejects a Vite input with multiple app entries", () => {
+  expect(() => transformOf({ input: ["src/one.ts", "src/two.ts"] })).toThrowError(
+    expect.objectContaining({
+      name: "VueTuiInvalidInputError",
+      message: expect.stringContaining("exactly one app entry"),
+    }),
+  );
+});

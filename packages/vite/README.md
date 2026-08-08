@@ -23,23 +23,15 @@ const input = "src/main.ts";
 
 export default defineConfig({
   input,
-  plugins: [vue(), vueTui({ entry: input })],
+  plugins: [vue(), vueTui()],
 });
 ```
 
 - `vite` (or `vp run dev` through a package script) — boots the app in-process through Vite's SSR module runner and renders it to the terminal, with state-preserving HMR.
 
-### Options
+`vueTui()` reads Vite's top-level `input`; it does not have a separate entry option. The dev server defaults to `src/main.ts` when `input` is omitted, but a standalone build should declare it explicitly so Vite does not look for an HTML entry. A TUI process has one app entry, so `vueTui()` rejects a multi-entry `input` during development.
 
-```ts
-vueTui({
-  entry: "src/main.ts", // default; the app entry (a .ts/.tsx file, not an index.html)
-});
-```
-
-`entry` accepts a path relative to the Vite root (with or without a leading `/`) or an existing absolute filesystem path.
-
-For a JSX/TSX entry, install `@vitejs/plugin-vue-jsx`, use it for development, and point both Vite and `vueTui()` at the `.tsx` file.
+For a JSX/TSX entry, install `@vitejs/plugin-vue-jsx` and point Vite at the `.tsx` file.
 
 ```ts
 import vueJsx from "@vitejs/plugin-vue-jsx";
@@ -48,15 +40,15 @@ const input = "src/main.tsx";
 
 export default defineConfig({
   input,
-  plugins: [vueJsx(), vueTui({ entry: input })],
+  plugins: [vueJsx(), vueTui()],
 });
 ```
 
-For a standalone JSX production build, select `unplugin-vue-jsx/vite` in the config's build branch so the Node build still emits client render functions. See the [JSX example](https://github.com/vuejs-ai/vue-tui/tree/main/examples/basic-jsx); embedded applications keep their existing JSX compiler.
+The same compiler works for development and production. Although the bundle runs in Node, vue-tui is a Vue client renderer rather than a server renderer, so the standalone config uses a regular Vite application build with Rolldown's Node platform instead of `build.ssr`. See the [JSX example](https://github.com/vuejs-ai/vue-tui/tree/main/examples/basic-jsx).
 
 ## Production build
 
-`vueTui()` is development-only and does not touch production builds. A standalone TUI application can use the same Vite config to build its Node entry; see the [starter](https://github.com/vuejs-ai/vue-tui/tree/main/templates/vite) for the complete single-file setup. An application embedding `@vue-tui/runtime` does not need this plugin at all—its host compiler, bundler, and process lifecycle remain in charge.
+`vueTui()` is development-only and does not touch production builds. A standalone TUI application can use the same top-level `input` in an application-owned Vite build; see the [starter](https://github.com/vuejs-ai/vue-tui/tree/main/templates/vite) for the complete single-file Node setup. An application embedding `@vue-tui/runtime` does not need this plugin at all—its host compiler, bundler, and process lifecycle remain in charge.
 
 ## License
 

@@ -15,6 +15,7 @@ import {
 } from "./dev-session.ts";
 import { forceVueJsxClientCompile } from "./force-vue-jsx-client-compile.ts";
 import {
+  devEntryFromViteInput,
   moduleIdMatchesConfiguredEntry,
   normalizeDevEntry,
   resolveConfiguredEntry,
@@ -35,14 +36,14 @@ async function closeLosingServer(server: ViteDevServer, error: unknown): Promise
 }
 
 export function devPlugin(opts: {
-  entry?: string;
   session: DevSessionRef;
   watcherUpdates?: WatcherUpdateTracker;
 }): Plugin {
-  // `entry` is the rooted form normalizeDevEntry() produced (leading "/" or a
-  // drive-letter path). The SSR runner imports this id; transform matching uses
-  // the absolute path resolved from config.root in configResolved.
-  const entry = opts.entry ?? normalizeDevEntry();
+  // `entry` becomes the rooted form devEntryFromViteInput() produces (leading
+  // "/" or a drive-letter path) once Vite resolves the top-level `input`. The SSR
+  // runner imports this id; transform matching uses the absolute path resolved
+  // from config.root in configResolved.
+  let entry = normalizeDevEntry();
   const session = opts.session;
   const watcherUpdates = opts.watcherUpdates ?? createWatcherUpdateTracker();
   let resolvedEntryAbs = entry;
@@ -67,6 +68,7 @@ export function devPlugin(opts: {
     name: "vue-tui:dev",
     apply: "serve",
     configResolved(config) {
+      entry = devEntryFromViteInput(config.input);
       preserveSymlinks = config.resolve.preserveSymlinks;
       resolvedEntryAbs = resolveConfiguredEntry(config.root, entry);
       // The terminal renderer needs client compiler output even though the app runs in

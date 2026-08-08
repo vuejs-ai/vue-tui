@@ -17,7 +17,6 @@
     "@types/node": "catalog:",
     "@vitejs/plugin-vue-jsx": "catalog:",
     "@vue-tui/vite": "workspace:*",
-    "unplugin-vue-jsx": "catalog:",
     "vite": "catalog:",
     "vue-tsc": "catalog:"
   }

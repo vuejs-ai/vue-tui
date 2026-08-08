@@ -4,30 +4,35 @@ A minimal standalone vue-tui app written with Vue SFC `<template>` syntax. It is
 
 ## Setup
 
-`unplugin-vue/vite` compiles the SFC in both modes. `vueTui()` adds the in-terminal development server, while the application-owned `build` and `ssr` options produce the self-contained Node bundle without plugin-specific production behavior.
+`unplugin-vue/vite` compiles the SFC in both modes. Vite's top-level `input` is the one application entry: `vueTui()` reads it to start the in-terminal development server, and the application-owned Vite build uses it to produce the self-contained Node bundle. This is a regular Vue client build targeting Node, not a Vue SSR build.
 
 ```ts
 // vite.config.ts
-import { defineConfig } from "vite";
+import { isBuiltin } from "node:module";
+import { defaultServerConditions, defaultServerMainFields, defineConfig } from "vite";
 import vue from "unplugin-vue/vite";
 import { vueTui } from "@vue-tui/vite";
 
 const input = "src/main.ts";
 
-export default defineConfig(({ command }) => ({
+export default defineConfig({
   input,
-  plugins: [vue(), vueTui({ entry: input })],
+  plugins: [vue(), vueTui()],
+  resolve: {
+    conditions: [...defaultServerConditions],
+    mainFields: [...defaultServerMainFields],
+  },
   build: {
-    ssr: input,
     target: "node22",
     modulePreload: false,
     copyPublicDir: false,
     rolldownOptions: {
+      platform: "node",
+      external: isBuiltin,
       output: { format: "esm", entryFileNames: "main.mjs", codeSplitting: false },
     },
   },
-  ssr: command === "build" ? { noExternal: true } : undefined,
-}));
+});
 ```
 
 ## Running it with Vite+

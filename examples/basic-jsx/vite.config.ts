@@ -1,21 +1,24 @@
-import { defineConfig } from "vite";
+import { isBuiltin } from "node:module";
+import { defaultServerConditions, defaultServerMainFields, defineConfig } from "vite";
 import vueJsx from "@vitejs/plugin-vue-jsx";
-import vueJsxBuild from "unplugin-vue-jsx/vite";
 import { vueTui } from "@vue-tui/vite";
 
 const input = "src/main.tsx";
 
-export default defineConfig(({ command }) => ({
+export default defineConfig({
   input,
-  // The HMR-capable compiler follows Vite's server build mode. Use the context-independent Vite
-  // integration for production so this client renderer does not receive SSR render functions.
-  plugins: command === "serve" ? [vueJsx(), vueTui({ entry: input })] : [vueJsxBuild()],
+  plugins: [vueJsx(), vueTui()],
+  resolve: {
+    conditions: [...defaultServerConditions],
+    mainFields: [...defaultServerMainFields],
+  },
   build: {
-    ssr: input,
     target: "node22",
     modulePreload: false,
     copyPublicDir: false,
     rolldownOptions: {
+      platform: "node",
+      external: isBuiltin,
       output: {
         format: "esm",
         entryFileNames: "main.mjs",
@@ -23,5 +26,4 @@ export default defineConfig(({ command }) => ({
       },
     },
   },
-  ssr: command === "build" ? { noExternal: true } : undefined,
-}));
+});
