@@ -31,6 +31,8 @@ Build with components, develop with HMR, test with confidence.
 
 Choose the method that matches your application.
 
+vue-tui does not include a Vue compiler. In a Vite application, use [`unplugin-vue/vite`](https://www.npmjs.com/package/unplugin-vue) for SFCs or [`@vitejs/plugin-vue-jsx`](https://www.npmjs.com/package/@vitejs/plugin-vue-jsx) for JSX and TSX.
+
 ### 1. Create a standalone TUI application (recommended)
 
 Use this scaffold for a standalone TUI application that controls the Node process and terminal. The Vite config defines the application entry. During development, `@vue-tui/vite` starts this entry and provides HMR. During a production build, it configures Vite to create one Node file. The Vue compiler creates client render functions in both modes.
