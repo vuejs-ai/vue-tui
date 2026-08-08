@@ -1,12 +1,16 @@
 import { expect, test } from "vite-plus/test";
-import { resolveConfig, type EnvironmentOptions, type UserConfig } from "vite";
+import { build, resolveConfig, type EnvironmentOptions, type UserConfig } from "vite";
 import { buildPlugin } from "../src/build.ts";
 
 function applyBuildDefaults(config: UserConfig): UserConfig {
   const hook = buildPlugin().configEnvironment!;
   const handler = typeof hook === "function" ? hook : hook.handler;
   const environment: EnvironmentOptions = { build: config.build };
-  Reflect.apply(handler, undefined, ["client", environment]);
+  Reflect.apply(handler, undefined, [
+    "client",
+    environment,
+    { command: "build", mode: "production" },
+  ]);
   config.build = environment.build;
   return config;
 }
@@ -128,11 +132,120 @@ test("fills config from other plugins after Vite merges it", async () => {
     "build",
   );
 
-  const build = config.environments.client.build;
+  const client = config.environments.client;
+  const build = client.build;
+  expect(client.keepProcessEnv).toBe(true);
   expect(build.rolldownOptions.external).toEqual(external);
   expect(build.rolldownOptions.output).toEqual([
     { format: "esm", entryFileNames: "cli.mjs", codeSplitting: true },
   ]);
+});
+
+test("keeps runtime environment values without keeping NODE_ENV", async () => {
+  let outputCode: string | undefined;
+
+  await build({
+    configFile: false,
+    logLevel: "silent",
+    input: "virtual:environment-entry",
+    build: { minify: false, write: false },
+    plugins: [
+      {
+        name: "virtual-environment-entry",
+        resolveId(id) {
+          if (id === "virtual:environment-entry") return id;
+        },
+        load(id) {
+          if (id === "virtual:environment-entry") {
+            return 'console.log(process.env["RUNTIME_VALUE"], process.env.NODE_ENV, global.process.env.NODE_ENV, globalThis.process.env.NODE_ENV);';
+          }
+        },
+      },
+      buildPlugin(),
+      {
+        name: "capture-output",
+        generateBundle(_options, bundle) {
+          const chunk = Object.values(bundle).find((output) => output.type === "chunk");
+          outputCode = chunk?.code;
+        },
+      },
+    ],
+  });
+
+  expect(outputCode).toMatch(/process\.env(?:\.RUNTIME_VALUE|\["RUNTIME_VALUE"\])/);
+  expect(outputCode).not.toContain("NODE_ENV");
+  expect(outputCode).toContain(JSON.stringify(process.env.NODE_ENV || "production"));
+});
+
+test("preserves explicit NODE_ENV definitions", async () => {
+  const definitions = {
+    "process.env.NODE_ENV": '"process-value"',
+    "global.process.env.NODE_ENV": '"global-value"',
+    "globalThis.process.env.NODE_ENV": '"global-this-value"',
+  };
+  const config = await resolveConfig(
+    {
+      configFile: false,
+      logLevel: "silent",
+      environments: { client: { keepProcessEnv: true, define: definitions } },
+      plugins: [buildPlugin()],
+    },
+    "build",
+  );
+
+  expect(config.environments.client.define).toEqual(definitions);
+});
+
+test("adds NODE_ENV definitions only to the client environment", async () => {
+  const rootDefine = { CUSTOM: "true" };
+  const expectedRootDefine = { ...rootDefine };
+  const config = await resolveConfig(
+    {
+      configFile: false,
+      logLevel: "silent",
+      define: rootDefine,
+      environments: { worker: {} },
+      plugins: [buildPlugin()],
+    },
+    "build",
+  );
+
+  expect(rootDefine).toEqual(expectedRootDefine);
+  expect(config.define).toEqual(expectedRootDefine);
+  expect(config.environments.worker.define).toEqual(expectedRootDefine);
+  expect(config.environments.client.define).toMatchObject({
+    ...expectedRootDefine,
+    "process.env.NODE_ENV": expect.any(String),
+    "global.process.env.NODE_ENV": expect.any(String),
+    "globalThis.process.env.NODE_ENV": expect.any(String),
+  });
+  expect(config.environments.client.define).not.toBe(rootDefine);
+});
+
+test("adds build defaults only to the client environment", async () => {
+  const rootOutput = { entryFileNames: "root.mjs" };
+  const rootBuild = { rolldownOptions: { output: rootOutput } };
+  const config = await resolveConfig(
+    {
+      configFile: false,
+      logLevel: "silent",
+      build: rootBuild,
+      environments: { worker: {} },
+      plugins: [buildPlugin()],
+    },
+    "build",
+  );
+
+  expect(rootBuild).not.toHaveProperty("target");
+  expect(rootOutput).toEqual({ entryFileNames: "root.mjs" });
+  expect(config.build.target).not.toBe("node22");
+  expect(config.environments.worker.build.target).not.toBe("node22");
+  expect(config.environments.client.build).toMatchObject({
+    target: "node22",
+    rolldownOptions: {
+      output: { format: "esm", entryFileNames: "root.mjs", codeSplitting: false },
+    },
+  });
 });
 
 test("preserves client environment build options", async () => {
@@ -142,6 +255,7 @@ test("preserves client environment build options", async () => {
       logLevel: "silent",
       environments: {
         client: {
+          keepProcessEnv: false,
           build: {
             target: "node20",
             rolldownOptions: {
@@ -157,7 +271,9 @@ test("preserves client environment build options", async () => {
     "build",
   );
 
-  const build = config.environments.client.build;
+  const client = config.environments.client;
+  const build = client.build;
+  expect(client.keepProcessEnv).toBe(false);
   expect(build.target).toBe("node20");
   expect(build.rolldownOptions.platform).toBe("neutral");
   expect(build.rolldownOptions.external).toEqual([]);

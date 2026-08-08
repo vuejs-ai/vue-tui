@@ -135,7 +135,9 @@ renderer-owned facts. [Package guide](./packages/runtime).
 
 `Box` and `Text` have closed prop surfaces: unknown props, misspellings, browser attributes, and listeners such as `@click` are rejected at runtime instead of silently ignored. The full prop tables are in the [Runtime guide](./packages/runtime/README.md#components).
 
-`v-show` belongs to the visual host layer, not to a component allowlist. Vue forwards `v-show` through a component chain when its current effective root is one `Box` or `Text`. Custom single-root components therefore support it without additional code. `Newline`, `Spacer`, `Spinner`, `ScrollBox`, and a non-empty `Table` also support `v-show`. An empty `Table` with no explicit columns renders no host node or layout space. Fragment and text roots produce a Vue development warning, and `v-show` has no effect. Comment roots ignore `v-show` without a warning. `Static` remains the explicit history-boundary exception.
+`v-show` belongs to the visual host layer, not to a component allowlist. Vue forwards `v-show` through a component chain when its current effective root is one `Box` or `Text`. Custom single-root components therefore support it without additional code. `Newline`, `Spacer`, `Spinner`, `ScrollBox`, and a non-empty `Table` also support `v-show`. An empty `Table` with no explicit columns renders no host node or layout space.
+
+Fragment and text roots produce a Vue development warning, and `v-show` has no effect. Comment roots ignore `v-show` without a warning. `Static` remains the explicit history-boundary exception.
 
 `Static` is the only export on that subpath, and it is deliberately absent from the package root. It has no collection API — use ordinary Vue iteration with stable keys. Each instance commits its output once and then releases its subtree; effective Fullscreen rejects `Static`.
 

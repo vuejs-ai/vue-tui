@@ -48,12 +48,13 @@ For a production build, `vueTui()` uses the same top-level `input` and supplies 
 
 - Target Node 22.
 - Keep Node built-in modules external.
+- Set `NODE_ENV` at build time and preserve other `process.env` values for runtime.
 - Create `dist/main.mjs` as one ESM file.
 - Disable module preload, public directory copies, and code splitting.
 
 The plugin sets a field only when the application has not set it. For example, an application can set only `build.rolldownOptions.output.entryFileNames` and keep all other defaults.
 
-An embedded application does not use this plugin. Its host keeps its compiler, build, entry, and process lifecycle.
+An embedded application keeps its host compiler, build, entry, and process lifecycle without this plugin.
 
 ## License
 
