@@ -17,7 +17,6 @@ Build with components, develop with HMR, test with confidence.
 - **Flexbox layout** — powered by Yoga, the same engine behind React Native
 - **Dev toolkit** _(experimental)_ — **HMR** in the terminal via the `@vue-tui/vite` plugin (`pnpm dev`)
 - **Input and focus primitives** — normalized text, paste, and key facts with managed terminal ownership, plus explicit unique focus handles that compose with input subscriptions
-- **Small public foundation** — renderer-owned facts stay public only when application code cannot derive them safely
 - **Testing harness** — out-of-the-box component-level terminal testing — render, simulate input, assert frames
 
 <p align="center">
