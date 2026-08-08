@@ -1,10 +1,10 @@
 # basic-template
 
-A minimal standalone vue-tui app written with Vue SFC `<template>` syntax. It is the canonical reference for using one Vite config for development and production while keeping `@vue-tui/vite` limited to development HMR.
+This example is a small standalone vue-tui application that uses Vue SFC `<template>` syntax. It uses one Vite config for development and production. `@vue-tui/vite` affects only development.
 
 ## Setup
 
-`unplugin-vue/vite` compiles the SFC in both modes. Vite's top-level `input` is the one application entry: `vueTui()` reads it to start the in-terminal development server, and the application-owned Vite build uses it to produce the self-contained Node bundle. This is a regular Vue client build targeting Node, not a Vue SSR build.
+`unplugin-vue/vite` compiles the SFC during development and production. Vite's top-level `input` defines the application entry. `vueTui()` starts this entry during development. Vite uses the same entry for the production build. The build creates one Node file that runs without `node_modules`. The Vue compiler creates client render functions instead of SSR render functions.
 
 ```ts
 // vite.config.ts
@@ -37,7 +37,7 @@ export default defineConfig({
 
 ## Running it with Vite+
 
-From the repository root:
+Run these commands from the repository root:
 
 ```bash
 vp run @vue-tui/example-basic-template#dev      # terminal dev server with HMR
@@ -45,4 +45,4 @@ vp run @vue-tui/example-basic-template#build    # produce dist/main.mjs with Vit
 vp run @vue-tui/example-basic-template#preview  # rebuild, then run the production bundle
 ```
 
-From this directory, the equivalent commands are `vp run dev`, `vp run build`, and `vp run preview`.
+From this directory, run `vp run dev`, `vp run build`, or `vp run preview`.

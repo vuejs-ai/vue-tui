@@ -1,6 +1,6 @@
 # @vue-tui/vite
 
-Vite plugin for [vue-tui](https://github.com/vuejs-ai/vue-tui): an in-process terminal dev server with HMR, for Vue apps that render to the terminal via `@vue-tui/runtime`.
+`@vue-tui/vite` starts a development server for Vue applications that use `@vue-tui/runtime`. The server runs in the application process and provides HMR in the terminal.
 
 ## Install
 
@@ -11,7 +11,7 @@ npm install -D @vue-tui/vite unplugin-vue vite
 
 ## Usage
 
-`vueTui()` adds the terminal dev server (HMR). Bring your own compiler alongside it: `unplugin-vue/vite` for SFCs, or `@vitejs/plugin-vue-jsx` for JSX. The SFC compiler's default `ssr: false` setting emits the client render functions required by the terminal renderer even though Vite evaluates the app through its SSR module runner.
+`vueTui()` starts the development server. Use `unplugin-vue/vite` to compile SFCs. Use `@vitejs/plugin-vue-jsx` to compile JSX. The SFC compiler creates client render functions for Vue by default. During development, Vite evaluates application modules with its SSR module runner.
 
 ```ts
 // vite.config.ts
@@ -27,11 +27,11 @@ export default defineConfig({
 });
 ```
 
-- `vite` (or `vp run dev` through a package script) — boots the app in-process through Vite's SSR module runner and renders it to the terminal, with state-preserving HMR.
+Run `vite` directly, or run the package script with `vp run dev`. Both commands start the application and enable HMR without resetting application state.
 
-`vueTui()` reads Vite's top-level `input`; it does not have a separate entry option. The dev server defaults to `src/main.ts` when `input` is omitted, but a standalone build should declare it explicitly so Vite does not look for an HTML entry. A TUI process has one app entry, so `vueTui()` rejects a multi-entry `input` during development.
+`vueTui()` uses Vite's top-level `input`. It has no separate entry option. If the config does not set `input`, the development server uses `src/main.ts`. A standalone application must set `input`. Otherwise, Vite searches for an HTML entry during the production build. `vueTui()` supports one application entry and reports an error if `input` contains multiple entries.
 
-For a JSX/TSX entry, install `@vitejs/plugin-vue-jsx` and point Vite at the `.tsx` file.
+For JSX or TSX, install `@vitejs/plugin-vue-jsx`. Set `input` to the `.tsx` file.
 
 ```ts
 import vueJsx from "@vitejs/plugin-vue-jsx";
@@ -44,11 +44,11 @@ export default defineConfig({
 });
 ```
 
-The same compiler works for development and production. Although the bundle runs in Node, vue-tui is a Vue client renderer rather than a server renderer, so the standalone config uses a regular Vite application build with Rolldown's Node platform instead of `build.ssr`. See the [JSX example](https://github.com/vuejs-ai/vue-tui/tree/main/examples/basic-jsx).
+Use the same JSX compiler during development and production. Configure Rolldown for Node. Do not set `build.ssr`. See the [JSX example](https://github.com/vuejs-ai/vue-tui/tree/main/examples/basic-jsx).
 
 ## Production build
 
-`vueTui()` is development-only and does not touch production builds. A standalone TUI application can use the same top-level `input` in an application-owned Vite build; see the [starter](https://github.com/vuejs-ai/vue-tui/tree/main/templates/vite) for the complete single-file Node setup. An application embedding `@vue-tui/runtime` does not need this plugin at all—its host compiler, bundler, and process lifecycle remain in charge.
+`vueTui()` affects only development. It does not change production builds. A standalone application uses Vite and the same top-level `input` for its production build. The [starter](https://github.com/vuejs-ai/vue-tui/tree/main/templates/vite) shows the complete config. `vite build` creates one Node file that runs without `node_modules`. An embedded application uses its existing compiler, build, entry, and process lifecycle without this plugin.
 
 ## License
 
