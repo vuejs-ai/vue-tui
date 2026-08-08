@@ -1,10 +1,10 @@
 # basic-template
 
-A minimal vue-tui app written with Vue SFC `<template>` syntax. It is the canonical reference for wiring up the `@vue-tui/vite` development plugin and the separate production build.
+A minimal standalone vue-tui app written with Vue SFC `<template>` syntax. It is the canonical reference for using one Vite config for development and production while keeping `@vue-tui/vite` limited to development HMR.
 
 ## Setup
 
-Development uses `unplugin-vue/vite`: its default client output is required by the terminal renderer even though `vueTui()` evaluates the app through Vite's SSR module runner.
+`unplugin-vue/vite` compiles the SFC in both modes. `vueTui()` adds the in-terminal development server, while the application-owned `build` and `ssr` options produce the self-contained Node bundle without plugin-specific production behavior.
 
 ```ts
 // vite.config.ts
@@ -12,12 +12,23 @@ import { defineConfig } from "vite";
 import vue from "unplugin-vue/vite";
 import { vueTui } from "@vue-tui/vite";
 
-export default defineConfig({
-  plugins: [vue(), vueTui()],
-});
-```
+const input = "src/main.ts";
 
-Production is intentionally separate: `tsdown.config.ts` uses `unplugin-vue/rolldown` to bundle the app into the self-contained Node entry `dist/main.mjs`. `vueTui()` is dev-only, and `vite build` is not used for the Node application.
+export default defineConfig(({ command }) => ({
+  input,
+  plugins: [vue(), vueTui({ entry: input })],
+  build: {
+    ssr: input,
+    target: "node22",
+    modulePreload: false,
+    copyPublicDir: false,
+    rolldownOptions: {
+      output: { format: "esm", entryFileNames: "main.mjs", codeSplitting: false },
+    },
+  },
+  ssr: command === "build" ? { noExternal: true } : undefined,
+}));
+```
 
 ## Running it with Vite+
 
@@ -25,7 +36,7 @@ From the repository root:
 
 ```bash
 vp run @vue-tui/example-basic-template#dev      # terminal dev server with HMR
-vp run @vue-tui/example-basic-template#build    # produce dist/main.mjs with tsdown
+vp run @vue-tui/example-basic-template#build    # produce dist/main.mjs with Vite
 vp run @vue-tui/example-basic-template#preview  # rebuild, then run the production bundle
 ```
 

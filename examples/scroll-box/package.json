@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "vite",
     "check:type": "vue-tsc --noEmit",
-    "build": "tsdown",
-    "preview": "tsdown && node dist/main.mjs"
+    "build": "vite build",
+    "preview": "pnpm run build && node dist/main.mjs"
   },
   "dependencies": {
     "@vue-tui/components": "workspace:*",
@@ -17,7 +17,6 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "@vue-tui/vite": "workspace:*",
-    "tsdown": "catalog:",
     "unplugin-vue": "catalog:",
     "vite": "catalog:",
     "vue-tsc": "catalog:"

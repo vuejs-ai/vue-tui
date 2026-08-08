@@ -35,7 +35,7 @@
     "@vitejs/plugin-vue-jsx": "5.1.5",
     "@vue-tui/runtime": "0.3.0",
     "unplugin-vue": "7.2.0",
-    "vite": "8.1.0"
+    "vite": "8.2.1"
   },
   "peerDependenciesMeta": {
     "@vitejs/plugin-vue-jsx": {

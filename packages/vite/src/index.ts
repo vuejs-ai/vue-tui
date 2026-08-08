@@ -11,10 +11,9 @@ export interface VueTuiOptions {
 }
 
 export function vueTui(options: VueTuiOptions = {}): Plugin[] {
-  // vueTui() is a DEV-only toolkit: an in-terminal dev server with HMR. It does NOT touch the
-  // production build — `vite build` is browser-first and the wrong tool for a Node program. Bundle
-  // the app into a self-contained Node file with tsdown + unplugin-vue instead (see the
-  // templates/vite and examples/*/tsdown.config.ts).
+  // vueTui() is a dev-only toolkit: an in-terminal dev server with HMR. Production builds belong
+  // to the application or its host, so @vue-tui/runtime can be embedded without this plugin. The
+  // standalone starter uses ordinary Vite app configuration for both its entry and Node bundle.
   //
   // Bring your own compiler alongside vueTui() — `[vueSfc(), vueTui()]` from
   // unplugin-vue/vite for SFCs, or `[vueJsx(), vueTui()]` from

@@ -7,6 +7,11 @@ This project adheres to [Semantic Versioning](https://semver.org/). While on
 
 ## Unreleased
 
+### Changed
+
+- **Vite-only application builds** — the standalone starter and examples now declare their entry with Vite 8.2's top-level `input` and reuse it for the production Node build, while `vueTui()` remains development-only and embedded Runtime applications keep ownership of their host build.
+- **Vite compatibility** — the exact tested Vite pin moves from 8.1.0 to 8.2.1.
+
 ## 0.3.0 - 2026-08-02
 
 Measured against the published `0.2.0`.

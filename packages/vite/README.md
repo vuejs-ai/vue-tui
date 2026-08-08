@@ -19,8 +19,11 @@ import { defineConfig } from "vite";
 import vue from "unplugin-vue/vite";
 import { vueTui } from "@vue-tui/vite";
 
+const input = "src/main.ts";
+
 export default defineConfig({
-  plugins: [vue(), vueTui()],
+  input,
+  plugins: [vue(), vueTui({ entry: input })],
 });
 ```
 
@@ -36,40 +39,24 @@ vueTui({
 
 `entry` accepts a path relative to the Vite root (with or without a leading `/`) or an existing absolute filesystem path.
 
-For a JSX/TSX entry, install `@vitejs/plugin-vue-jsx`, use it for development, and point `entry` at the `.tsx` file. Production JSX builds use `unplugin-vue-jsx/rolldown` in the separate `tsdown` config.
+For a JSX/TSX entry, install `@vitejs/plugin-vue-jsx`, use it for development, and point both Vite and `vueTui()` at the `.tsx` file.
 
 ```ts
 import vueJsx from "@vitejs/plugin-vue-jsx";
 
+const input = "src/main.tsx";
+
 export default defineConfig({
-  plugins: [vueJsx(), vueTui({ entry: "/src/main.tsx" })],
+  input,
+  plugins: [vueJsx(), vueTui({ entry: input })],
 });
 ```
+
+For a standalone JSX production build, select `unplugin-vue-jsx/vite` in the config's build branch so the Node build still emits client render functions. See the [JSX example](https://github.com/vuejs-ai/vue-tui/tree/main/examples/basic-jsx); embedded applications keep their existing JSX compiler.
 
 ## Production build
 
-`vueTui()` is **dev only** — it does not touch the production build. `vite build` is browser-first and the wrong tool for a Node program, so build with [`tsdown`](https://tsdown.dev) instead: it bundles the whole app into one self-contained Node file that runs with no `node_modules` present.
-
-```ts
-// tsdown.config.ts
-import { defineConfig } from "tsdown";
-import Vue from "unplugin-vue/rolldown"; // or unplugin-vue-jsx/rolldown for a .tsx entry
-
-export default defineConfig({
-  entry: ["src/main.ts"],
-  platform: "node", // keep Node builtins external; real createRequire for CJS deps
-  format: "esm",
-  deps: { alwaysBundle: [/./], onlyBundle: false }, // inline every dep into the one file
-  plugins: [Vue()],
-});
-```
-
-```sh
-npm install -D tsdown unplugin-vue
-tsdown # → dist/main.mjs, self-contained
-```
-
-See the [starter](https://github.com/vuejs-ai/vue-tui/tree/main/templates/vite) and this repo's `examples/` for complete setups.
+`vueTui()` is development-only and does not touch production builds. A standalone TUI application can use the same Vite config to build its Node entry; see the [starter](https://github.com/vuejs-ai/vue-tui/tree/main/templates/vite) for the complete single-file setup. An application embedding `@vue-tui/runtime` does not need this plugin at all—its host compiler, bundler, and process lifecycle remain in charge.
 
 ## License
 

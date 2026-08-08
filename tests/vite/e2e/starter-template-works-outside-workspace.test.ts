@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { basename, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "vite-plus/test";
@@ -112,6 +112,13 @@ test("the starter manifest matches the branch-local Vite contract", () => {
 
   expect(viteConfig).toContain('from "unplugin-vue/vite"');
   expect(viteConfig).not.toContain('from "@vitejs/plugin-vue"');
+  expect(viteConfig).toContain('const input = "src/main.ts"');
+  expect(viteConfig).toContain("  input,");
+  expect(viteConfig).toContain("vueTui({ entry: input })");
+  expect(viteConfig).toContain("ssr: input");
+  expect(viteConfig).toContain("codeSplitting: false");
+  expect(existsSync(`${templateRoot}/tsdown.config.ts`)).toBe(false);
+  expect(templateManifest.devDependencies).not.toHaveProperty("tsdown");
 
   for (const [field, name, localManifest] of [
     ["dependencies", "@vue-tui/runtime", runtimeManifest],
@@ -246,6 +253,7 @@ test("the starter installs and works outside the workspace", { timeout: 300_000 
     runPnpm(scratch.root, "run", "type-check");
     runPnpm(scratch.root, "run", "build");
     expect(existsSync(scratch.file("dist/main.mjs"))).toBe(true);
+    expect(readdirSync(scratch.file("dist")).sort()).toEqual(["main.mjs"]);
     const installedViteBin = resolveViteBin(scratch.file("package.json"));
     expect(relative(realpathSync(scratch.root), realpathSync(installedViteBin)).split(sep)[0]).toBe(
       "node_modules",

@@ -11,13 +11,12 @@ const require = createRequire(import.meta.url);
 const repoRoot = url.fileURLToPath(new URL("../../../../../", import.meta.url));
 export const exampleDir = (name: string): string => path.join(repoRoot, "examples", name);
 
-// Resolve an example's local tsdown CLI the same way — production builds go through tsdown (a
-// self-contained Node bundle), not `vite build`.
-export const tsdownBin = (cwd: string): string => {
-  const pkgPath = require.resolve("tsdown/package.json", { paths: [cwd] });
+// Resolve the example's local Vite CLI instead of relying on a workspace-global executable.
+export const viteBin = (cwd: string): string => {
+  const pkgPath = require.resolve("vite/package.json", { paths: [cwd] });
   const pkg = require(pkgPath) as { bin?: string | Record<string, string> };
-  const rel = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.tsdown;
-  if (!rel) throw new Error(`could not locate tsdown's CLI bin from ${pkgPath}`);
+  const rel = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.vite;
+  if (!rel) throw new Error(`could not locate Vite's CLI bin from ${pkgPath}`);
   return path.join(path.dirname(pkgPath), rel);
 };
 

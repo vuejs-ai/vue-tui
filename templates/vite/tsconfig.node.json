@@ -1,6 +1,6 @@
 {
   "extends": "@tsconfig/node22/tsconfig.json",
-  "include": ["vite.config.*", "tsdown.config.*"],
+  "include": ["vite.config.*"],
   "compilerOptions": {
     // vite.config.ts is bundled by Vite, so use bundler module resolution.
     "module": "preserve",

@@ -4,9 +4,9 @@ How a source edit reaches a running terminal application, which component owns w
 
 How these claims are proven is in [testing the dev server and HMR](./hmr-testing.md).
 
-Not covered here: production builds (applications bundle with `tsdown`; the plugin is dev-only), the rendering-mode semantics of a reload (see [Development-reload modifier](./rendering-mode-matrix.md#development-reload-modifier)), and layer/dependency direction (see [package layers](./package-layers.md)).
+Not covered here: production builds (standalone applications use their own Vite Node-build configuration, embedded applications use their host build, and the plugin stays dev-only), the rendering-mode semantics of a reload (see [Development-reload modifier](./rendering-mode-matrix.md#development-reload-modifier)), and layer/dependency direction (see [package layers](./package-layers.md)).
 
-Version-pinned claims below were checked against Vite 8.1.0, `@vitejs/plugin-vue-jsx` 5.1.5, and `unplugin-vue` 7.2.0. These are exact compatibility pins, not minimums; re-check the compiler configuration and HMR seams before any of them move.
+Version-pinned claims below were checked against Vite 8.2.1, `@vitejs/plugin-vue-jsx` 5.1.5, and `unplugin-vue` 7.2.0. These are exact compatibility pins, not minimums; re-check the compiler configuration and HMR seams before any of them move.
 
 ## The constraint everything follows from
 
@@ -133,7 +133,7 @@ Rejected. The stated benefits did not hold: Vite's module runner already clears 
 
 ### A custom Vite environment with `consumer: "client"`
 
-Rejected. Vite 8.1.0 binds three separate concerns to that one switch. The `resolve.builtins` escape is gated on `consumer === "server"`, so `node:fs` becomes a browser stub with no configuration able to prevent it; the same switch injects Vite's browser HMR client into the module graph, so `import.meta.hot` binds to a websocket transport while the plugin forwards events on the runner's channel. A probe that only inspected generated text looked like it worked; running the suite showed the application does not boot.
+Rejected. Vite 8.2.1 binds three separate concerns to that one switch. The `resolve.builtins` escape is gated on `consumer === "server"`, so `node:fs` becomes a browser stub with no configuration able to prevent it; the same switch injects Vite's browser HMR client into the module graph, so `import.meta.hot` binds to a websocket transport while the plugin forwards events on the runner's channel. A probe that only inspected generated text looked like it worked; running the suite showed the application does not boot.
 
 ### A table of view positions surviving a replacement
 

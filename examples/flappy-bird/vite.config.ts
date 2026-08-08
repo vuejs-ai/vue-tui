@@ -1,12 +1,13 @@
 import { defineConfig } from "vite";
 import vue from "unplugin-vue/vite";
-import { vueTui } from "@vue-tui/vite";
 
 const input = "src/main.ts";
 
+// This application intentionally builds without @vue-tui/vite. The plugin is optional dev/HMR
+// tooling; Vite and the Vue compiler are sufficient for a production Node bundle.
 export default defineConfig(({ command }) => ({
   input,
-  plugins: [vue(), vueTui({ entry: input })],
+  plugins: [vue()],
   build: {
     ssr: input,
     target: "node22",
@@ -15,7 +16,7 @@ export default defineConfig(({ command }) => ({
     rolldownOptions: {
       output: {
         format: "esm",
-        entryFileNames: "main.mjs",
+        entryFileNames: "game.mjs",
         codeSplitting: false,
       },
     },

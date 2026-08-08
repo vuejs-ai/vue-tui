@@ -125,7 +125,7 @@ Wait for a named event, never for a wall-clock budget to expire. A timeout is a 
 
 **An absence claim needs an end point, and that end point costs wall-clock.** "A template edit caused no full reload" cannot be settled without deciding when to stop waiting. `quiesce(ms)` resolves when no event has arrived for `ms`, and the absence is asserted against the log at that moment. The wall-clock element cannot be removed; what matters is that it is one explicit helper rather than a budget buried in every wait.
 
-**Two synthetic writes to the same path need the watcher boundary.** The pinned Vite 8.1 watcher suppresses a second `change` for the same path inside 50ms even when the contents differ. A test can receive the first error and repair its fixture faster than that, leaving the valid file on disk with no second HMR update. Failure/recovery tests therefore call `settleViteWatchChange()` after observing the failure and before writing the recovery. Its 100ms quiescence is a test-input precondition, not evidence that an update succeeded; the subsequent named event and frame remain the proof.
+**Two synthetic writes to the same path need the watcher boundary.** The pinned Vite 8.2 watcher suppresses a second `change` for the same path inside 50ms even when the contents differ. A test can receive the first error and repair its fixture faster than that, leaving the valid file on disk with no second HMR update. Failure/recovery tests therefore call `settleViteWatchChange()` after observing the failure and before writing the recovery. Its 100ms quiescence is a test-input precondition, not evidence that an update succeeded; the subsequent named event and frame remain the proof.
 
 ## Which channel proves which claim
 

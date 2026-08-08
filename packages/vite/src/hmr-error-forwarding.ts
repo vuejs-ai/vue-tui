@@ -117,7 +117,7 @@ export class VueTuiViteHmrCompatibilityError extends Error {
 
   constructor() {
     super(
-      "[vue-tui] Vite 8.1.0 HMR compatibility check failed: runner.hmrClient.fetchUpdate and hotModulesMap are required. Install the exact supported Vite version instead of continuing with a partial HMR guard.",
+      "[vue-tui] Vite 8.2.1 HMR compatibility check failed: runner.hmrClient.fetchUpdate and hotModulesMap are required. Install the exact supported Vite version instead of continuing with a partial HMR guard.",
     );
   }
 }
