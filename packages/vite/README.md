@@ -25,7 +25,7 @@ export default defineConfig({
 });
 ```
 
-Run `vite` directly, or run the package script with `vp run dev`. Both commands start the application and enable HMR without resetting application state.
+Run `vite` directly, or run the package script with `vp run dev`. Both commands start the application and enable HMR. An SFC template edit keeps component state. An SFC script edit or a JSX edit recreates the affected component instance.
 
 `vueTui()` uses Vite's top-level `input`. It has no separate entry option. If the config does not set `input`, the development server uses `src/main.ts`. A standalone application must set `input`. Otherwise, Vite searches for an HTML entry during the production build. `vueTui()` supports one application entry and reports an error if `input` contains multiple entries.
 

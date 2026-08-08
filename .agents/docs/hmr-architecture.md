@@ -59,6 +59,10 @@ Three things, each replaced on a different cadence. Which layer something belong
 
 There is deliberately no fourth layer carrying view positions across replacements.
 
+**Ruling:** vue-tui follows Vue's HMR state semantics. An SFC template edit keeps the affected component instance and its local state. An SFC script edit recreates the affected component instance, and every JSX edit does the same because JSX has no separate template-only update. This is not a vue-tui gap; revisit it only if Vue changes these semantics or vue-tui diverges from them. [VOUCHED @hyfdev 2026-08-09]
+
+The ruling matches the official Vue tooling and runtime: the [SFC plugin](https://github.com/vitejs/vite-plugin-vue/blob/b5702344785833a5a3129571db63b2f537b85aba/packages/plugin-vue/src/main.ts) uses `rerender` only for a template-only change and otherwise uses `reload`; the [JSX plugin](https://github.com/vitejs/vite-plugin-vue/blob/b5702344785833a5a3129571db63b2f537b85aba/packages/plugin-vue-jsx/src/index.ts) always uses `reload`; and Vue's [HMR runtime](https://github.com/vuejs/core/blob/8f89be88faaadd9e1025f7dc1430b3854341fb72/packages/runtime-core/src/hmr.ts) implements `reload` by replacing the component instance. The local SFC paths are enforced by [`template-edit-keeps-instance.test.ts`](../../tests/vite/e2e/template-edit-keeps-instance.test.ts) and [`script-edit-recreates-instance.test.ts`](../../tests/vite/e2e/script-edit-recreates-instance.test.ts).
+
 The bottom row is a property of the authoring format, not of this design. A `.tsx` file has no separate template block to diff, so `@vitejs/plugin-vue-jsx` only ever emits `__VUE_HMR_RUNTIME__.reload` — **every JSX edit is a script edit and recreates the instance**. Measured: a counter goes 3 → 0 on a JSX edit and 3 → 5 on an SFC template edit. The same is true on the web; it is not a gap to close.
 
 ## Update flow
