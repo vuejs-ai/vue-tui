@@ -7,9 +7,9 @@ import { hmrErrorForwardingPlugin } from "./hmr-error-forwarding.ts";
 import { createWatcherUpdateTracker } from "./watcher-update.ts";
 
 export function vueTui(): Plugin[] {
-  if (arguments.length > 0) {
+  if (arguments.length > 1 || arguments[0] !== undefined) {
     const error = new Error(
-      "[vue-tui] vueTui() no longer accepts an entry option. Set Vite's top-level input instead.",
+      "[vue-tui] vueTui() no longer accepts options. Set Vite's top-level input instead.",
     );
     error.name = "VueTuiInvalidOptionsError";
     throw error;

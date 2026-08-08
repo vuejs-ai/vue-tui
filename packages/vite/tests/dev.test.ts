@@ -43,8 +43,18 @@ test("rejects the removed entry option instead of silently ignoring it in JavaSc
   expect(() => Reflect.apply(vueTui, undefined, [{ entry: "src/legacy.ts" }])).toThrowError(
     expect.objectContaining({
       name: "VueTuiInvalidOptionsError",
-      message: expect.stringContaining("top-level input"),
+      message: expect.stringContaining("no longer accepts options"),
     }),
+  );
+});
+
+test("treats an explicit undefined argument like an omitted argument", () => {
+  expect(() => Reflect.apply(vueTui, undefined, [undefined])).not.toThrow();
+});
+
+test("rejects multiple arguments when the first argument is undefined", () => {
+  expect(() => Reflect.apply(vueTui, undefined, [undefined, undefined])).toThrowError(
+    expect.objectContaining({ name: "VueTuiInvalidOptionsError" }),
   );
 });
 
