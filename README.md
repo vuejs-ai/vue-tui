@@ -191,6 +191,7 @@ Reusable behavior composed only from public Runtime APIs. [Package guide](./pack
 
 | Composable                                                                                                  | Returns     | Description                                                                                           |
 | ----------------------------------------------------------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------- |
+| [`useTextInput(handler, opts?)`](./packages/use/src/input/use-text-input.ts)                                | —           | Text events only; enhanced input preserves its optional logical-key information                       |
 | [`useInputWhileMounted(handler, opts?)`](./packages/use/src/input-while-mounted/use-input-while-mounted.ts) | `targetRef` | Global input, optionally filtered by `opts.type`, while one directly referenced vnode remains mounted |
 
 ### Components
@@ -199,7 +200,9 @@ Reusable behavior composed only from public Runtime APIs. [Package guide](./pack
 | ---------------------------------------------------------------------------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------- |
 | [`<UseInputWhileMounted type?>`](./packages/use/src/input-while-mounted/use-input-while-mounted.vue) | `@vue-tui/use/components` | Emits global input, optionally filtered by `type`, while mounted and renders only its default slot |
 
-Both forms retain `useInput()`'s broadcast semantics. A literal `type` narrows the handler or emitted event to the selected `text`, `key`, or `paste` member. The bound ref is a lifecycle signal rather than a focus or routing target; `v-show` remains mounted and active.
+`useTextInput()` delivers the exact frozen `text` member of `TuiInputEvent`; it excludes key-only and paste events without discarding an enhanced text event's optional `key`. It accepts the same live handler and reactive activation forms as `useInput()`.
+
+Both `useInputWhileMounted` forms retain `useInput()`'s broadcast semantics. A literal `type` narrows the handler or emitted event to the selected `text`, `key`, or `paste` member. The bound ref is a lifecycle signal rather than a focus or routing target; `v-show` remains mounted and active.
 
 ## `@vue-tui/components`
 

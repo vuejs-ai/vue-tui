@@ -1,11 +1,37 @@
-import { shallowRef, type VNodeRef } from "vue";
+import { shallowRef, type MaybeRef, type MaybeRefOrGetter, type VNodeRef } from "vue";
+import { expectTypeOf } from "vite-plus/test";
 import { Box, Text, type TuiInputEvent } from "@vue-tui/runtime";
 import { UseInputWhileMounted, type UseInputWhileMountedProps } from "../src/components.ts";
-import { useInputWhileMounted, type InputWhileMountedTargetRef } from "../src/index.ts";
+import {
+  useInputWhileMounted,
+  type InputWhileMountedTargetRef,
+  useTextInput,
+} from "../src/index.ts";
 
 type KeyInputEvent = Extract<TuiInputEvent, { readonly type: "key" }>;
 type TextInputEvent = Extract<TuiInputEvent, { readonly type: "text" }>;
 type PasteInputEvent = Extract<TuiInputEvent, { readonly type: "paste" }>;
+
+expectTypeOf<Parameters<typeof useTextInput>[0]>().toEqualTypeOf<
+  MaybeRef<(event: TextInputEvent) => void>
+>();
+expectTypeOf<Parameters<typeof useTextInput>[1]>().toEqualTypeOf<
+  { readonly isActive?: MaybeRefOrGetter<boolean> } | undefined
+>();
+const textInputActive = shallowRef(true);
+const liveTextInputHandler = shallowRef<(event: TextInputEvent) => void>(() => undefined);
+useTextInput((event) => {
+  expectTypeOf(event).toEqualTypeOf<TextInputEvent>();
+  event.text.toUpperCase();
+  event.key?.character?.toUpperCase();
+  // @ts-expect-error The handler receives only the text event member.
+  const keyEvent: KeyInputEvent = event;
+  void keyEvent;
+});
+useTextInput(liveTextInputHandler, { isActive: textInputActive });
+useTextInput(liveTextInputHandler, { isActive: () => textInputActive.value });
+// @ts-expect-error A key-event handler cannot subscribe through useTextInput().
+useTextInput((_event: KeyInputEvent) => undefined);
 
 const targetRef = useInputWhileMounted((event) => {
   if (event.type === "key") event.key.name?.toUpperCase();
