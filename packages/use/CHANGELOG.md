@@ -8,6 +8,7 @@ This project adheres to [Semantic Versioning](https://semver.org/). While on `0.
 
 ### Added
 
+- **`useTextInput()`** — subscribes only to the exact text event member while preserving the original event and optional enhanced key information.
 - **Mounted input type selection** — `useInputWhileMounted()` accepts a static `type` option, and `<UseInputWhileMounted>` accepts a reactive `type` prop. Both filter `"text"`, `"key"`, or `"paste"` events and narrow their handler or emitted event type.
 
 ## 0.3.0 - 2026-08-02

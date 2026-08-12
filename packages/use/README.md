@@ -9,6 +9,29 @@ npm install @vue-tui/use @vue-tui/runtime
 # peer deps: @vue-tui/runtime, vue ^3.5
 ```
 
+## `useTextInput`
+
+Use `useTextInput()` when a handler only needs insertion-ready text and should not repeat a `type` check:
+
+```vue
+<script setup lang="ts">
+import { shallowRef } from "vue";
+import { useTextInput } from "@vue-tui/use";
+
+const value = shallowRef("");
+const lastInputUsedShift = shallowRef(false);
+
+useTextInput((event) => {
+  value.value += event.text;
+  lastInputUsedShift.value = event.key?.shift ?? false;
+});
+</script>
+```
+
+The handler receives the exact `"text"` member of `TuiInputEvent`. A terminal protocol that provides reliable logical-key identity leaves that information on the optional `event.key`; ordinary text can omit it. The hook passes the original frozen event object instead of creating a text-only copy.
+
+Key-only and paste events do not call the handler. The handler can be a direct function or a live Vue ref, and `isActive` accepts the same reactive sources as `useInput()`. A handler ref is read only after a matching text event arrives. The narrowed event type is inferred from the callback; `@vue-tui/use` does not export a separate text-event type.
+
 ## `useInputWhileMounted`
 
 Call the hook in a component that stays mounted, then bind the returned Vue function ref directly to the vnode whose mount lifetime should control input:
