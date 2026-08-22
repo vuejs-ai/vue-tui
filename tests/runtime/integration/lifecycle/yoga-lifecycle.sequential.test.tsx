@@ -1,11 +1,11 @@
-// Sequential: spies on the process-shared Yoga module (Node.create / free call
-// counts). Concurrent siblings that mount hosts would perturb the counts. Tests
-// are it.sequential.
+// Sequential: spies on the process-shared Yoga module (Node and Config
+// allocation/free counts). Concurrent siblings that mount hosts would perturb
+// the counts. Tests are it.sequential.
 //
 // Direct regression evidence for Runtime-owned Yoga cleanup: production ships no
-// global counters, so these tests observe the exact allocation/free seam the
-// renderer uses (Yoga.Node.create and Node.prototype.free on the runtime's own
-// yoga-layout instance) and require every allocation to be freed by teardown.
+// global counters, so these tests observe the exact Node and Config allocation/
+// free seams on the runtime's own yoga-layout instance and require every
+// allocation to be freed by teardown.
 
 import { createRequire } from "node:module";
 import { defineComponent } from "vue";
@@ -15,6 +15,10 @@ import { makeFakeStdin, makeFakeWritable } from "./test-streams.ts";
 
 interface YogaLifecycleModule {
   default: {
+    Config: {
+      create(): { free(): void };
+      prototype: { free(): void };
+    };
     Node: {
       create(): unknown;
       // Only the members these tests spy on. `setWidth` is the first prototype
@@ -35,16 +39,25 @@ function resolveRuntimeYoga(): Promise<YogaLifecycleModule> {
 
 async function spyOnYogaLifecycle(): Promise<{
   readonly balance: () => { readonly created: number; readonly freed: number };
+  readonly configBalance: () => { readonly created: number; readonly freed: number };
 }> {
   const yoga = await resolveRuntimeYoga();
   const createSpy = vi.spyOn(yoga.default.Node, "create");
   const freeSpy = vi.spyOn(yoga.default.Node.prototype, "free");
+  const configCreateSpy = vi.spyOn(yoga.default.Config, "create");
+  const configFreeSpy = vi.spyOn(yoga.default.Config.prototype, "free");
   const createdBefore = createSpy.mock.calls.length;
   const freedBefore = freeSpy.mock.calls.length;
+  const configsCreatedBefore = configCreateSpy.mock.calls.length;
+  const configsFreedBefore = configFreeSpy.mock.calls.length;
   return {
     balance: () => ({
       created: createSpy.mock.calls.length - createdBefore,
       freed: freeSpy.mock.calls.length - freedBefore,
+    }),
+    configBalance: () => ({
+      created: configCreateSpy.mock.calls.length - configsCreatedBefore,
+      freed: configFreeSpy.mock.calls.length - configsFreedBefore,
     }),
   };
 }
@@ -56,7 +69,7 @@ afterEach(() => {
 const AllocatedLeaf = defineComponent(() => () => <Text>allocated</Text>);
 
 test.sequential("repeated mount and unmount frees every Yoga allocation", async () => {
-  const { balance } = await spyOnYogaLifecycle();
+  const { balance, configBalance } = await spyOnYogaLifecycle();
   const App = defineComponent(() => () => (
     <Box>
       <Text>x</Text>
@@ -77,6 +90,9 @@ test.sequential("repeated mount and unmount frees every Yoga allocation", async 
   const { created, freed } = balance();
   expect(created).toBeGreaterThan(0);
   expect(freed).toBe(created);
+  const configs = configBalance();
+  expect(configs.created).toBeGreaterThan(0);
+  expect(configs.freed).toBe(configs.created);
 });
 
 test.sequential("a throw after Yoga attachment frees the allocation", async () => {

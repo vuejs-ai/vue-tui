@@ -7,6 +7,10 @@ This project adheres to [Semantic Versioning](https://semver.org/). While on
 
 ## Unreleased
 
+### Fixed
+
+- **Text measurement** — fractional constraints now use one conservative whole-cell budget for measurement and paint, removing the feedback layout pass and its layout-engine callback-order dependency ([#283](https://github.com/vuejs-ai/vue-tui/issues/283)).
+
 ## 0.3.0 - 2026-08-02
 
 A clean-slate reduction of the public surface. The root now exports only what

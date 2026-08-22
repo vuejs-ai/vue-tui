@@ -313,7 +313,8 @@ describe("Table", () => {
         │ buil │ Compile the   │
         │ d    │ application   │
         ├──────┼───────────────┤
-        │ test │ Run all tests │
+        │ test │ Run all       │
+        │      │ tests         │
         └──────┴───────────────┘"
       `);
     } finally {
@@ -333,8 +334,8 @@ describe("Table", () => {
         "┌───────┬───┐
         │a      │b  │
         ├───────┼───┤
-        │ABCDEFG│xyz│
-        │HIJK   │   │
+        │ABCDEFG│xy │
+        │HIJK   │z  │
         └───────┴───┘"
       `);
     } finally {
