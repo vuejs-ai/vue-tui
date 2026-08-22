@@ -1116,8 +1116,17 @@ function paintNode(
     }
     case "tui-text": {
       const layout = node.yoga.getComputedLayout();
-      const y = y0 + layout.top;
-      const h = Math.max(0, Math.floor(layout.height));
+      // Text keeps its pre-pixel-grid fractional geometry so measurement and
+      // paint can quantize the same width without a feedback layout. Terminal
+      // writes still need integral cell coordinates; floor matches the
+      // conservative start edge used for its complete-cell budget.
+      const left = Math.floor(layout.left);
+      const top = Math.floor(layout.top);
+      const y = y0 + top;
+      // This span is only an early-clip bound. Text geometry can retain a
+      // positive fractional height, so round outward here; Output remains the
+      // authority for clipping the actual rows written below.
+      const h = Math.max(0, Math.ceil(layout.height));
       // A Text entirely above or below an authoritative clip cannot affect the
       // output grid. Skip composition and write-op allocation as well. Limit
       // this to Text: a clipped Box may still contain an absolutely positioned or
@@ -1130,11 +1139,10 @@ function paintNode(
       // is resolved against this inherited bg inside applyOwnStyle
       // (`ownBackgroundColor ?? inheritedBg`, Ink Text.tsx:103-106), where it wraps
       // the node's whole children concatenation alongside its boolean styles.
-      // Wrap at the whole-cell width the Text actually owns inside its Yoga
-      // parent. Measured nodes round outward, so their computed width can be
-      // one cell wider than the rounded parent content box; measurement and
-      // paint reconcile to this same value before we get here. The width can
-      // legitimately be 0 (flexBasis=0, width=0, width="0%"). At width 0,
+      // Wrap by quantizing Text's retained pre-pixel-grid width with the same
+      // pure whole-cell rule used by measurement, clamped by the final parent
+      // content box. The width can legitimately be 0 (flexBasis=0, width=0,
+      // width="0%"). At width 0,
       // wrapText returns the leading-newline wrap "\nA" → ["", "A"], pushing
       // the glyph onto its own second row exactly as measurement reported.
       const wrapWidth = getTextTerminalCellWidth(node);
@@ -1153,7 +1161,7 @@ function paintNode(
       // pad, matching Ink (getMaxWidth=0 → no padding). Clamping to 1 here would
       // bg-pad the empty leading wrap line "" into a stray 1-cell fill that
       // collides with a row-sibling at the 0-width box origin.
-      output.write(x0 + layout.left, y0 + layout.top, wrapped);
+      output.write(x0 + left, y0 + top, wrapped);
       return;
     }
     case "tui-static": {

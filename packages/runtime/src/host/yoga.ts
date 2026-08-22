@@ -1,6 +1,7 @@
 import Yoga from "yoga-layout";
 import type {
   Node as YogaNode,
+  Config as YogaConfig,
   Align,
   FlexDirection,
   Justify,
@@ -34,23 +35,38 @@ interface TextMeasureState {
   cache?: TextMeasureRequest & {
     readonly revision: number;
     readonly wrap: TextProps["wrap"];
-    readonly terminalCellWidth: number;
     readonly result: TextMeasureResult;
-  };
-  last?: TextMeasureRequest & {
-    readonly terminalCellWidth: number;
-    readonly result: TextMeasureResult;
-  };
-  override?: TextMeasureRequest & { readonly terminalCellWidth: number };
-  checked?: TextMeasureRequest & {
-    readonly revision: number;
-    readonly measuredCellWidth: number;
-    readonly finalCellWidth: number;
-    readonly measuredHeight: number;
   };
 }
 
-const textMeasureStates = new WeakMap<TuiText, TextMeasureState>();
+let textYogaConfig: YogaConfig | undefined;
+let textYogaConfigUsers = 0;
+
+function acquireTextYogaConfig(): YogaConfig {
+  if (!textYogaConfig) {
+    const config = Yoga.Config.create();
+    try {
+      // Layout engines resolve flex constraints before their final pixel-grid
+      // projection. Keep measured Text's resolved dimensions unrounded so
+      // measurement and paint apply the same terminal-cell quantization.
+      config.setPointScaleFactor(0);
+      textYogaConfig = config;
+    } catch (error) {
+      config.free();
+      throw error;
+    }
+  }
+  textYogaConfigUsers++;
+  return textYogaConfig;
+}
+
+function releaseTextYogaConfig(): void {
+  textYogaConfigUsers--;
+  if (textYogaConfigUsers !== 0) return;
+  const config = textYogaConfig;
+  textYogaConfig = undefined;
+  config?.free();
+}
 
 // --- yoga node lifecycle seam --------------------------------------------
 
@@ -74,7 +90,17 @@ function hasYoga(node: TuiNode): node is YogaCarrier {
 }
 
 export function attachYoga(node: YogaCarrier): void {
-  node.yoga = createYogaNode();
+  if (node.type === "tui-text") {
+    const config = acquireTextYogaConfig();
+    try {
+      node.yoga = Yoga.Node.create(config);
+    } catch (error) {
+      releaseTextYogaConfig();
+      throw error;
+    }
+  } else {
+    node.yoga = createYogaNode();
+  }
   // Static nodes are painted via a separate channel (paintIsolated), so they
   // must not occupy space in the dynamic frame's yoga layout.
   if (node.type === "tui-static") {
@@ -102,7 +128,11 @@ export function attachYoga(node: YogaCarrier): void {
 }
 
 export function detachYoga(node: YogaCarrier): void {
-  freeYogaNode(node.yoga as YogaNode);
+  try {
+    freeYogaNode(node.yoga as YogaNode);
+  } finally {
+    if (node.type === "tui-text") releaseTextYogaConfig();
+  }
 }
 
 // Returns the yoga index a child should occupy when added to `parent`.
@@ -642,88 +672,79 @@ export function applyYogaProp(
 
 // --- text measure binding ------------------------------------------------
 
+function toWholeCellWidth(width: number): number {
+  if (!Number.isFinite(width) || width <= 0) return 0;
+  return Math.max(1, Math.floor(width));
+}
+
+export function getTextMeasureCellWidth(
+  naturalWidth: number,
+  availableWidth: number,
+  widthMode: MeasureMode,
+): number {
+  if (widthMode === Yoga.MEASURE_MODE_UNDEFINED || !Number.isFinite(availableWidth)) {
+    return naturalWidth;
+  }
+
+  return toWholeCellWidth(availableWidth);
+}
+
 export function bindTextMeasure(text: TuiText): void {
   const state: TextMeasureState = {};
-  textMeasureStates.set(text, state);
   text.yoga.setMeasureFunc((availableWidth, widthMode) => {
     const wrap = text.props.wrap;
+
     if (
       state.cache?.revision === text.textRevision &&
       state.cache.availableWidth === availableWidth &&
       state.cache.widthMode === widthMode &&
       state.cache.wrap === wrap
     ) {
-      state.last = {
-        availableWidth,
-        widthMode,
-        terminalCellWidth: state.cache.terminalCellWidth,
-        result: state.cache.result,
-      };
       return state.cache.result;
     }
     const raw = flattenLeaves(text);
 
-    const remember = (terminalCellWidth: number, result: TextMeasureResult): TextMeasureResult => {
+    const remember = (result: TextMeasureResult): TextMeasureResult => {
       state.cache = {
         revision: text.textRevision,
         availableWidth,
         widthMode,
         wrap,
-        terminalCellWidth,
         result,
       };
-      state.last = { availableWidth, widthMode, terminalCellWidth, result };
       return result;
     };
 
     // Empty text (no children or all-null children) — return zero dimensions
     // so yoga doesn't crash trying to measure an empty string.
     if (raw === "") {
-      return remember(0, { width: 0, height: 0 });
+      return remember({ width: 0, height: 0 });
     }
 
     const natural = measureTextNatural(raw);
 
-    const override = state.override;
-    const hasOverride =
-      override?.availableWidth === availableWidth && override.widthMode === widthMode;
-    // A measured Text node is rounded outward onto Yoga's pixel grid. Ceiling
-    // is the common whole-cell budget; after the first layout pass,
-    // reconcileTextMeasurementWidth corrects it when a fractional absolute
-    // offset makes the final node one cell wider.
-    const terminalCellWidth = hasOverride
-      ? override.terminalCellWidth
-      : widthMode === Yoga.MEASURE_MODE_UNDEFINED
-        ? natural.width
-        : Math.ceil(availableWidth);
+    // A terminal can only paint complete cells. A positive fractional
+    // constraint therefore gets the conservative whole-cell budget it already
+    // contains; a sub-cell allocation still gets one cell. This is a pure
+    // function of the measure request: final absolute offsets and callback
+    // order never feed another layout pass.
+    const terminalCellWidth = getTextMeasureCellWidth(natural.width, availableWidth, widthMode);
 
     // Text fits into container, no need to wrap.
     if (natural.width <= terminalCellWidth) {
-      return remember(terminalCellWidth, natural);
-    }
-
-    // When <Box> is shrinking child nodes, yoga asks if we can fit this text
-    // node in a sub-1px space. Return the natural size to tell yoga "no, I
-    // need my full width". This matches Ink's behavior and prevents text from
-    // wrapping to infinite height when given fractional widths.
-    if (!hasOverride && natural.width >= 1 && availableWidth > 0 && availableWidth < 1) {
-      // This intentionally ignores the fractional constraint for Yoga's first
-      // pass, so record the natural width actually used. If the parent later
-      // owns a real terminal cell, reconciliation can distinguish this
-      // provisional one-line answer from wrapping at that final cell width.
-      return remember(natural.width, natural);
+      return remember(natural);
     }
 
     const wrapped = wrapText(raw, terminalCellWidth, wrap ?? "wrap");
     const result = measureTextNatural(wrapped.join("\n"));
-    return remember(terminalCellWidth, result);
+    return remember(result);
   });
 }
 
-/** Final whole-cell width available to an outer Text inside its Yoga parent. */
+/** Whole-cell width shared by measurement and paint. */
 export function getTextTerminalCellWidth(text: TuiText): number {
   const layout = text.yoga.getComputedLayout();
-  let width = Math.max(0, Math.floor(layout.width));
+  let width = toWholeCellWidth(layout.width);
   // Use Yoga parentage, not host-tree parentage: Static temporarily moves its
   // children into an isolated layout tree without changing DOM-style links.
   const parent = text.yoga.getParent();
@@ -732,59 +753,14 @@ export function getTextTerminalCellWidth(text: TuiText): number {
   const parentLayout = parent.getComputedLayout();
   const rightInset =
     parent.getComputedBorder(Yoga.EDGE_RIGHT) + parent.getComputedPadding(Yoga.EDGE_RIGHT);
-  const parentRemainder = Math.max(0, Math.floor(parentLayout.width - layout.left - rightInset));
+  // Paint places Text at floor(left), so clamp against the parent's integral
+  // right content edge in that same coordinate system. Flooring the fractional
+  // remainder as one value would lose the last valid cell for a Text spanning
+  // 9.23..10: it paints from cell 9 and owns that cell.
+  const parentRight = Math.floor(parentLayout.width - rightInset);
+  const parentRemainder = Math.max(0, parentRight - Math.floor(layout.left));
   width = Math.min(width, parentRemainder);
   return width;
-}
-
-/**
- * Reconcile Yoga's location-dependent pixel-grid rounding with terminal text
- * wrapping. A measure callback knows the fractional width constraint but not
- * the node's eventual absolute offset; after layout, the integer paint width is
- * authoritative. Return whether another Yoga pass is required.
- */
-export function reconcileTextMeasurementWidth(node: TuiText): boolean {
-  const state = textMeasureStates.get(node);
-  const last = state?.last;
-  if (!state || !last || node.yoga.getDisplay() === Yoga.DISPLAY_NONE) return false;
-
-  const terminalCellWidth = getTextTerminalCellWidth(node);
-  const checked = state.checked;
-  if (
-    checked?.revision === node.textRevision &&
-    checked.availableWidth === last.availableWidth &&
-    checked.widthMode === last.widthMode &&
-    checked.measuredCellWidth === last.terminalCellWidth &&
-    checked.finalCellWidth === terminalCellWidth &&
-    checked.measuredHeight === last.result.height
-  ) {
-    return false;
-  }
-  state.checked = {
-    revision: node.textRevision,
-    availableWidth: last.availableWidth,
-    widthMode: last.widthMode,
-    measuredCellWidth: last.terminalCellWidth,
-    finalCellWidth: terminalCellWidth,
-    measuredHeight: last.result.height,
-  };
-  if (terminalCellWidth === last.terminalCellWidth) return false;
-
-  const raw = flattenLeaves(node);
-  const painted =
-    raw === ""
-      ? { width: 0, height: 0 }
-      : measureTextNatural(wrapText(raw, terminalCellWidth, node.props.wrap ?? "wrap").join("\n"));
-  if (painted.height === last.result.height) return false;
-
-  state.override = {
-    availableWidth: last.availableWidth,
-    widthMode: last.widthMode,
-    terminalCellWidth,
-  };
-  state.cache = undefined;
-  node.yoga.markDirty();
-  return true;
 }
 
 export function markTextDirty(text: TuiText): void {

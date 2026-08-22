@@ -1,4 +1,4 @@
-import { defineComponent } from "vue";
+import { defineComponent, nextTick, shallowRef } from "vue";
 import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text } from "@vue-tui/runtime";
@@ -85,6 +85,72 @@ test("wraps against the rounded parent content width without a stale row", async
   expect(lastFrame()).toBe("buil\nd\nafter");
 });
 
+test("keeps the conservative text budget when a fractional origin rounds outward", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="column">
+        <Box width={10}>
+          <Box flexBasis="2.5%" flexShrink={0} />
+          <Box flexBasis="42.5%" flexDirection="column" flexShrink={0}>
+            <Text>build</Text>
+          </Box>
+        </Box>
+        <Text>after</Text>
+      </Box>
+    )),
+    { columns: 20 },
+  );
+  expect(lastFrame()).toBe("buil\nd\nafter");
+});
+
+test("keeps the measured budget when only a paint prop changes", async () => {
+  const bold = shallowRef(false);
+  const result = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="column">
+        <Box width={10}>
+          <Box flexBasis="2.5%" flexShrink={0} />
+          <Box flexBasis="42.5%" flexDirection="column" flexShrink={0}>
+            <Text bold={bold.value}>build</Text>
+          </Box>
+        </Box>
+        <Text>after</Text>
+      </Box>
+    )),
+    { columns: 20, color: "truecolor" },
+  );
+
+  expect(result.lastFrame()).toBe("buil\nd\nafter");
+
+  bold.value = true;
+  await nextTick();
+  await result.waitUntilRenderFlush();
+
+  const updatedFrame = result.lastFrame();
+  expect(updatedFrame).toContain("\x1b[1m");
+  expect(stripAnsi(updatedFrame)).toBe("buil\nd\nafter");
+});
+
+test("restores the measured budget when Yoga reuses a cached layout", async () => {
+  const result = await render(
+    defineComponent(() => () => (
+      <Box flexDirection="column">
+        <Text>abcdefghi</Text>
+        <Text>after</Text>
+      </Box>
+    )),
+    { columns: 5 },
+  );
+
+  expect(result.lastFrame()).toBe("abcde\nfghi\nafter");
+
+  await result.terminal.resize(4, 100);
+  expect(result.lastFrame()).toBe("abcd\nefgh\ni\nafte\nr");
+
+  await result.terminal.resize(5, 100);
+  expect(result.lastFrame()).toBe("abcde\nfghi\nafter");
+});
+
 test("keeps measurement and paint in sync from a fractional horizontal offset", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
@@ -101,6 +167,35 @@ test("keeps measurement and paint in sync from a fractional horizontal offset", 
     { columns: 20 },
   );
   expect(lastFrame()).toBe(" 1234\n 56\nafter");
+});
+
+test("paints a directly offset measured Text at an integral terminal cell", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box width={10}>
+        <Box flexBasis="2.5%" flexShrink={0} />
+        <Text>build</Text>
+      </Box>
+    )),
+    { columns: 20 },
+  );
+
+  expect(lastFrame()).toBe("build");
+});
+
+test("keeps text visible inside a positive fractional row allocation", async () => {
+  const { lastFrame } = await render(
+    defineComponent(() => () => (
+      <Box height={1} flexDirection="column">
+        <Box flexBasis="50%" flexShrink={0}>
+          <Text>X</Text>
+        </Box>
+      </Box>
+    )),
+    { columns: 10, rows: 10 },
+  );
+
+  expect(lastFrame()).toBe("X");
 });
 
 test("does not clip text that rounds wider than an overflow-hidden parent", async () => {

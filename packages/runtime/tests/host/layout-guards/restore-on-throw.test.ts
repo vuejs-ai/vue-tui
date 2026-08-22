@@ -5,7 +5,7 @@ import {
   calculateLayoutWithContentGuards,
   isContentLayoutGuarded,
 } from "../../../src/host/layout-guards.ts";
-import { attachYoga } from "../../../src/host/yoga.ts";
+import { attachYoga, detachYoga } from "../../../src/host/yoga.ts";
 import { createBox, createRoot, createText } from "../../../src/host/nodes.ts";
 import type { AppContext } from "../../../src/context.ts";
 
@@ -98,27 +98,33 @@ test("a throw on a later layout iteration restores nodes hidden by an earlier it
     return realCalculateLayout(...(args as Parameters<typeof realCalculateLayout>));
   };
 
-  // Sanity: nothing is hidden before layout runs.
-  expect(hiddenChild.yoga.getDisplay()).not.toBe(DISPLAY_NONE);
+  try {
+    // Sanity: nothing is hidden before layout runs.
+    expect(hiddenChild.yoga.getDisplay()).not.toBe(DISPLAY_NONE);
 
-  // The original measure error must propagate UNCHANGED.
-  expect(() => calculateLayoutWithContentGuards(root, 80, 24, DIRECTION_LTR as never)).toThrow(
-    boom,
-  );
+    // The original measure error must propagate UNCHANGED.
+    expect(() => calculateLayoutWithContentGuards(root, 80, 24, DIRECTION_LTR as never)).toThrow(
+      boom,
+    );
 
-  // The throw genuinely happened on a LATER outer iteration (the loop ran
-  // calculateLayout at least twice), not within the first pass.
-  expect(outerLayoutCalls).toBeGreaterThanOrEqual(2);
-  expect(measureCalls).toBeGreaterThanOrEqual(2);
-  // ...and the iteration-1 hide had already landed on the live tree when the
-  // throwing pass started — so there was genuinely something to leak.
-  expect(hiddenWasAlreadyHiddenWhenThrowingPassBegan).toBe(true);
+    // The throw genuinely happened on a LATER outer iteration (the loop ran
+    // calculateLayout at least twice), not within the first pass.
+    expect(outerLayoutCalls).toBeGreaterThanOrEqual(2);
+    expect(measureCalls).toBeGreaterThanOrEqual(2);
+    // ...and the iteration-1 hide had already landed on the live tree when the
+    // throwing pass started — so there was genuinely something to leak.
+    expect(hiddenWasAlreadyHiddenWhenThrowingPassBegan).toBe(true);
 
-  // The bug: the node hidden in iteration 1 must NOT be left DISPLAY_NONE on the
-  // live yoga tree. Before the fix this fails (it stays hidden forever); after
-  // the fix the catch restores it before re-throwing.
-  expect(hiddenChild.yoga.getDisplay()).not.toBe(DISPLAY_NONE);
-  expect(isContentLayoutGuarded(hiddenChild)).toBe(false);
+    // The bug: the node hidden in iteration 1 must NOT be left DISPLAY_NONE on the
+    // live yoga tree. Before the fix this fails (it stays hidden forever); after
+    // the fix the catch restores it before re-throwing.
+    expect(hiddenChild.yoga.getDisplay()).not.toBe(DISPLAY_NONE);
+    expect(isContentLayoutGuarded(hiddenChild)).toBe(false);
+  } finally {
+    root.yoga.removeChild(measuredText.yoga);
+    detachYoga(measuredText);
+    root.yoga.freeRecursive();
+  }
 });
 
 test("temporary content guards are observable only until the layout restore", () => {
