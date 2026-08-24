@@ -9,6 +9,27 @@ npm install @vue-tui/use @vue-tui/runtime
 # peer deps: @vue-tui/runtime, vue ^3.5
 ```
 
+## `useKeyInput`
+
+Use `useKeyInput()` when a handler only needs key-only input such as arrows, function keys, or modified shortcuts:
+
+```vue
+<script setup lang="ts">
+import { shallowRef } from "vue";
+import { useKeyInput } from "@vue-tui/use";
+
+const lastKey = shallowRef<string>();
+
+useKeyInput((event) => {
+  lastKey.value = event.key.name ?? event.key.character;
+});
+</script>
+```
+
+The handler receives the exact `"key"` member of `TuiInputEvent` and the original frozen event object. Text events are excluded even when an enhanced terminal attaches reliable logical-key information to them; paste events are excluded as well.
+
+The handler can be a direct function or a live Vue ref, and `isActive` accepts the same reactive sources as `useInput()`. A handler ref is read only after a matching key event arrives. The narrowed event type is inferred from the callback; `@vue-tui/use` does not export a separate key-event type.
+
 ## `useTextInput`
 
 Use `useTextInput()` when a handler only needs insertion-ready text and should not repeat a `type` check:
