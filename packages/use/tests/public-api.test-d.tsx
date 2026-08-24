@@ -5,12 +5,33 @@ import { UseInputWhileMounted, type UseInputWhileMountedProps } from "../src/com
 import {
   useInputWhileMounted,
   type InputWhileMountedTargetRef,
+  useKeyInput,
   useTextInput,
 } from "../src/index.ts";
 
 type KeyInputEvent = Extract<TuiInputEvent, { readonly type: "key" }>;
 type TextInputEvent = Extract<TuiInputEvent, { readonly type: "text" }>;
 type PasteInputEvent = Extract<TuiInputEvent, { readonly type: "paste" }>;
+
+expectTypeOf<Parameters<typeof useKeyInput>[0]>().toEqualTypeOf<
+  MaybeRef<(event: KeyInputEvent) => void>
+>();
+expectTypeOf<Parameters<typeof useKeyInput>[1]>().toEqualTypeOf<
+  { readonly isActive?: MaybeRefOrGetter<boolean> } | undefined
+>();
+const keyInputActive = shallowRef(true);
+const liveKeyInputHandler = shallowRef<(event: KeyInputEvent) => void>(() => undefined);
+useKeyInput((event) => {
+  expectTypeOf(event).toEqualTypeOf<KeyInputEvent>();
+  event.key.name?.toUpperCase();
+  event.key.character?.toUpperCase();
+  // @ts-expect-error A key event has no text value.
+  event.text.toUpperCase();
+});
+useKeyInput(liveKeyInputHandler, { isActive: keyInputActive });
+useKeyInput(liveKeyInputHandler, { isActive: () => keyInputActive.value });
+// @ts-expect-error A text-event handler cannot subscribe through useKeyInput().
+useKeyInput((_event: TextInputEvent) => undefined);
 
 expectTypeOf<Parameters<typeof useTextInput>[0]>().toEqualTypeOf<
   MaybeRef<(event: TextInputEvent) => void>
