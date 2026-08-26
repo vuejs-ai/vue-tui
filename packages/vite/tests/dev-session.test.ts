@@ -89,9 +89,9 @@ test("releasing a session that is not the owner leaves the owner alone", async (
   reset("owner");
 });
 
-// Two servers waiting on the same outgoing owner both used to succeed: each woke
-// on the release, each found the slot empty, and the last write won while the
-// first went on believing it owned the terminal.
+// Two servers waiting on the same outgoing owner must not both become the owner:
+// each wakes on the release and finds the slot empty, so without the claim queue
+// the last write wins while the first goes on believing it owns the terminal.
 test("only one of two waiting claims becomes the owner", async () => {
   await claimDevSession("outgoing-contended");
 

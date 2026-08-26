@@ -33,7 +33,7 @@ type HotUpdateHook = {
   order: string;
   handler(options: { type: string; file: string; timestamp: number }): void;
 };
-const injectPrefix = `import ${JSON.stringify(DEV_VMOD_ID)};\n`;
+const injectPrefix = `import ${JSON.stringify(DEV_VMOD_ID)};`;
 
 test("the package root exposes only the Vite plugin", () => {
   expect(Object.keys(publicApi).sort()).toEqual(["default", "vueTui"]);
@@ -453,6 +453,18 @@ test("injects the dev module into a CUSTOM entry matched by absolute path", () =
   const transform = transformOf({ input: "/src/app.ts" });
   const out = transform("export const x = 1;", "/Users/proj/src/app.ts");
   expect(out?.code).toBe(`${injectPrefix}export const x = 1;`);
+});
+
+// The injected import shares line 1 with the entry's own first statement, so an
+// error thrown while evaluating the entry keeps the line number the author wrote.
+test("injecting the dev connector keeps every entry line at its original number", () => {
+  const transform = transformOf({ input: "/src/app.ts" });
+  const source = ["const a = 1;", "const b = 2;", "throw new Error('boom');"].join("\n");
+
+  const lines = transform(source, "/Users/proj/src/app.ts")?.code.split("\n") ?? [];
+
+  expect(lines).toHaveLength(3);
+  expect(lines[2]).toBe("throw new Error('boom');");
 });
 
 test("injects the dev module into the DEFAULT entry", () => {

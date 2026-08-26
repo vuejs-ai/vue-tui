@@ -119,7 +119,11 @@ export function devPlugin(opts: {
       // absolute module path EXACTLY against the entry resolved from the Vite root —
       // never a suffix match that could hit an unrelated file ending in the same path.
       if (moduleIdMatchesConfiguredEntry(id, resolvedEntryAbs, preserveSymlinks)) {
-        return { code: `import ${JSON.stringify(DEV_VMOD_ID)};\n` + code, map: null };
+        // No newline after the injected import: it shares line 1 with the entry's own
+        // first statement so every line keeps the number the author wrote, which is what
+        // `map: null` ("this transform did not move code") promises the rest of the
+        // toolchain. Only line 1's columns shift, by the length of this prefix.
+        return { code: `import ${JSON.stringify(DEV_VMOD_ID)};` + code, map: null };
       }
     },
     hotUpdate: {
