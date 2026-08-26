@@ -87,6 +87,74 @@ describe("public input projection", () => {
     expect(event?.type === "key" ? Object.isFrozen(event.key) : false).toBe(true);
   });
 
+  // A legacy terminal encodes Alt as an ESC prefix and Ctrl by clearing the upper
+  // bits, for every key on the board — not only letters and digits.
+  test.each([
+    ["Alt+.", "\x1b.", ".", { alt: true }],
+    ["Alt+/", "\x1b/", "/", { alt: true }],
+    ["Alt+-", "\x1b-", "-", { alt: true }],
+    ["Alt+;", "\x1b;", ";", { alt: true }],
+    ["Ctrl+backslash", "\x1c", "\\", { ctrl: true }],
+    ["Ctrl+]", "\x1d", "]", { ctrl: true }],
+    ["Ctrl+^", "\x1e", "^", { ctrl: true }],
+    ["Ctrl+_", "\x1f", "_", { ctrl: true }],
+  ] as const)(
+    "projects the %s chord a legacy terminal sends",
+    (_label, sequence, character, mods) => {
+      expect(projectPublicInputEvent(fact(sequence))).toEqual({
+        type: "key",
+        key: { character, ...noModifiers, ...mods },
+      });
+    },
+  );
+
+  // Alt is a prefix, not a different key: the byte after ESC keeps the identity it
+  // has on its own, so a control byte stays a Ctrl chord and a named key stays named.
+  test.each([
+    ["Alt+Ctrl+C", "\x1b\x03", { character: "c", alt: true, ctrl: true }],
+    ["Alt+Ctrl+backslash", "\x1b\x1c", { character: "\\", alt: true, ctrl: true }],
+  ] as const)("projects %s as a chord, not a raw control byte", (_label, sequence, key) => {
+    expect(projectPublicInputEvent(fact(sequence))).toEqual({
+      type: "key",
+      key: { ...noModifiers, ...key },
+    });
+  });
+
+  test.each([
+    ["Alt+Tab", "\x1b\t", "tab"],
+    ["Alt+Enter", "\x1b\n", "enter"],
+  ] as const)("keeps %s a named key", (_label, sequence, name) => {
+    expect(projectPublicInputEvent(fact(sequence))).toEqual({
+      type: "key",
+      key: { name, ...noModifiers, alt: true },
+    });
+  });
+
+  test("delivers no key for a flushed CSI introducer", () => {
+    // A slow link can split an arrow key across the escape flush, leaving the bare
+    // introducer. No terminal sends `ESC [` as a key, so it resolves to nothing
+    // rather than inventing a keypress the user did not make.
+    expect(normalizeInputEvent("\x1b[")).toBeUndefined();
+  });
+
+  test("delivers the Alt chord a flushed SS3 introducer is indistinguishable from", () => {
+    // `ESC O` is both Alt+Shift+O and a truncated SS3. A keyboard produces the
+    // chord; the truncation is a slow-link accident, so the chord is what is
+    // delivered rather than nothing.
+    expect(projectPublicInputEvent(fact("\x1bO"))).toEqual({
+      type: "key",
+      key: { character: "o", ...noModifiers, alt: true, shift: true },
+    });
+  });
+
+  test("projects the Ctrl chord a terminal sends as NUL", () => {
+    // Ctrl+Space and Ctrl+@ both arrive as 0x00, which is Ctrl with 0x40.
+    expect(projectPublicInputEvent(fact("\x00"))).toEqual({
+      type: "key",
+      key: { character: "@", ...noModifiers, ctrl: true },
+    });
+  });
+
   test("projects logical shortcut characters and all six command modifiers", () => {
     expect(projectPublicInputEvent(fact("\x01"))).toEqual({
       type: "key",
