@@ -15,7 +15,6 @@ import Yoga from "yoga-layout";
 import type {
   TuiNode,
   TuiRoot,
-  TuiContainer,
   TextProps,
   TuiText,
   TuiVirtualText,
@@ -393,8 +392,11 @@ class Output {
         line = sanitizeAnsi(line, { singleLine: true, terminalStyle: this.terminalStyle });
         const currentLine = output[y + offsetY];
 
-        // Line can be missing if text is taller than pre-initialized output
+        // A row of this write can fall outside the pre-initialized output, either
+        // below it or above row 0 for a negative origin. Advance with the write so
+        // the remaining rows keep their own offsets and still land on the surface.
         if (!currentLine) {
+          offsetY++;
           continue;
         }
 
@@ -890,9 +892,11 @@ export interface PaintOptions {
   /** Private frame-local geometry collector. Publication happens after paint succeeds. */
   readonly geometry?: InternalGeometryPaintFrame;
   /**
-   * Clip paint and semantic geometry to an app-owned viewport. Fullscreen
-   * rendering uses this to keep off-screen layout from wrapping or scrolling
-   * the alternate screen and to exclude cells outside the addressable surface.
+   * Clip painted cells to an app-owned viewport. Fullscreen rendering uses this
+   * to keep off-screen layout from wrapping or scrolling the alternate screen
+   * and to exclude cells outside the addressable surface. Semantic geometry is
+   * recorded from accepted layout and is not clipped: a Box lying entirely
+   * outside the viewport still reports its rectangle to `useBoxMetrics()`.
    */
   readonly viewport?: { readonly width: number; readonly height: number };
 }
@@ -1076,12 +1080,13 @@ function paintNode(
     }
     case "tui-text": {
       const layout = node.yoga.getComputedLayout();
-      // Text keeps its pre-pixel-grid fractional geometry so measurement and
-      // paint can quantize the same width without a feedback layout. Terminal
-      // writes still need integral cell coordinates; floor matches the
-      // conservative start edge used for its complete-cell budget.
-      const left = Math.floor(layout.left);
-      const top = Math.floor(layout.top);
+      // Text keeps its pre-pixel-grid fractional geometry so measurement and paint
+      // can quantize the same width without a feedback layout. Its origin still has
+      // to land on the grid line the layout engine handed its siblings, which it
+      // reaches by rounding — flooring a half-cell offset starts the write one cell
+      // inside the preceding Box and overwrites that Box's last painted column or row.
+      const left = Math.round(layout.left);
+      const top = Math.round(layout.top);
       const y = y0 + top;
       // This span is only an early-clip bound. Text geometry can retain a
       // positive fractional height, so round outward here; Output remains the
@@ -1138,25 +1143,14 @@ function paintNode(
   }
 }
 
-export function paintContainer(container: TuiContainer, terminalStyle: TerminalStyle): string {
-  // Used by Static channel and tests.
-  if (container.type === "root") return paint(container, { terminalStyle });
-  throw new Error("paintContainer currently only supports root");
-}
-
 export function paintIsolated(
   nodes: TuiNode[],
   width: number,
   terminalStyle: TerminalStyle,
-  staticNode?: import("../host/nodes.ts").TuiStatic,
+  staticNode: import("../host/nodes.ts").TuiStatic,
 ): string {
-  // No staticNode: legacy/simple path — a single iso root sized to the available
-  // columns, with the nodes parented directly under it.
-  if (!staticNode) {
-    return paintUnderRoot(nodes, width, terminalStyle, (iso) => iso.yoga.setWidth(width));
-  }
-
-  // Static history uses an absolute, auto-width box under a terminal-width root:
+  // Static history is laid out as a two-level structure: an absolute,
+  // auto-width box under a terminal-width root:
   //
   //   root (yogaNode.setWidth(terminalWidth))  ← containing block for TEXT wrap
   //     └─ staticNode (position:absolute, auto width, flexDirection:column…)
@@ -1278,66 +1272,6 @@ export function paintIsolated(
     // Tear down the temporary two-level iso tree.
     iso.yoga.removeChild(staticBox.yoga);
     detachYoga(staticBox);
-    iso.children.length = 0;
-    detachYoga(iso);
-  }
-}
-
-// Paint `nodes` under a single fresh iso root configured by `configureRoot`.
-// Children's yoga parentage is temporarily moved under the root for layout and
-// restored afterward; DOM .parent pointers are never touched. Used by the
-// staticNode-less fallback of paintIsolated.
-function paintUnderRoot(
-  nodes: TuiNode[],
-  width: number,
-  terminalStyle: TerminalStyle,
-  configureRoot: (iso: import("../host/nodes.ts").TuiRoot) => void,
-): string {
-  const iso = createIsoRoot({} as never);
-  attachYoga(iso);
-  configureRoot(iso);
-
-  const yogaAdded: Array<{
-    yoga: import("yoga-layout").Node;
-    origParent: import("yoga-layout").Node | null;
-    origIndex: number;
-  }> = [];
-
-  let yIdx = 0;
-  for (let i = 0; i < nodes.length; i++) {
-    const node = nodes[i]!;
-    iso.children.push(node);
-
-    const yoga = attachedYogaNode(node);
-    if (!yoga) continue;
-
-    const yParent = yoga.getParent();
-    const origIndex = yParent ? findYogaIndex(yParent, yoga) : 0;
-    if (yParent) {
-      yParent.removeChild(yoga);
-    }
-    iso.yoga.insertChild(yoga, yIdx);
-    yogaAdded.push({ yoga, origParent: yParent, origIndex });
-    yIdx++;
-  }
-
-  let restoreLayoutGuards = () => {};
-  try {
-    restoreLayoutGuards = calculateLayoutWithContentGuards(
-      iso,
-      width,
-      undefined,
-      Yoga.DIRECTION_LTR,
-    );
-    return paint(iso, { terminalStyle });
-  } finally {
-    restoreLayoutGuards();
-    for (const { yoga, origParent, origIndex } of yogaAdded.slice().reverse()) {
-      iso.yoga.removeChild(yoga);
-      if (origParent) {
-        origParent.insertChild(yoga, origIndex);
-      }
-    }
     iso.children.length = 0;
     detachYoga(iso);
   }
