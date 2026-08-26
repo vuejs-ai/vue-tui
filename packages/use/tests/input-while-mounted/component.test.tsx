@@ -75,3 +75,51 @@ test("UseInputWhileMounted filters input through its reactive type prop", async 
     result.dispose();
   }
 });
+
+test("UseInputWhileMounted rejects a type outside the input event union", async () => {
+  const App = defineComponent(() => () => (
+    <UseInputWhileMounted type={"mouse" as never}>
+      <Text>unreachable</Text>
+    </UseInputWhileMounted>
+  ));
+
+  await expect(render(App)).rejects.toThrow(
+    '<UseInputWhileMounted> type must be "text", "key", or "paste"',
+  );
+});
+
+test("UseInputWhileMounted fails on a type that becomes unusable after mount", async () => {
+  const type = shallowRef<TuiInputEvent["type"]>("text");
+  const received: string[] = [];
+  const App = defineComponent(() => () => (
+    <UseInputWhileMounted
+      type={type.value}
+      onInput={(event) => {
+        if (event.type === "text") received.push(event.text);
+      }}
+    >
+      <Text>wrapped</Text>
+    </UseInputWhileMounted>
+  ));
+  const result = await render(App);
+
+  try {
+    await result.stdin.write("a");
+    expect(received).toEqual(["a"]);
+
+    // The prop is reactive, so setup cannot catch this. Dropping every later event
+    // instead would leave the app holding raw mode with nothing being delivered.
+    type.value = "mouse" as TuiInputEvent["type"];
+    await nextTick();
+
+    await expect(result.stdin.write("b")).rejects.toThrow(
+      '<UseInputWhileMounted> type must be "text", "key", or "paste"',
+    );
+    await expect(result.waitUntilExit()).rejects.toThrow(
+      '<UseInputWhileMounted> type must be "text", "key", or "paste"',
+    );
+    expect(received).toEqual(["a"]);
+  } finally {
+    result.dispose();
+  }
+});
