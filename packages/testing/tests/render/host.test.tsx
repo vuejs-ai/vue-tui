@@ -435,3 +435,19 @@ test.each([
   await expect(render(App, options as never)).rejects.toThrow(message);
   expect(setupRan).toBe(false);
 });
+
+test("a Fullscreen request on stream stdout mounts the document host", async () => {
+  const App = defineComponent(() => {
+    const { width, height } = useLayoutSize();
+    return () => <Text>{`doc:${width.value}x${String(height.value)}`}</Text>;
+  });
+
+  const result = await render(App, { mode: "fullscreen", stdout: "stream", columns: 30, rows: 8 });
+
+  try {
+    expect(result.lastFrame()).toBe("doc:80x24");
+    expect((await result.screen()).activeBuffer).toBe("normal");
+  } finally {
+    result.dispose();
+  }
+});
