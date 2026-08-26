@@ -717,6 +717,33 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let teardownStarted = false;
   let teardownCompleted = false;
   let teardownExecutionStarted = false;
+  // A write refused by the output gate (suspension, or teardown past the console
+  // sink) must not hand back an already-settled `ready`: the patched console pump
+  // retries the moment it settles, so a resolved promise makes it re-enter through
+  // the microtask queue without end and starve timers, I/O, and signal delivery.
+  // One deferred per closed gate, settled when suspension ends or teardown finishes.
+  let blockedOutputGate: { readonly promise: Promise<void>; readonly resolve: () => void } | null =
+    null;
+
+  function gateBlockedWrite(): Extract<CoordinatedWriteResult, { status: "blocked" }> {
+    if (teardownCompleted) {
+      return Object.freeze({ status: "blocked", ready: Promise.resolve() });
+    }
+    if (!blockedOutputGate) {
+      let resolve!: () => void;
+      const promise = new Promise<void>((settle) => {
+        resolve = settle;
+      });
+      blockedOutputGate = { promise, resolve };
+    }
+    return Object.freeze({ status: "blocked", ready: blockedOutputGate.promise });
+  }
+
+  function reopenBlockedOutputGate(): void {
+    const gate = blockedOutputGate;
+    blockedOutputGate = null;
+    gate?.resolve();
+  }
   let lifecycleTransactionDepth = 0;
   let pendingTeardown = false;
   let pendingTeardownSync = false;
@@ -998,6 +1025,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       closeOutstandingSynchronizedOutput();
       mountedSynchronizedOutputReleases = null;
       teardownCompleted = true;
+      reopenBlockedOutputGate();
       reportTerminalReleased();
       if (abandonExitSettlement) {
         // A Vite full reload replaces this application without representing an
@@ -1301,6 +1329,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     if (!vueMountStarted) return;
     vueMountStarted = false;
     consoleTeardownWritesAllowed = mountedConsoleSink !== null;
+    // Teardown parks on the console sink's idle barrier, so a record refused
+    // during the window before this point must be retried now. Leaving it on a
+    // gate that only opens at teardown completion deadlocks the two.
+    reopenBlockedOutputGate();
     try {
       originalUnmount();
     } catch (error) {
@@ -1313,6 +1345,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     vueCleanupCompleted = true;
     vueMountStarted = false;
     consoleTeardownWritesAllowed = mountedConsoleSink !== null;
+    // Same retry as in runMountedVueCleanup: teardown is parked on the console
+    // sink's idle barrier.
+    reopenBlockedOutputGate();
     // Vue-side rollback goes exactly as far as Vue itself does, and no further.
     // If app.mount() returned and a later Runtime step failed, the ordinary Vue
     // unmount tears the tree down. If Vue's own mount threw, Vue never took
@@ -1904,6 +1939,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
             runLifecycleTransaction(() => {
               terminalSuspended = false;
+              reopenBlockedOutputGate();
               suspendedFullscreenSurface = false;
               suspendedInlineSurface = false;
               resizeHandledGeneration = Math.max(
@@ -1981,7 +2017,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // only the current output gate; lifecycle availability must still be
         // re-checked by a caller that chooses to retry.
         if ((teardownStarted && !consoleTeardownWritesAllowed) || terminalSuspended) {
-          return blockedCoordinatedWrite();
+          return gateBlockedWrite();
         }
         const rollback = createOutputStateRollback();
         return runOutputTransaction(
@@ -2015,7 +2051,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
       function writeToStderr(data: string): CoordinatedWriteResult {
         if ((teardownStarted && !consoleTeardownWritesAllowed) || terminalSuspended) {
-          return blockedCoordinatedWrite();
+          return gateBlockedWrite();
         }
         const rollback = createOutputStateRollback();
         return runOutputTransaction(
