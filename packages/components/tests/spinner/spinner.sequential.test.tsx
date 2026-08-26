@@ -91,4 +91,17 @@ describe.sequential("Spinner component-local timer", () => {
     expect(timer.clearIntervalSpy).toHaveBeenCalledTimes(2);
     expect(timer.setIntervalSpy).toHaveBeenCalledTimes(2);
   });
+
+  test("an unusable interval starts no timer at all", async () => {
+    const timer = installTimerHarness();
+
+    await expect(render(Spinner, { props: { interval: 0 } })).rejects.toThrow(
+      '<Spinner> prop "interval"',
+    );
+
+    // Setup aborts before the watcher runs, so nothing was ever scheduled. A timer
+    // here would keep firing for the lifetime of the process.
+    expect(timer.delays).toEqual([]);
+    expect(timer.setIntervalSpy).not.toHaveBeenCalled();
+  });
 });

@@ -14,7 +14,12 @@ A pure composition of `<Text>` plus a component-local timer — no Runtime hook 
   Everything else — including the full `cli-spinners` set — is reachable via the escape hatch.
 - **Escape hatch:** `frames: string[]` + `interval?: number` override `type`. A `cli-spinners`
   entry (`{ interval, frames }`) can be spread in verbatim. Empty `frames` and an unknown `type`
-  both fall back to `dots`; `interval` overrides in either mode.
+  both fall back to `dots`; `interval` overrides in either mode. `interval` must be an integer
+  between 1 and 2147483647 milliseconds; anything else throws a `TypeError`, like `<Newline>`'s
+  `count`. Spinner resolves the props once in its setup body so that throw lands before the frame
+  timer is created: Vue's production error handling reports and continues, and a rejected value
+  reaching `setInterval` would run a timer at roughly one millisecond for the life of the
+  application.
 - **No `cli-spinners` dependency.** This is a first-party catalog decision under the inclusion bar,
   recorded here. `ink-spinner` and `cli-spinners` are third-party packages, so their catalogs do
   not define the first-party vue-tui component or preset set.
