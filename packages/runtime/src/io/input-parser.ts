@@ -141,6 +141,19 @@ const parseEscapeSequence = (input: string, escapeIndex: number): ParsedEscapeSe
       return "pending";
     }
 
+    // No terminal encodes Alt onto a bracketed-paste marker, so a marker after an
+    // ESC means a standalone Escape key came first. Hand back that lone Escape and
+    // let the marker keep its own framing instead of consuming both as one chord.
+    // The end marker reaches here whenever a paste start was discarded — resetting
+    // pending framing drops a partial one — and folding it into a double-ESC
+    // sequence would swallow the Escape keypress with it.
+    if (
+      input.startsWith(pasteStart, escapeIndex + 1) ||
+      input.startsWith(pasteEnd, escapeIndex + 1)
+    ) {
+      return { sequence: escape, nextIndex: escapeIndex + 1 };
+    }
+
     const doubleEscapeSequence = parseControlSequence(input, escapeIndex, 2);
     if (doubleEscapeSequence === "pending") {
       return "pending";

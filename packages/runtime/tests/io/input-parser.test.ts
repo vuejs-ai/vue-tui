@@ -332,6 +332,36 @@ describe("input-parser", () => {
     expect(parseChunks(["\x1b[200~hello world\x1b[201~"])).toEqual([{ paste: "hello world" }]);
   });
 
+  test("keeps an Escape that precedes an orphaned paste end", () => {
+    // A discarded paste start leaves its end marker to arrive on its own. Folding
+    // it into a double-Escape sequence produces one event that normalizes to no
+    // key at all, losing the Escape press with it.
+    expect(parseChunks(["\x1b\x1b[201~"])).toEqual(["\x1b", "\x1b[201~"]);
+  });
+
+  test("keeps a paste intact when a standalone Escape immediately precedes it", () => {
+    // A terminal never encodes Alt with a bracketed-paste marker, so `\x1b\x1b[200~`
+    // is an Escape key followed by a paste, not one Alt chord.
+    expect(parseChunks(["\x1b\x1b[200~hello world\x1b[201~"])).toEqual([
+      "\x1b",
+      { paste: "hello world" },
+    ]);
+  });
+
+  test("keeps the Escape and the paste apart when the marker spans two reads", () => {
+    // A terminal writes the six-byte marker in one go, but the read boundary is not a
+    // protocol boundary. As long as the rest arrives before the ambiguity timer, the
+    // leading Escape and the paste framing both survive the split.
+    expect(parseChunks(["\x1b\x1b[", "200~hello world\x1b[201~"])).toEqual([
+      "\x1b",
+      { paste: "hello world" },
+    ]);
+    expect(parseChunks(["\x1b\x1b", "[200~hello world\x1b[201~"])).toEqual([
+      "\x1b",
+      { paste: "hello world" },
+    ]);
+  });
+
   test("emits paste event for multiline bracketed paste", () => {
     expect(parseChunks(["\x1b[200~line1\nline2\x1b[201~"])).toEqual([{ paste: "line1\nline2" }]);
   });
