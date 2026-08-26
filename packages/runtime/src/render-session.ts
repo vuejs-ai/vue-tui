@@ -108,6 +108,10 @@ function positiveCellCount(value: unknown): number | null {
 }
 
 export function needsTerminalSizeProbe(stdout: LiveHostInput["stdout"]): boolean {
+  // Only a TTY can use the answer. A non-TTY stdout always resolves to the fixed
+  // modeled document below, and probing it would open `/dev/tty` and spawn `tput`
+  // on the ordinary piped, redirected, and CI paths for a value nothing reads.
+  if (!stdout.isTTY) return false;
   return positiveCellCount(stdout.columns) === null || positiveCellCount(stdout.rows) === null;
 }
 
