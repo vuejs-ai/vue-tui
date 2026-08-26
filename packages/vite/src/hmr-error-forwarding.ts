@@ -9,7 +9,7 @@ import {
 import { ESModulesEvaluator, type HMRLogger, type ModuleEvaluator } from "vite/module-runner";
 import { invalidateDevHmrUpdate } from "@vue-tui/runtime/internal/devtools";
 import { stripModuleIdQuery } from "./entry-match.ts";
-import { createWatcherUpdateTracker, type WatcherUpdateTracker } from "./watcher-update.ts";
+import type { WatcherUpdateTracker } from "./watcher-update.ts";
 
 const SOURCE_MODULE_RE = /\.(?:[cm]?[jt]sx?|vue)$/;
 
@@ -73,7 +73,9 @@ export interface HmrErrorForwardingDependencies {
 
 interface HmrErrorForwardingOptions {
   readonly dependencies?: HmrErrorForwardingDependencies;
-  readonly watcherUpdates?: WatcherUpdateTracker;
+  // Shared with devPlugin, which writes it in the `pre` hot-update hook; see the
+  // note on that option.
+  readonly watcherUpdates: WatcherUpdateTracker;
 }
 
 const defaultDependencies: HmrErrorForwardingDependencies = {
@@ -124,8 +126,8 @@ export class VueTuiViteHmrCompatibilityError extends Error {
 
 export function hmrErrorForwardingPlugin({
   dependencies = defaultDependencies,
-  watcherUpdates = createWatcherUpdateTracker(),
-}: HmrErrorForwardingOptions = {}): Plugin {
+  watcherUpdates,
+}: HmrErrorForwardingOptions): Plugin {
   let installedFactory: SsrEnvironmentFactory | undefined;
   const createdEnvironments = new WeakSet<object>();
   // Set by the environment factory below. The hot-update preflight and the
@@ -467,8 +469,8 @@ export function hmrErrorForwardingPlugin({
     },
     // The second check below covers a window the earlier ones cannot see:
     // `server.environments.ssr` is writable, and an assignment from another
-    // plugin's configureServer takes effect — measured, not inferred. No test
-    // covers that window, so this guard is the only thing that catches it.
+    // plugin's configureServer takes effect. No test covers that window, so this
+    // guard is the only thing that catches it.
     configureServer(server) {
       if (
         installedFactory !== undefined &&

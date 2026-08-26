@@ -17,6 +17,7 @@ import {
   hmrErrorForwardingPlugin,
   type HmrErrorForwardingDependencies,
 } from "../../src/hmr-error-forwarding.ts";
+import { createWatcherUpdateTracker } from "../../src/watcher-update.ts";
 
 type ConfigEnvironmentHandler = (
   name: string,
@@ -121,7 +122,10 @@ export function createObserverHarness(harnessOptions: { withoutFetchUpdate?: boo
       createRunnableDevEnvironment as HmrErrorForwardingDependencies["createRunnableDevEnvironment"],
     createEvaluator: () => baseEvaluator,
   };
-  const plugin = hmrErrorForwardingPlugin({ dependencies });
+  const plugin = hmrErrorForwardingPlugin({
+    dependencies,
+    watcherUpdates: createWatcherUpdateTracker(),
+  });
   const resolved = configEnvironmentHook(plugin)("ssr", {
     dev: {},
   } as EnvironmentOptions);

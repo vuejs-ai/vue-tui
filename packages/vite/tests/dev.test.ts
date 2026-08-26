@@ -9,6 +9,7 @@ import { vueTui } from "../src/index.ts";
 import * as publicApi from "../src/index.ts";
 import { DEV_VMOD_ID } from "../src/dev-vmod.ts";
 import { moduleIdMatchesConfiguredEntry, resolveConfiguredEntry } from "../src/entry-match.ts";
+import { createWatcherUpdateTracker } from "../src/watcher-update.ts";
 
 // Vite's transform hook receives an ABSOLUTE fs path. After configResolved, the
 // configured entry is resolved against the Vite root and matched exactly — never
@@ -33,7 +34,50 @@ type HotUpdateHook = {
   order: string;
   handler(options: { type: string; file: string; timestamp: number }): void;
 };
+/** The `post` hook is async and answers with the modules it keeps. */
+type FilteringHotUpdateHook = {
+  order: string;
+  handler(options: {
+    type: string;
+    file: string;
+    timestamp: number;
+  }): Promise<unknown[] | undefined>;
+};
 const injectPrefix = `import ${JSON.stringify(DEV_VMOD_ID)};`;
+
+test("the dev and error-forwarding plugins observe one watcher-update tracker", async () => {
+  // devPlugin classifies a watcher task in the `pre` hot-update hook and
+  // hmrErrorForwardingPlugin reads that decision in the `post` one. Given two
+  // watcher tasks for one unchanged file, the second is a duplicate, and the second
+  // plugin only knows that if both were handed the same tracker.
+  const root = mkdtempSync(join(tmpdir(), "vue-tui-tracker-"));
+  const file = join(root, "app.vue");
+  writeFileSync(file, "<template><div /></template>");
+
+  try {
+    const plugins = vueTui() as unknown as { name: string }[];
+    const dev = plugins.find((plugin) => plugin.name === "vue-tui:dev") as unknown as
+      | { hotUpdate?: HotUpdateHook }
+      | undefined;
+    const forwarding = plugins.find(
+      (plugin) => plugin.name === "vue-tui:hmr-error-forwarding",
+    ) as unknown as { hotUpdate?: FilteringHotUpdateHook } | undefined;
+    if (!dev?.hotUpdate || !forwarding?.hotUpdate) {
+      throw new Error("expected both plugins to register a hotUpdate hook");
+    }
+
+    dev.hotUpdate.handler.call({}, { type: "update", file, timestamp: 1 });
+    dev.hotUpdate.handler.call({}, { type: "update", file, timestamp: 2 });
+    const suppressed = await forwarding.hotUpdate.handler.call(
+      { environment: { name: "client" } },
+      { type: "update", file, timestamp: 2 },
+    );
+
+    expect(suppressed).toEqual([]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("the package root exposes only the Vite plugin", () => {
   expect(Object.keys(publicApi).sort()).toEqual(["default", "vueTui"]);
@@ -61,6 +105,7 @@ test("rejects multiple arguments when the first argument is undefined", () => {
 test("keeps Vite error diagnostics enabled for failures without an HMR payload", () => {
   const plugin = devPlugin({
     session: { sessionId: "test-session" },
+    watcherUpdates: createWatcherUpdateTracker(),
   }) as unknown as { config: ConfigFn };
 
   expect(plugin.config()).toEqual({
@@ -87,6 +132,7 @@ test("classifies a watcher task in the pre hook before compilers run", () => {
 test("replaces Vite's CLI shortcut binder before the TUI takes over stdin", async () => {
   const plugin = devPlugin({
     session: { sessionId: "shortcut-neutralization-session" },
+    watcherUpdates: createWatcherUpdateTracker(),
   }) as unknown as {
     configureServer(server: import("vite").ViteDevServer): void;
   };
@@ -127,6 +173,7 @@ test("follows Vite's preserveSymlinks policy at both HMR path seams", async () =
 
     const plugin = devPlugin({
       session: { sessionId: "preserve-symlinks-session" },
+      watcherUpdates: createWatcherUpdateTracker(),
     }) as unknown as {
       configResolved: ConfigResolvedFn;
       configureServer(server: import("vite").ViteDevServer): void;
@@ -168,6 +215,7 @@ test("follows Vite's preserveSymlinks policy at both HMR path seams", async () =
 test("still reports an unavailable runnable SSR environment", async () => {
   const plugin = devPlugin({
     session: { sessionId: "non-runnable-session" },
+    watcherUpdates: createWatcherUpdateTracker(),
   }) as unknown as {
     configureServer(server: import("vite").ViteDevServer): (() => void) | undefined;
   };
@@ -193,6 +241,7 @@ test("still reports an unavailable runnable SSR environment", async () => {
 test("closes a server rejected by the Runtime ownership boundary", async () => {
   const plugin = devPlugin({
     session: { sessionId: "runtime-conflict-session" },
+    watcherUpdates: createWatcherUpdateTracker(),
   }) as unknown as {
     configureServer(server: import("vite").ViteDevServer): (() => void) | undefined;
   };
@@ -233,6 +282,7 @@ test("closes a server rejected by the Runtime ownership boundary", async () => {
 function configResolvedHook(): ConfigResolvedFn {
   const plugin = devPlugin({
     session: { sessionId: "compiler-config-session" },
+    watcherUpdates: createWatcherUpdateTracker(),
   }) as unknown as { configResolved: ConfigResolvedFn };
   return plugin.configResolved;
 }
@@ -338,6 +388,7 @@ test("rejects unplugin-vue-jsx at config time with the HMR-capable alternative",
 test("correlates an HMR error with its own overlapping file-change batch", async () => {
   const plugin = devPlugin({
     session: { sessionId: "overlapping-update-session" },
+    watcherUpdates: createWatcherUpdateTracker(),
   }) as unknown as {
     hotUpdate: {
       handler(options: {
@@ -439,6 +490,7 @@ function transformOf(opts: {
 }): TransformFn {
   const plugin = devPlugin({
     session: { sessionId: "test-session" },
+    watcherUpdates: createWatcherUpdateTracker(),
   }) as unknown as { transform: TransformFn; configResolved: ConfigResolvedFn };
   plugin.configResolved({
     root: opts.root ?? "/Users/proj",
