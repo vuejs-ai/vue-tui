@@ -266,35 +266,37 @@ test("counter responds to arrow keys", async () => {
 
 [`render(component, options?)`](./packages/testing/src/render.ts) takes a flat options object; omitting it models an Inline TTY.
 
-| Option         | Default    | Description                                     |
-| -------------- | ---------- | ----------------------------------------------- |
-| `mode`         | `"inline"` | Production screen model to reproduce            |
-| `stdin`        | `"tty"`    | `"tty"` or `"non-tty"`                          |
-| `stdout`       | `"tty"`    | `"tty"` or `"stream"`                           |
-| `columns`      | `100`      | Layout and emulator width                       |
-| `rows`         | `100`      | Emulator and TTY height                         |
-| `patchConsole` | `false`    | Route console output through the modeled writer |
-| `exitOnCtrlC`  | `false`    | Exit before delivering an exact Ctrl+C key      |
-| `props`        | —          | Props passed to the component under test        |
+| Option         | Default    | Description                                                                                  |
+| -------------- | ---------- | -------------------------------------------------------------------------------------------- |
+| `mode`         | `"inline"` | Production screen model to reproduce                                                         |
+| `stdin`        | `"tty"`    | `"tty"` or `"non-tty"`                                                                       |
+| `stdout`       | `"tty"`    | `"tty"` or `"stream"`                                                                        |
+| `columns`      | `100`      | Emulator width, and layout width on a TTY stdout                                             |
+| `rows`         | `100`      | Emulator height, and TTY height on a TTY stdout                                              |
+| `color`        | `true`     | `true` follows the modeled stdout, `false` strips SGR, a named profile forces one capability |
+| `patchConsole` | `false`    | Route console output through the modeled writer                                              |
+| `exitOnCtrlC`  | `false`    | Exit before delivering an exact Ctrl+C key                                                   |
+| `retainFrames` | `true`     | Retain renderer commits for `frames` and `lastFrame()`                                       |
+| `props`        | —          | Props passed to the component under test                                                     |
 
 `render()` resolves to a `RenderResult`:
 
-| Member                                       | Description                                                                                      |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `frames`                                     | Every renderer content commit                                                                    |
-| `lastFrame(options?)`                        | The most recent content commit                                                                   |
-| `screen()`                                   | Emulated terminal state after queued output; `screen().cursor` gives row, column, and visibility |
-| `stdin.write(data)`                          | Feed input to the app                                                                            |
-| `terminal`                                   | `columns`, `rows`, `resize()`, `suspend()`, `resume()`, `rawMode`                                |
-| `unmount()`                                  | Tear down the app, keeping the emulated screen readable for restoration assertions               |
-| `dispose()`                                  | Idempotently tear down and release every test-host resource                                      |
-| `waitUntilExit()` / `waitUntilRenderFlush()` | App-owner barriers                                                                               |
+| Member                                       | Description                                                                                              |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `frames`                                     | Every renderer content commit                                                                            |
+| `lastFrame(options?)`                        | The most recent content commit                                                                           |
+| `screen()`                                   | Emulated terminal state after queued output; `(await screen()).cursor` gives row, column, and visibility |
+| `stdin.write(data)`                          | Feed input to the app                                                                                    |
+| `terminal`                                   | `columns`, `rows`, `resize()`, `suspend()`, `resume()`, `rawMode`                                        |
+| `unmount()`                                  | Tear down the app, keeping the emulated screen readable for restoration assertions                       |
+| `dispose()`                                  | Idempotently tear down and release every test-host resource                                              |
+| `waitUntilExit()` / `waitUntilRenderFlush()` | App-owner barriers                                                                                       |
 
 See the [`@vue-tui/testing` package guide](./packages/testing) for the complete matrix.
 
 ## Development
 
-Requires [Vite+](https://viteplus.dev/) (`vp`) and Node.js 22+.
+Requires [Vite+](https://viteplus.dev/) (`vp`) and Node.js `^22.18.0 || >=24.11.0`.
 
 ```bash
 vp install            # install dependencies

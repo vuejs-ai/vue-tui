@@ -103,8 +103,8 @@ export interface UseBoxMetricsReturn {
   readonly hasMeasured: Readonly<Ref<boolean>>;
 }
 
-export function useBoxMetrics(
-  target: Readonly<Ref<InstanceType<typeof Box> | null | undefined>>,
+export function useBoxMetrics<T extends PublicBoxInstance>(
+  target: Readonly<Ref<T | null | undefined>>,
 ): UseBoxMetricsReturn;
 ```
 

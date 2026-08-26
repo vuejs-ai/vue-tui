@@ -26,7 +26,6 @@ dist-ssr
 # AI agent worktrees
 .claude/worktrees/
 
-# Superpowers
-docs/superpowers/
+# Local working notes and specs, never committed (AGENTS.md)
+/docs/
 tmp/
-docs/known-yoga-bugs.md
