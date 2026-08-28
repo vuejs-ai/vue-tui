@@ -6,7 +6,7 @@
 > component-tied hooks (`components`) and independent hooks (`use`) are **[VOUCHED @hyfdev]**.
 > Runtime admission is governed by [intent.md](./intent.md#reusable-runtime-behavior);
 > higher-level component admission is governed by
-> [components-design-principles.md](./components-design-principles.md). Neither rule is duplicated here.
+> [components-api-design.md](./components-api-design.md). Neither rule is duplicated here.
 
 ## The layers
 

@@ -8,4 +8,4 @@ Concrete follow-up work that Yunfei explicitly asked the project not to forget. 
 
 ## Component type verification
 
-- [ ] Add real Vue-template declaration fixtures for `Newline`, `Spacer`, `Spinner`, and `ScrollBox` so every `@vue-tui/components` public type shape is exercised in both templates and TSX, as required by the [component public type contract](./components-design-principles.md#public-type-contract).
+- [ ] Add real Vue-template declaration fixtures for `Newline`, `Spacer`, `Spinner`, and `ScrollBox` so every `@vue-tui/components` public type shape is exercised in both templates and TSX, as required by the [component public type contract](./components-api-design.md#public-type-contract).

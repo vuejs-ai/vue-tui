@@ -1,4 +1,4 @@
-# @vue-tui/components design principles
+# @vue-tui/components API design
 
 This record applies only to the higher-level `@vue-tui/components` package. It does not decide admission into `@vue-tui/runtime`; Runtime follows the separate [reusable Runtime rule](./intent.md#reusable-runtime-behavior).
 
@@ -42,10 +42,8 @@ These two do not establish a blanket convenience catalog. Another convenience co
 
 - Templates and TSX must both reject wrong props, models, event payloads, slot payloads, and imperative handles.
 - Collection components infer their item type without leaking `any`; extracted definitions use ordinary TypeScript mechanisms such as `satisfies` rather than package-specific identity helpers unless evidence requires one.
-- Stable public constructor types hide generated SFC generic details while preserving typed children and exposed handles.
+- Stable public constructor types hide generated SFC generic details across supported Vue patch releases. Default-slot components preserve typed children and exposed handles; leaf components reject ignored children.
 - Verify every public type shape through real template and TSX fixtures rather than inferring it from the source declaration alone.
-
-Authoring mechanics shared with Runtime live in [component-authoring.md](./component-authoring.md).
 
 ## Boolean prop naming & defaults
 

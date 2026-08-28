@@ -1,6 +1,6 @@
-# Runtime public API contract
+# @vue-tui/runtime API design
 
-This record summarizes the implemented application-facing contract of `@vue-tui/runtime`. The [Runtime public API decision ledger](./runtime-public-api-decisions.md) is authoritative for Yunfei's judgments. Export declarations, public type tests, behavior tests, and package-export tests are authoritative for exact machine-checkable shape.
+This record owns the non-obvious application-facing design and implemented contract of `@vue-tui/runtime`. The [Runtime public API decision ledger](./runtime-public-api-decisions.md) is authoritative for Yunfei's judgments. Export declarations, public type tests, behavior tests, and package-export tests remain authoritative for exact machine-checkable inventory.
 
 ## Supported package entries
 
@@ -14,9 +14,9 @@ This record summarizes the implemented application-facing contract of `@vue-tui/
 
 The two `/internal/*` entries are published integration seams, not application extension contracts. `@vue-tui/use`, `@vue-tui/components`, applications, and third-party packages use only the supported application-facing entries.
 
-The Runtime root exports these named public types: `TuiApp`, `MountOptions`, `RenderToStringOptions`, `ColorProfile`, `BoxProps`, `Color`, `TextProps`, `UseAppReturn`, `FocusTarget`, `UseFocusReturn`, `TuiInputEvent`, `TuiKey`, `TuiKeyName`, `UseStdinReturn`, `UseLayoutSizeReturn`, and `UseBoxMetricsReturn`. Exact inventory is pinned by [`public-api.test.ts`](../../tests/runtime/integration/public-api.test.ts) and the public type suites under [`tests/runtime/integration/public-types`](../../tests/runtime/integration/public-types).
+The table summarizes the supported entries. [`public-api.test.ts`](../../tests/runtime/integration/public-api.test.ts) and the public type suites under [`tests/runtime/integration/public-types`](../../tests/runtime/integration/public-types) define the complete export inventory.
 
-## Exact public shapes
+## Application API
 
 ### Application and mount
 
@@ -38,15 +38,9 @@ Caller-supplied streams are borrowed. Runtime removes its listeners and restores
 
 ## Host and rendering-mode contract
 
-The [rendering-mode matrix](./rendering-mode-matrix.md) is the canonical visual-host contract. Its public consequences are:
+The [rendering-mode matrix](./rendering-mode-matrix.md) is the canonical visual-host contract. TTY Inline owns a main-screen live region, TTY Fullscreen owns the alternate-screen viewport, and non-TTY stdout selects the final-document host for either request. Input capability resolves independently from the output surface. Inline and Fullscreen are both first-class modes, but their different screen ownership remains explicit.
 
-- TTY Inline owns a bounded main-screen live region and preserves pre-application terminal history.
-- TTY Fullscreen requires positive terminal dimensions, owns the alternate-screen viewport, and restores the previous main screen on teardown.
-- Non-TTY stdout selects the supported final-document host for either requested mode. It acquires no screen controls and writes the latest dynamic document on clean teardown.
-- Input availability is independent of output surface. A mounted non-TTY document may still receive normalized input from its selected stdin.
-- `Static` is available only from `/inline`; an effective visual Fullscreen surface rejects its presence before committing output or a new frame.
-
-Inline and Fullscreen are both first-class modes, but their different screen ownership is explicit rather than hidden behind false behavioral equivalence.
+`Static` is available only from `/inline`; an effective visual Fullscreen surface rejects its presence before committing output or a new frame.
 
 ## String rendering
 
@@ -55,6 +49,14 @@ Inline and Fullscreen are both first-class modes, but their different screen own
 `RenderToStringOptions` has exactly `width?: number`, `height?: number`, and `color?: boolean | ColorProfile`. Width defaults to 80, height defaults to 24, and `height: Infinity` requests an unbounded document. Color defaults to plain output; explicit `true` uses the shared automatic resolver, while a named profile forces a capability.
 
 The renderer runs a temporary normal Vue tree, prepends present `Static` blocks, and returns the first synchronous commit without an artificial trailing newline. After a successful initial patch it unmounts the temporary Vue tree; after any result it releases Runtime-owned services and Yoga allocations before returning or throwing. An interrupted initial patch follows Vue and runs no component cleanup. Terminal-bound composables receive inert services appropriate to this host; `useApp().exit()` is a no-op.
+
+## Vue component boundary
+
+`Box`, `Text`, and `Static` are public Vue components; raw `tui-box`, `tui-text`, `tui-virtual-text`, and `tui-static` hosts are Runtime implementation details.
+
+Host-prop bindings use exact camelCase keys or `v-bind="object"`; custom-renderer attributes do not apply browser-style kebab-case normalization. Public components expose stable author-facing constructor types rather than generated SFC types tied to one Vue patch release.
+
+The closed `Box` and `Text` contracts reject unknown attributes and invalid declared values on Vue's component-error path before they reach layout or paint. `Text` performs that validation even when it has no content. `Static` accepts no props and suppresses inherited attributes; it does not add a separate runtime attribute validator.
 
 ## Box and Text
 
@@ -67,7 +69,7 @@ The renderer runs a temporary normal Vue tree, prepends present `Static` blocks,
 - `textAlign?: "left" | "center" | "right"`;
 - `wrap?: "wrap" | "hard" | "truncate" | "truncate-middle" | "truncate-start"`.
 
-Nested Text is an inline style span. The outermost Text controls wrapping and physical-line alignment. Component-layer validation rejects unknown attributes and invalid declared values before they reach the paint callback.
+Nested Text is an inline style span. The outermost Text controls wrapping and physical-line alignment.
 
 `Static` represents one mounted Inline history block. Vue owns collection iteration, keys, conditional creation, and slot lifecycle. A non-empty accepted block becomes irreversible terminal history; an empty mounted block remains eligible until it emits or unmounts.
 
@@ -79,6 +81,14 @@ Nested Text is an inline style span. The outermost Text controls wrapping and ph
 - `useLayoutSize()` exposes readonly reactive root-layout `width` and `height`; `Infinity` is the explicit unbounded-height sentinel.
 
 Composables throw outside a compatible Runtime render tree rather than returning silent global defaults.
+
+### Rendered-target lifetime
+
+`useFocus(target)` and `useBoxMetrics(target)` accept ordinary caller-owned Vue refs while Runtime privately reconciles them with the host boundary that is actually rendered. A component instance may remain stable while its root host is inserted, removed, hidden, or replaced, so reading the component proxy or `$el` once cannot establish current Runtime ownership.
+
+Reconciliation runs with renderer commits and resolves only the host form accepted by the consuming API. Removal invalidates the old host even when the public ref remains non-null; replacement detaches the old host before attaching the new one. Retargeting, subtree removal, scope disposal, and application teardown release prior registration. No public value exposes a Runtime host node, VNode, Yoga node, or registration controller.
+
+This is not a general target API. Focus keeps a component-boundary availability constraint, while metrics keeps a direct-`Box` target. Neither contract implies input routing, traversal, pointer or caret behavior, surface coordinates, clipping geometry, selection, or clipboard behavior.
 
 ### `useBoxMetrics`
 
@@ -121,6 +131,8 @@ export function useFocus(target: FocusTarget): UseFocusReturn;
 
 Every call creates one opaque identity in a per-app single-owner controller. `focus()` synchronously replaces the current owner, `blur()` releases only that handle, and disposed-handle operations are inert. The zero-argument form follows its Vue scope. The targeted form additionally follows the supplied Vue component boundary: hidden or detached rendered ancestry clears ownership, and later availability does not restore it.
 
+A targeted handle follows the component's one root VNode boundary, including Vue's single-root normalization for component chains and development-root Fragments. A normal Fragment remains one boundary; Runtime neither selects its first rendered descendant nor collects its children into a region. Calling `focus()` while that boundary is unavailable is a no-op. A valid-to-valid retarget preserves the focus identity, while an unavailable state clears it and later availability does not restore it. String rendering provides inert handles.
+
 The target is not the identity and supplies no input routing, traversal, names, ordering, automatic focus, restoration, geometry, styling, or visual focus ring. Applications gate broadcast `useInput()` explicitly through `isFocused` when desired.
 
 ## Contract enforcement
@@ -136,3 +148,5 @@ Exact enforcement belongs in:
 - packed-consumer tests for declaration portability and supported package boundaries.
 
 Repository source paths, raw `tui-*` hosts, Yoga nodes, renderer-node types, module-private testing controls, and implementation-specific scheduling or observation are not public API merely because repository code can reach them.
+
+Rendered-target coverage under [`use-focus`](../../tests/runtime/integration/composables/use-focus) and the Box-metrics integration tests pins stable refs, replacement, removal, visibility, validation, and teardown. [`script-edit-recreates-instance.test.ts`](../../tests/vite/e2e/script-edit-recreates-instance.test.ts) verifies that Vite/Vue replacement reaches the same Runtime lifetime rules.

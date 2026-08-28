@@ -1,6 +1,6 @@
 # Terminal UI prior art
 
-This record keeps pinned peer evidence used by current vue-tui decisions. It does not choose vue-tui product direction, package membership, or API shape. Those live in [intent](./intent.md), [product-work priority](./product-scenarios.md), the [Runtime decision ledger](./runtime-public-api-decisions.md), and [`@vue-tui/components` principles](./components-design-principles.md).
+This record keeps pinned peer evidence used by current vue-tui decisions. It does not choose vue-tui product direction, package membership, or API shape. Those live in [intent](./intent.md), [product-work priority](./product-scenarios.md), the [Runtime decision ledger](./runtime-public-api-decisions.md), and [`@vue-tui/components` principles](./components-api-design.md).
 
 Exact Ink alignment and divergence belongs in [ink-divergences.md](./ink-divergences.md), not here.
 
@@ -76,6 +76,6 @@ vue-tui therefore keeps broadcast `useInput()`, an independently owned `useStdin
 
 ### Component catalogs
 
-A peer component proves a recurring task may exist, not that vue-tui should ship the same member. Components follow the package-specific [evidence bar](./components-design-principles.md#inclusion-bar--product-driven-and-evidence-backed) and use peer behavior only after the local need is established.
+A peer component proves a recurring task may exist, not that vue-tui should ship the same member. Components follow the package-specific [evidence bar](./components-api-design.md#inclusion-bar--product-driven-and-evidence-backed) and use peer behavior only after the local need is established.
 
 This evidence does not decide whether vue-tui adds a capability, which package owns it, what it is named, whether another framework's benchmark applies, or whether another project's catalog is a roadmap.

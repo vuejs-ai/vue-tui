@@ -2,7 +2,7 @@
 
 > **Status:** one tombstone file for public surfaces that were built, reviewed, and then removed from the Runtime foundation. None of them is a current or hidden contract. They are collected here so that searching for a removed name finds the reason it is gone instead of re-deriving the design.
 
-Current authority is the [Runtime public API decision ledger](./runtime-public-api-decisions.md) for what was accepted and the [public API contract](./api-contract.md) for the exact implemented surface. Current implementation evidence belongs in code and tests rather than a second prose inventory.
+Current authority is the [Runtime public API decision ledger](./runtime-public-api-decisions.md) for what was accepted and [Runtime API design](./runtime-api-design.md) for the non-obvious implemented contract. Exact implementation evidence belongs in code and tests rather than a second prose inventory.
 
 The rule for every entry below: **do not reintroduce it without a concrete application journey and a new decision-ledger entry.** Full design tables, journey prototypes, and status narratives remain in git history for each path.
 

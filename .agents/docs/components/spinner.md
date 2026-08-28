@@ -1,7 +1,7 @@
 # Spinner — decision record
 
 > Decisions specific to `@vue-tui/components`' `Spinner`. Shared conventions live in
-> [components-design-principles.md](../components-design-principles.md).
+> [components-api-design.md](../components-api-design.md).
 
 A pure composition of `<Text>` plus a component-local timer — no Runtime hook or privileged access needed.
 

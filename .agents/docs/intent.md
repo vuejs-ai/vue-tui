@@ -23,7 +23,7 @@ The product value is that a Vue developer can build and ship a reliable interact
 
 ## Reusable Runtime behavior
 
-When a low-level interaction behavior recurs across multiple complex terminal applications, is generic rather than application-specific, and requires renderer or terminal ownership, it may become a first-party `@vue-tui/runtime` API or composable. The concrete Runtime shape follows the demonstrated problem rather than a predefined catalog. Higher-level component admission is governed separately by the [`@vue-tui/components` design principles](./components-design-principles.md#inclusion-bar--product-driven-and-evidence-backed).
+When a low-level interaction behavior recurs across multiple complex terminal applications, is generic rather than application-specific, and requires renderer or terminal ownership, it may become a first-party `@vue-tui/runtime` API or composable. The concrete Runtime shape follows the demonstrated problem rather than a predefined catalog. Higher-level component admission is governed separately by the [`@vue-tui/components` design principles](./components-api-design.md#inclusion-bar--product-driven-and-evidence-backed).
 
 ## Rendering modes
 
