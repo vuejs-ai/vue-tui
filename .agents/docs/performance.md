@@ -1,6 +1,6 @@
 # Renderer performance
 
-> **Status:** parked. Performance work reopens only on a recorded representative failure, and the trigger conditions below are the whole current contract. The earlier cost model, pipeline walkthrough, candidate dirty-span architecture, native-core upper bound, and per-scenario implications were speculation about a failure that has not happened; they remain in git history rather than reading as a plan.
+> **Status:** parked. Performance work reopens only on a recorded representative failure, and the trigger conditions below are the whole current contract.
 
 ## Current decision
 
@@ -16,7 +16,7 @@ Yoga stays the layout engine. It is already a dependency, handles the flex seman
 
 Reopen the performance architecture when at least one of these is true:
 
-- a deterministic journey from an active scenario misses a defined frame-time or input-latency budget;
+- a deterministic complex-application journey misses a defined frame-time or input-latency budget;
 - profiling shows material CPU time, allocation or garbage collection, output bytes or write count, event-loop delay, or sustained stream backpressure;
 - a small visible update scales with total mounted nodes or viewport area enough to block a real application;
 - a required scenario cannot be made correct with the current full-paint or non-virtualized model.

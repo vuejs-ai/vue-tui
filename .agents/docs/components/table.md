@@ -1,16 +1,16 @@
 # Table
 
-`Table` is the non-interactive tabular data display in `@vue-tui/components`. Tracking: #224 and #244.
+`Table` is the non-interactive tabular data display in `@vue-tui/components`.
 
 ## Why it is first-party
 
-The contributor had already converted a table component for Vue and reported a concrete terminal-correctness failure: Chinese headers did not align with their cells. The maintainer accepted that as a legitimate use and opened #224 for the contribution ([issue #221 context](https://github.com/vuejs-ai/vue-tui/issues/221#issuecomment-4824549966)). This is real consumer evidence for a recurring display need in the monitoring and data-workbench scenarios, not catalog parity with another framework. The generic non-interactive formatter belongs in `@vue-tui/components`; application data models and interactive sorting, selection, filtering, or navigation policy do not.
+The contributor had already converted a table component for Vue and reported a concrete terminal-correctness failure: Chinese headers did not align with their cells. The maintainer accepted that as a legitimate use and opened #224 for the contribution ([issue #221 context](https://github.com/vuejs-ai/vue-tui/issues/221#issuecomment-4824549966)). This is real consumer evidence for a recurring display need, not catalog parity with another framework. The generic non-interactive formatter belongs in `@vue-tui/components`; application data models and interactive sorting, selection, filtering, or navigation policy do not.
 
-## Accepted first API
+## Public API
 
-The initial component accepts `data`, `columns`, and `padding`; each column may choose a Runtime `Text` wrap mode, physical-line alignment, string formatting, and structured header or cell text styles. A non-empty grid renders as real Runtime column-direction `Box` cells containing stretched `Text`, so Yoga supplies a responsive fractional allocation and keeps borders aligned as logical rows grow. Runtime converts that allocation once to its [conservative whole-cell Text budget](../ink-divergences.md#measured-text-uses-one-conservative-whole-cell-budget), then `textAlign` aligns every wrapped or hard-newline line against that budget. It has no sorting, selection, explicit column sizing, table-wide color props, header slot, cell slot, or border slot.
+The component accepts `data`, `columns`, and `padding`; each column may choose a Runtime `Text` wrap mode, physical-line alignment, string formatting, and structured header or cell text styles. A non-empty grid renders as real Runtime column-direction `Box` cells containing stretched `Text`, so Yoga supplies a responsive fractional allocation and keeps borders aligned as logical rows grow. Runtime converts that allocation once to its conservative whole-cell Text budget, then `textAlign` aligns every wrapped or hard-newline line against that budget. It has no sorting, selection, explicit column sizing, table-wide color props, header slot, cell slot, or border slot.
 
-The narrow surface is deliberate. Table owns the text and the shared column geometry; arbitrary rendered slot content has no synchronous intrinsic-measurement contract that could keep every row on the same column boundaries. Slots and interaction can be added later from concrete product use cases without making border internals, provisional frames, or duplicate slot evaluation part of the first public contract.
+The narrow surface is deliberate. Table owns the text and the shared column geometry; arbitrary rendered slot content has no synchronous intrinsic-measurement contract that could keep every row on the same column boundaries.
 
 ## Structured text styling
 
@@ -18,7 +18,7 @@ Per-cell and per-header text styling extends the column model without opening a 
 
 `TableTextStyle` is `Readonly<Omit<TextProps, "textAlign" | "wrap">>`, covering foreground and background color, dim, bold, italic, underline, strikethrough, and inverse without exposing layout or arbitrary children. Table applies these structured values through nested public Runtime `<Text>` spans, so the render session remains the sole owner of color capability and ANSI generation. A background style covers the formatted text only; cell padding and borders remain structural Table output and are not styled by `TableTextStyle`.
 
-This extension deliberately does not re-export Chalk, add a general string-color helper, or restore the contributor's slots. A general slot cannot enforce that callers preserve measured text and shared column geometry; re-exported or helper-generated ANSI would keep ordinary data and presentation markup in the same `string` channel. Labels and formatter output instead remain plain text. An actual ESC or other terminal-control byte is not a styling API and is rejected; callers that need to display one encode it visibly as `\\u001b`, `\\x1b`, or `␛`.
+Table does not re-export Chalk, add a general string-color helper, or expose general header or cell slots. A general slot cannot enforce that callers preserve measured text and shared column geometry; re-exported or helper-generated ANSI would keep ordinary data and presentation markup in the same `string` channel. Labels and formatter output instead remain plain text. An actual ESC or other terminal-control byte is not a styling API and is rejected; callers that need to display one encode it visibly as `\\u001b`, `\\x1b`, or `␛`.
 
 ## Row and column types
 
@@ -37,8 +37,8 @@ Extracted column arrays use TypeScript's `satisfies readonly TableColumn<Row>[]`
 - Cells default to Runtime's `wrap` behavior. A column may instead choose `hard`, `truncate`, `truncate-middle`, or `truncate-start`. Yoga shrinks naturally wider columns proportionally when the grid exceeds its parent, and a logical row grows to the tallest resulting cell while shared borders remain aligned. A fractional allocation uses only its complete-cell budget during that single layout pass; if Yoga later rounds the column outward, one extra cell can remain unused rather than triggering feedback layout or changing the measured row height.
 - A natural grid wider than 65,535 terminal columns is rejected before creating layout nodes. If the parent is narrower than the structural minimum required by borders, configured padding, and one content cell per column, normal overflow clipping is the final fallback because a complete grid cannot fit.
 - Rows are separated by Unicode box-drawing lines. Empty data with explicit columns renders the header; empty data without columns renders no host node or layout space.
-- The first API has no slot contract. Unsupported child content is not interpreted as table data or geometry.
+- Table has no slot contract. Unsupported child content is not interpreted as table data or geometry.
 
 ## Package boundary
 
-The component imports only the public Runtime `Box`, `Text`, `BoxProps`, and `TextProps` surface plus `string-width`; it does not depend on Runtime internals or read terminal globals. Its public constructor hides Vue's generated patch-specific SFC type, matching the other components package exports. Runtime behavior tests live under `packages/components/tests/table/`; implementation files remain under `src/table/`.
+The component imports only the public Runtime `Box`, `Text`, `BoxProps`, and `TextProps` surface plus `string-width`; it does not depend on Runtime internals or read terminal globals. Its public constructor hides Vue's generated patch-specific SFC type, matching the other components package exports. Component behavior tests live under `packages/components/tests/table/`; implementation files remain under `src/table/`.

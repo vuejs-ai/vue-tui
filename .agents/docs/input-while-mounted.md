@@ -43,10 +43,10 @@ The renderless `<UseInputWhileMounted>` companion emits `input` during its own m
 
 The renderless component's stable public constructor takes its props as a generic constructor argument. This lets Vue language tooling infer the selector from a template attribute. The same generic event member appears in both `$props.onInput` and `$emit`; keeping only one side narrow would leave template `$event` inference incomplete.
 
-The paired identifiers would not collide at the language level because JavaScript and TypeScript are case-sensitive. They are nevertheless split across the root and `/components` entries so the root remains composable-only and similar future pairs have one predictable import convention. Their source files use the same kebab-case base with different extensions rather than names that differ only by letter case.
+The root stays composable-only, while renderless companions use the `/components` entry. Their source files use the same kebab-case base with different extensions.
 
 ## Evidence
 
 - `packages/use/tests/input-while-mounted/use-input-while-mounted.test.tsx` proves function-ref activation, teardown, remount, `v-show`, exact type filtering, live handler resolution, and static selector capture; `packages/use/tests/input-while-mounted/component.test.tsx` proves the renderless companion's output, mounted lifetime, and reactive selector.
 - `packages/use/tests/public-api.test.ts`, `packages/use/tests/public-api.test-d.tsx`, and `packages/use/tests/input-while-mounted/public-api.test-d.vue` pin the exact value surface and compile real TSX and template usage, including positive and negative selector/event narrowing.
-- `tests/runtime/integration/public-layer-imports.test.ts` enforces that `@vue-tui/use` imports only supported Runtime entries and never Runtime source or internals.
+- `tests/runtime/integration/package-boundaries.test.ts` enforces that `@vue-tui/use` imports only supported Runtime entries and never Runtime source or internals.

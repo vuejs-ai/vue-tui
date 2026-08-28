@@ -1,7 +1,7 @@
 # Spinner — decision record
 
 > Decisions specific to `@vue-tui/components`' `Spinner`. Shared conventions live in
-> [components-design-principles.md](../components-design-principles.md). Tracking: #218.
+> [components-design-principles.md](../components-design-principles.md).
 
 A pure composition of `<Text>` plus a component-local timer — no Runtime hook or privileged access needed.
 
@@ -23,19 +23,16 @@ A pure composition of `<Text>` plus a component-local timer — no Runtime hook 
 
 - **Always animates while mounted.** It does not inspect Runtime session internals or terminal
   capabilities. Its component-local timer changes Vue state; Runtime independently decides how
-  those updates are committed for the current host. A future static-output affordance would need
-  real product evidence and a supported public fact, not privileged access.
+  those updates are committed for the current host.
 - Switching `type` changes the preset interval; Spinner clears its old timer and resets `frame`
   to 0 on a live interval change.
 
 ## API shape
 
 - `color` tints the **glyph only**; the `label` stays default-colored (matches ora / @inkjs/ui).
-- `label` is a **`string` prop** (type-friendly + the common Vue idiom for simple text). If rich
-  label content is ever needed, reconsider a same-purpose **default slot** from consumer evidence.
+- `label` is a **`string` prop** (type-friendly + the common Vue idiom for simple text). Spinner has no slot contract.
 
 ## Non-goals
 
-- **succeed / fail / pending** terminal states (`✔`/`✖`) are NOT Spinner's job — they belong to a
-  future `TaskList` / `StatusMessage` (render = f(state) in a separate component).
-- **Screen-reader** handling: deferred (niche; no surveyed spinner implements it).
+- **succeed / fail / pending** terminal outcome states (`✔`/`✖`) are outside Spinner.
+- **Screen-reader** behavior is absent because Runtime exposes no accessibility contract that Spinner can compose honestly.

@@ -1,71 +1,54 @@
 # Rendered-target lifetime
 
-> **Status:** unstamped historical F2 implementation record with a smaller current use. Runtime retains rendered-target reconciliation only for `useFocus(target)` and direct-Box `useBoxMetrics()`. The broad F5 geometry service and pointer/caret adapters that once reused it were removed. This record does not publish a generic target API or settle future caret or pointer semantics.
+Runtime internally reconciles a public Vue component ref with the real host boundary currently rendered by that component. This mechanism exists only for public APIs whose correctness depends on rendered availability: `useFocus(target)` and direct-Box `useBoxMetrics()`.
 
-## The problem
+It is not a generic public target, geometry, pointer, or renderer-node API.
 
-A Vue ref and a rendered terminal element do not have the same lifetime. A template ref on a component points to its public component instance, and that instance may stay identical while its rendered root changes from `null` to a host element, from one keyed host element to another, or back to `null`. Vue 3.4 can also leave a non-null component ref whose host element has already been detached during a same-tick update and unmount ([vuejs/core#12639](https://github.com/vuejs/core/issues/12639), fixed upstream by [vuejs/core#12642](https://github.com/vuejs/core/pull/12642)). Watching only the author ref therefore cannot answer whether a behavior still has a live renderer target.
+## Why component refs are insufficient
 
-The user-visible failure is a behavior outliving what is on screen. In a coding-agent application, a conditionally rendered composer or approval target could keep a registration after the visible branch disappeared. In a finder or workbench, a stable wrapper could replace its inner row or pane while measurement or targeted interaction remained attached to the old host. The result can be stale metrics, input delivered to a removed cell, duplicate callbacks, a drag that never ends, or raw/mouse terminal modes that remain acquired without a live owner.
+A Vue component instance can remain stable while its rendered root is inserted, removed, hidden, or replaced. Vue may also leave an author-facing ref non-null after the underlying host has detached. Reading the component proxy or `$el` once therefore cannot establish current Runtime ownership.
 
-## Internal contract
+Runtime must bind validity to the renderer's actual host lifetime while leaving the public ref and component instance owned by the caller.
 
-Every ref-bound renderer behavior registers a resolver and an attach function with the render root that owns it. The registration identity is the resolved renderer host node, not the raw Vue ref or component proxy.
+## Internal invariant
 
-The contract is:
+- Public callers pass ordinary readonly Vue refs.
+- Runtime resolves only the host forms accepted by the consuming API.
+- Reconciliation happens on renderer commits and compares host identity.
+- A removed host becomes unavailable synchronously even if the public component ref remains non-null.
+- Replacement detaches the old host before attaching the new one.
+- Target reassignment, subtree removal, scope disposal, and application teardown release prior registration.
+- No public value exposes a Runtime host node, VNode, Yoga node, or registration controller.
 
-- `null`, a Vue comment anchor, an empty fragment text anchor, a detached node, and a node owned by another render root are unavailable targets;
-- the first available target attaches once;
-- an unchanged resolved host does not attach again;
-- a changed resolved host detaches the old adapter completely before attaching the new one;
-- removal invalidates the target synchronously before its parent link and Yoga resources are cleared, so a stale non-null Vue ref cannot reattach it;
-- scope disposal, component unmount, app teardown, string-render teardown, and HMR replacement release the current adapter exactly once;
-- cleanup and attach callbacks may synchronously change reactive state: the controller resolves again after detach, validates again after attach, and converges on the latest host instead of attaching a cached intermediate target;
-- subtree invalidation selects and logically detaches every affected registration before invoking any cleanup callback, so one cleanup cannot move another node or registration out of the cleanup batch;
-- cleanup failure does not prevent other registrations, mouse/raw leases, host nodes, or Yoga resources from receiving their cleanup turn. The first error remains observable on ordinary controller operations, while host removal treats adapter cleanup as a best-effort backstop and still completes structural removal.
+## Current consumers
 
-Each live or deterministic renderer owns one controller for one `TuiRoot`. Vue-ref changes request reconciliation, and the renderer also reconciles after every authoritative commit. The second path is essential: a component proxy can remain stable while its `$el` changes, so no watcher of the proxy itself fires. A target is accepted only when walking its current parent chain reaches the controller's owning root.
+### `useBoxMetrics()`
 
-The controller now also accepts one private owner transaction host for F4 integration. It distinguishes authoritative `reconcile` transactions from `cleanup` transactions. A complete reconcile derives one focus generation only after all detach/attach callbacks settle, so atomic host swaps never publish transient duplicate or unavailable states. Registration disposal, subtree invalidation, and controller disposal remain cleanup-only: during subtree removal the host is notified after every matching registration is logically detached and before any cleanup callback runs, so focus can make removed targets ineligible and invalidate their route without publishing a fallback before the renderer commit. Nested reconciliation reuses the outer transaction kind and cannot turn cleanup into an authoritative publication; hook or cleanup failure still gives every selected cleanup its turn.
+The ref must bind directly to the exported current-app `Box`. Runtime follows that Box through host replacement and publishes only its last accepted parent-relative `width`, `height`, `left`, `top`, and `hasMeasured` values. Text, arbitrary component, foreign-app, and raw-host targets are rejected.
 
-`renderToString()` creates the same per-root controller, reconciles the one mounted tree before layout, and disposes it during the string-render transaction. The controller and renderer-node types remain internal and are not exported from the root package or `/internal`.
+### `useFocus(target)`
 
-## First adapters
+The target is a Vue component-boundary availability constraint, not the focus identity. Runtime follows supported single-root component chains and hidden or detached rendered ancestry. Losing availability clears ownership; later availability does not restore focus. True Fragments remain one boundary rather than becoming a first-descendant search.
 
-At the F2 checkpoint, `useDraggable()` and the then-public `useBoxMetrics()` used the same internal registration seam.
+## Lifecycle behavior
 
-The former `useDraggable()` registered with the mouse controller only while its resolved host existed. Losing or replacing the target unregistered the old host, cleared active capture, reset `isDragging`, and released raw/SGR mouse ownership when no other consumer remained. Mouse acquisition and release were transactions: a failed first acquisition could not leave an ownerless registration or SGR token, and a failing SGR release could not skip raw-mode release.
-
-The original measurement adapter subscribed to layout for the current resolved host and reset its scalar Yoga metrics synchronously when that host disappeared. F5 removed that API and the imperative Yoga read, then temporarily published `useElementGeometry()` on the same F2 attachment identity. The current Path 1 boundary keeps its authoritative accepted-layout source private and publishes `useBoxMetrics()` only for a direct `Box` in the current app. Its readonly numeric refs describe one coherent parent-relative layout rectangle, while `hasMeasured` distinguishes an unavailable result from a real zero-sized Box; it never exposes renderer nodes, surface coordinates, clipping fragments, or private caret slots.
-
-The private resolver recognizes direct renderer-owned host refs by nominal identity recorded when the runtime constructs each node, not by checking for a string `type` field. Public component resolution still walks the Vue instance's rendered subtree. This distinction lets internal adapters accept their real host refs without mistaking an ordinary Vue component with a `type` prop for a renderer node.
-
-The F2 migrations did not freeze either public API. Historically, F5 replaced the earlier `useBoxMetrics()` with experimental `useElementGeometry()` and removed `measureElement()` without aliases; Path 1 then narrowed that projection to experimental `useBoxSize()`, and the final accepted boundary replaced it with the current `useBoxMetrics()` contract. F6 directly removed `useDraggable()`, element listeners, and terminal-wide raw mouse after their historical experiment. F2 proves only the shared attachment mechanism, not the later public semantics.
-
-## Environment behavior
-
-| Environment or transition                                               | F2 behavior                                                                                                                                                                                 |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Template or TSX ref to a host component                                 | Resolve the current real host below the public component instance; never expose that host to the author.                                                                                    |
-| Stable component proxy, inner root insertion or replacement             | Reconcile on the renderer commit and detach-before-attach by host identity.                                                                                                                 |
-| `v-if`, keyed removal, component unmount, or Vue 3.4 stale non-null ref | Invalidate during host removal; the detached host is unavailable even if the author ref still points to its component.                                                                      |
-| HMR template rerender                                                   | Preserve the component instance and follow its replacement host.                                                                                                                            |
-| HMR script/component reload                                             | Release the old instance's host and attach the replacement instance's host.                                                                                                                 |
-| Deterministic testing                                                   | Use the same live renderer controller and modeled session; lifecycle behavior is not a testing-only simulation.                                                                             |
-| String rendering                                                        | Reconcile the fixed mounted tree and dispose before returning; no terminal capability is acquired.                                                                                          |
-| Outside a render tree                                                   | `useBoxMetrics()` throws because there is no current Runtime app; a non-Box or foreign-app target also throws. Other terminal-bound composables retain their own explicit context behavior. |
-| `v-show` or another mounted-but-hidden policy                           | Still a mounted target. F2 defines attachment and removal, not visibility, enabled state, clipping eligibility, or focusability.                                                            |
-
-## Evidence
-
-The implementation has focused coverage for null-to-host insertion, ordinary host refs, stable component refs, keyed inner-root replacement, `v-if` removal, target reassignment without a renderer commit, component unmount, nested effect-scope disposal, active-drag removal, no duplicate attach, subtree cleanup failure, cleanup and attach re-entrancy, foreign-root rejection, stale hit-map removal before a throttled repaint, string rendering, and standalone metrics.
-
-The restored Vite journey in [`script-edit-recreates-instance.test.ts`](../../tests/vite/e2e/script-edit-recreates-instance.test.ts) separately proves that a template-only rerender preserves the component instance and target setup, while a script edit unmounts the old target and mounts a replacement. Its Runtime-owned invariants are also covered deterministically without a dev server in [`use-focus/identity.test.tsx`](../../tests/runtime/integration/composables/use-focus/identity.test.tsx), [`use-focus/component-boundaries.test.tsx`](../../tests/runtime/integration/composables/use-focus/component-boundaries.test.tsx), and [`use-focus/suspension-and-rollback.test.tsx`](../../tests/runtime/integration/composables/use-focus/suspension-and-rollback.test.tsx) — target loss does not queue acquisition or restore focus, a boundary that becomes hidden during suspension clears focus, and child visibility inside a true Fragment boundary is not reinterpreted — and in the Box-metrics tests for measurement following replacement. The HMR journey is integration evidence that the Vue/Vite lifetime transitions reach Runtime without stale ownership; the lower-level contract does not depend on Vue's hot-replacement behavior.
-
-A clean in-repository packed consumer using Vue 3.4.38, TypeScript 6, `skipLibCheck: false`, SFC template refs, and TSX refs originally proved both adapters without exposing `RenderedTargetController`, `useRenderedTargetRegistration`, or `TuiNode`. The same historical fixture reproduced vuejs/core#12639: the author ref remained non-null after detach while measurement reset and mouse ownership released, then recovered after insertion. Current public type checks restrict `useBoxMetrics()` to `InstanceType<typeof Box>` and reject Text or arbitrary component refs.
+| Transition                                  | Required result                                                                                     |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Target starts null, then renders            | Attach when the accepted host appears.                                                              |
+| Stable component replaces its root host     | Detach the old host, then attach the replacement.                                                   |
+| `v-if`, keyed removal, or component unmount | Invalidate even if the author ref is stale.                                                         |
+| `v-show` hides relevant ancestry            | Box metrics become unavailable and targeted focus clears while component lifecycle remains mounted. |
+| HMR template rerender                       | Follow the replacement host without inventing component-state restoration.                          |
+| HMR script/component reload                 | Release the old component boundary and attach the replacement if valid.                             |
+| String rendering                            | Reconcile only during the temporary tree and dispose before return.                                 |
+| Deterministic testing                       | Use the same production controller and modeled Runtime session.                                     |
 
 ## Deliberate limits
 
-F2 itself did not define normalized input or routing, hidden/disabled eligibility, logical focus, semantic rectangles, terminal caret placement, public pointer events, selection, or copy, and it did not migrate the input, focus, or cursor composables early. The historical F3/F4 candidate later established a shared event, route result, and target attachment on this mechanism; those public routing surfaces are now superseded. Current Runtime keeps the internal rendered-target lifetime for `useFocus(target)` validity while applications compose its readonly ownership with the broadcast `useInput({ isActive })` hook. Issue [#250](https://github.com/vuejs-ai/vue-tui/issues/250) remains evidence that setup-scope input lifetime alone cannot reveal which rendered branch should own application policy.
+There is no public `useRenderedTarget()`. Rendered-target lifetime does not define focus traversal, disabled state, input routing, pointer hit testing, caret placement, surface coordinates, clipping geometry, selection, or clipboard behavior.
 
-No generic public `useRenderedTarget()` is justified. The historical F4 through F6 surfaces consumed the internal lifetime rule without publishing the renderer node. The current public component-target type belongs only to `useFocus(target)` and exposes no generic registration or geometry capability.
+The public types remain specific to their consumers: `FocusTarget` for `useFocus(target)` and a direct `Box` ref for `useBoxMetrics()`. A future capability must justify its own semantic contract rather than exposing this internal mechanism.
+
+## Evidence
+
+Focus coverage under [`tests/runtime/integration/composables/use-focus`](../../tests/runtime/integration/composables/use-focus) proves stable refs, replacement, removal, visibility, suspension, rollback, and HMR-compatible lifetime. Box-metrics integration tests prove direct-target validation, accepted measurement, replacement, hidden state, and teardown. [`script-edit-recreates-instance.test.ts`](../../tests/vite/e2e/script-edit-recreates-instance.test.ts) proves that Vite/Vue lifetime transitions reach the same Runtime invariants.

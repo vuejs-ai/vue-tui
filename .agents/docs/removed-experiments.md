@@ -8,11 +8,28 @@ The rule for every entry below: **do not reintroduce it without a concrete appli
 
 ## Application API design record
 
-The earlier `api-design.md` concluded that a broad application foundation — render session, element geometry, focus manager and scopes, input routing, caret, pointer, selection, and clipboard — was complete. The 2026-07 item-by-item review replaced that surface with the narrower one now implemented. Its mode-contract discussion survives in [rendering-mode-matrix.md](./rendering-mode-matrix.md), its proposal checklist in [autonomous-iteration.md](./autonomous-iteration.md#review-template-for-each-proposed-api), and its package-placement rules in [package-layers.md](./package-layers.md).
+The earlier `api-design.md` concluded that a broad application foundation — render session, element geometry, focus manager and scopes, input routing, caret, pointer, selection, and clipboard — was complete. The 2026-07 item-by-item review replaced that surface with the narrower one now implemented. Its mode contract survives in [rendering-mode-matrix.md](./rendering-mode-matrix.md), its package-placement rules in [package-layers.md](./package-layers.md), and the remaining proposal process lives in Git history rather than a current operating record.
 
 ## API foundation roadmap
 
 An execution ledger that classified F1–F8 and R1–R17 for an earlier candidate, including "complete foundation" claims that later became false. The decision ledger is the sole acceptance authority; a completed checkpoint never created foundation work by itself.
+
+## Former Runtime root exports
+
+| Former name                                                | Current status                                                                                                                                           |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Newline`, `Spacer`                                        | Exported from `@vue-tui/components`, where these public compositions of Runtime primitives belong.                                                       |
+| `Static`                                                   | Exported from `@vue-tui/runtime/inline` as the explicit Inline history primitive.                                                                        |
+| `Transform`, `useAnimation`                                | No current Runtime replacement. Vue components and reactive state compose presentation above Runtime without a Runtime-owned transform or animation API. |
+| `usePaste`                                                 | Paste is one member of the tagged event union delivered by `useInput()`.                                                                                 |
+| `useStdout`, `useStderr`                                   | Runtime coordinates mounted output internally; no application-facing raw-output hook is exported.                                                        |
+| `useWindowSize`, `useLayoutWidth`, `useViewportHeight`     | `useLayoutSize()` exposes the accepted root layout width and height for every supported host.                                                            |
+| `useFocusManager`                                          | `useFocus()` exposes one explicit focus identity; Runtime has no public manager, traversal, scope, or string-ID API.                                     |
+| `useBoxSize`, `BoxSize`, `measureElement`                  | Direct-Box `useBoxMetrics()` and `UseBoxMetricsReturn` form the public measurement contract.                                                             |
+| `useCursor`                                                | Runtime exposes no public physical-cursor or caret contract.                                                                                             |
+| `useIsScreenReaderEnabled`                                 | Runtime exposes no accessibility-presentation selector; the removed experiment is recorded below.                                                        |
+| `kittyFlags`, `kittyModifiers`, and related protocol types | Terminal protocol negotiation and parser facts are private; public input uses `TuiInputEvent` and `TuiKey`.                                              |
+| `@vue-tui/runtime/fullscreen`                              | Fullscreen is selected by `MountOptions.mode`; no Fullscreen package entry exists.                                                                       |
 
 ## Render session
 
@@ -45,4 +62,4 @@ This is not a claim that terminal accessibility is unimportant — it is a refus
 - A no-DOM renderer cannot rely on browser attribute fallthrough. Any future semantic values must be interpreted by the renderer or by another explicitly owned accessibility engine.
 - Vue and Volar type-check declared camelCase props, but kebab `aria-*` is treated as a broadly allowed global template attribute and can bypass component-prop checking. A future design must not assume that accepting arbitrary kebab attributes gives a checked semantic contract.
 
-A future accessibility proposal must be additive and establish the real assistive-technology journey, a minimum semantic vocabulary rather than mechanically copied browser ARIA, behavior across every host and lifecycle edge, how higher-level components add semantics using only public Runtime APIs, run evidence with the intended terminal and screen-reader tools, and a migration that does not reintroduce parser, renderer-node, or lifecycle details as public API.
+Future accessibility work starts from a concrete assistive-technology journey and a complete additive Runtime contract.

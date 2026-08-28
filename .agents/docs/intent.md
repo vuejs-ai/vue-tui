@@ -1,116 +1,46 @@
-# Product goal
-
-> **Status:** maintainer-reviewed product direction. Vouched sections are the durable reference; implementation details and evidence remain challengeable where they are not stamped.
+# Product intent
 
 ## Positioning
 
-> **Status:** the original section vouch was superseded where later item-by-item Runtime decisions changed its assumptions. The current accessibility boundary is authoritative in the [Runtime public API decision ledger](./runtime-public-api-decisions.md#screen-reader-presentation-is-removed-from-the-current-foundation).
+[VOUCHED @hyfdev 2026-08-29]
 
-vue-tui is a Vue-native application framework for interactive terminal UIs.
+vue-tui is a Vue-native application framework for interactive terminal applications.
 
-It is for stateful applications that stay alive, react to user input and asynchronous events, and repeatedly update what the user sees. It is not trying to replace ordinary command-line tools for one-shot commands, pipelines, or simple prompts that do not need an application UI.
+Complex, long-lived applications that continuously update and respond to input are the primary product workload. Their rendering, input, layout, asynchronous-update, and terminal-lifecycle requirements set the architectural bar and product priority.
 
-Coding agents are a major application scenario, not the definition of the whole product. The framework must also serve real-time task and monitoring applications and multi-region data workbenches. The active scenario model is recorded in [product-scenarios.md](./product-scenarios.md).
+One-shot commands, pipelines, simple prompts, and non-interactive document output remain supported secondary workloads. The same foundation should serve them coherently, but their simpler requirements do not take priority over needs that block complex interactive terminal applications.
 
-## What makes it an application framework
+"Complex" refers to a UI that must coordinate layout, input, continuous updates, and terminal lifecycle; it does not refer to the size of the codebase or the complexity of the application domain.
 
-vue-tui combines:
-
-- a mature renderer that the project owns and evolves;
-- Vue-native authoring through components, SFCs or JSX, reactivity, lifecycle, props, slots, events, `v-model`, and composables;
-- terminal foundations for layout, paint, input, focus, cursor, mouse, resize, streaming updates, scrolling, process lifecycle, and terminal restoration;
-- useful first-party APIs, components, and composables for interaction patterns that recur across supported applications;
-- a complete authoring and verification loop: HMR, component tests, interaction tests, real-PTY tests, examples, starter material, and a documented production build path.
-
-Owning a renderer is an implementation responsibility, not the product value on its own. The product value is that a Vue developer can build and ship a reliable interactive terminal application without assembling those layers by hand.
+The product value is that a Vue developer can build and ship a reliable interactive terminal application without assembling the renderer, terminal lifecycle, development, and verification foundations by hand.
 
 ## Product promises
 
-- **Vue-native authoring.** Public APIs should feel like Vue rather than a translation of a React or imperative API.
-- **Mature terminal behavior.** Visible output, input, focus, cursor, mouse, resize, asynchronous updates, errors, interruption, non-TTY behavior, and cleanup should be predictable under real terminal conditions.
-- **Useful building blocks.** Repeated interaction behavior should become a generic first-party API, component, or composable when supported by a representative journey or a real consumer.
-- **A complete feedback loop.** Authors should be able to develop quickly, test behavior deterministically under real terminal conditions, and verify a clean packaged consumer.
-- **Stable generic contracts.** Public APIs and user-consumable types should mature toward a dependable 1.0 surface without freezing weak early designs.
-- **Clear package boundaries.** Terminal rendering and I/O, reusable interaction logic, and composed UI pieces stay in their recorded layers; application-specific data and business behavior stay in the application.
+- **Vue-native authoring.** Public APIs should follow Vue's design philosophy and established conventions, so Vue developers can use familiar component composition, reactivity, lifecycle, props, events, slots, and composables. [VOUCHED @hyfdev 2026-08-29]
+- **Reliable terminal behavior.** Complex interactive applications set the quality bar: output, input, layout, continuous updates, responsiveness, interruption, errors, and cleanup must be reliable and predictable under real terminal conditions. [VOUCHED @hyfdev 2026-08-29]
+- **Complete development and verification.** First-party HMR and build tooling, component and interaction testing, real-terminal verification, starter material, and documented production build paths are product responsibilities for building, testing, and shipping complex interactive terminal applications. Problems in `@vue-tui/vite` and `@vue-tui/testing` are product work when they affect this path, not merely auxiliary repository maintenance. [VOUCHED @hyfdev 2026-08-29]
+- **Stable generic contracts.** Public APIs and user-consumable types should converge on a coherent and dependable 1.0 contract. [VOUCHED @hyfdev 2026-08-29]
 
-## API stability during experimentation
+## Reusable Runtime behavior
 
-[VOUCHED @hyfdev 2026-07-11]
-
-vue-tui is currently experimental. Until a future stability milestone is explicitly accepted, existing public APIs are not backward-compatibility constraints. Treat each shipped API as evidence about the current implementation, then decide from the target product and terminal model whether to retain it, redesign it, or delete it. Design work should prefer one coherent target contract over aliases, deprecation windows, precedence rules, or compatibility shims whose only purpose is to preserve current releases.
-
-## Vue compatibility
-
-Version 0.3 starts at Vue 3.5. All public package peers, examples, tests, and the starter use `^3.5.0`; the project does not retain a separate external consumer matrix solely for older Vue minors. The cloneable starter's packed-package smoke remains the external installation, type-check, build, and development-flow check. Supporting an older Vue line again requires a concrete consumer need and a focused compatibility test.
+When a low-level interaction behavior recurs across multiple complex terminal applications, is generic rather than application-specific, and requires renderer or terminal ownership, it may become a first-party `@vue-tui/runtime` API or composable. The concrete Runtime shape follows the demonstrated problem rather than a predefined catalog. Higher-level component admission is governed separately by the [`@vue-tui/components` design principles](./components-design-principles.md#inclusion-bar--product-driven-and-evidence-backed).
 
 ## Rendering modes
 
-[VOUCHED @hyfdev 2026-07-25]
+[VOUCHED @hyfdev 2026-08-29]
 
-Rendering mode selects one of two terminal screen models. Both are live-TTY screens in the sense the [host ruling](./runtime-public-api-decisions.md#live-tty-is-primary-explicit-and-implicit-document-rendering-are-supported-secondary-hosts) uses; what separates them is **history ownership**, in the vocabulary of the [surface comparison terms](./terminal-ui-prior-art.md#terminal-surface-and-history-ownership):
+Inline and Fullscreen are both first-class rendering modes. Every feature must consider both. Shared APIs should support both where their screen models honestly allow it; any mode-specific behavior or limitation must be explicit.
 
-- **Inline delegates finished content to the terminal.** The application renders in the main screen buffer, and completed output becomes native scrollback the _terminal_ owns: it survives the process, composes with other shell output, and costs the framework no memory. The price is that the application has no stable physical origin — its rows move as anything else writes.
-- **Fullscreen owns its viewport and delegates nothing.** The application takes the alternate screen and holds a persistent viewport with stable coordinates, the way `vim` or `htop` does. Everything visible is application state the application renders each frame. The price is that no terminal-owned history exists to hand content to, and nothing survives the restore.
-
-Most concrete mode differences follow from that one distinction rather than from separate decisions. Because Fullscreen owns the surface, external output must be coordinated into the frame instead of pushing it down, clipping is meaningful, resize recomputes a viewport, and the stable origin is what a renderer-owned hit map would later need. Because Inline delegates, it gets unbounded history for free and cannot promise coordinates. "History" in a Fullscreen app is therefore ordinary application state that the app renders — not a framework service, and not a gap.
-
-The product supports both modes. No decision currently makes either one the primary product mode or treats the other as a degraded fallback. Work that affects only one mode must say so; shared APIs should support both when their terminal models honestly allow it, without hiding real differences behind a misleading common abstraction.
-
-A future hierarchy decision requires evidence from representative journeys in both modes and explicit maintainer review. No current or future mount default settles that product decision by itself; the exact clean-slate mount API is a separate design choice.
-
-## Inline scrollback ownership
-
-[VOUCHED @hyfdev 2026-07-11]
-
-The coordinated inline renderer must never erase terminal history or shell output that existed before the application started. Applications that need behavior outside that guarantee must retain an explicit application-side escape hatch. This vouch does not choose the exact overflow presentation, implementation mechanism, or escape-hatch API. Those details may be derived or proposed through real-terminal evidence, but they cannot weaken the scrollback invariant implicitly.
-
-## Application scenarios and shared interaction flows
-
-The active application scenarios are:
-
-1. **Conversational applications:** coding agents, chat interfaces, REPLs, and interactive debuggers.
-2. **Real-time tasks and monitoring:** build, test, and deployment runners; process, service, job, queue, and cluster monitors and control surfaces.
-3. **Multi-region data workbenches:** Git, database, API, file, project, cloud, Kubernetes, and dependency tools that combine navigation, details, actions, and live state.
-
-A terminal workspace or multiplexer is a demanding subscenario of the multi-region workbench. vue-tui can own its visible application shell, but specialized terminal-session infrastructure remains outside the framework core. The exact boundary and the reusable interaction flows are recorded in [product-scenarios.md](./product-scenarios.md).
-
-## How product work is chosen
-
-[VOUCHED @hyfdev 2026-07-10]
-
-Product work starts from concrete evidence, in this order of strength:
-
-1. a user-visible failure in a representative journey from an active application scenario;
-2. a reproducible problem from a real vue-tui consumer;
-3. behavior that several applications repeatedly have to implement and get right themselves;
-4. a reproducible failure in renderer correctness, the Vue contract, terminal lifecycle, development workflow, packaging, or an objective test gate.
-
-Coding-agent work is valuable because it stresses streaming, editable input, approval, tools, long output, and interruption together. It does not automatically outrank a clearer or more broadly reusable framework problem from another active scenario.
-
-Public framework APIs stay generic. Provider protocols, Git models, database schemas, monitor collectors, agent state machines, and purely application-specific presentation remain in applications or specialized libraries. A competitor's widget catalog or internal architecture is prior art, not a roadmap by itself.
+Inline uses the main screen, delegates completed output to terminal-owned scrollback, and must never erase terminal history or shell output that existed before the application started. Fullscreen uses the alternate screen, and the application owns and redraws the entire viewport.
 
 ## Product boundaries
 
-- vue-tui owns terminal UI rendering, Vue integration, reusable interaction behavior, development tooling, and verification support.
-- It does not provide model SDKs, agent loops, tool-execution policy, Git or database clients, monitoring collectors, or other application business layers.
-- A terminal-workspace application may use vue-tui for layout, tabs, panes, focus, mouse, status, and high-frequency rendering. PTY process ownership, ANSI/VT emulation, detach servers, sockets, SSH, session persistence, and coding-agent process detection belong to the application or specialized libraries.
-- A generic view over an externally supplied styled terminal-cell grid may become framework work only after repeated consumer evidence establishes a stable UI abstraction. vue-tui does not need to become a terminal emulator to render such a view.
-- A complete text editor, terminal emulator, multiplexer backend, or game engine is not a core product goal, even though those workloads can expose useful renderer limits.
-- `@vue-tui/components` currently has no blanket accessibility requirement. Runtime currently exposes no accessibility contract; future support requires a complete semantic and host-lifecycle design rather than restoring the removed experiment. See [components-design-principles.md](./components-design-principles.md#accessibility-is-not-a-current-component-contract).
-- The project does not add a component merely to match another framework or claim that arbitrary browser UI can run unchanged in a terminal.
+[VOUCHED @hyfdev 2026-08-29]
+
+vue-tui owns reusable UI-framework capabilities, including Vue integration, rendering and layout, terminal interaction and lifecycle, generic interaction behavior, and development and testing support. Application-domain logic and specialized infrastructure remain in applications or dedicated libraries. vue-tui may provide generic integration points, but it does not take ownership of the external system itself.
 
 ## Success looks like
 
-- A Vue developer can build a reliable application in each active scenario without implementing terminal escape handling, layout, repaint coordination, focus, input decoding, resize, and restoration from scratch.
-- Repeated workflow, finder, and viewer behavior is available through coherent generic APIs, components, and composables instead of being copied between applications.
-- Inline and full-screen behavior is explicit, tested under a real PTY, and faithful to each screen model.
-- Representative journeys are deterministic enough for CI. Several journeys may share one example application; the product does not require one showcase per scenario.
-- Published examples and a clean tarball consumer exercise the documented development and production paths without importing private runtime internals.
-- Common author mistakes are rejected by template and TSX types when possible and otherwise fail with a clear, recoverable runtime error.
+[VOUCHED @hyfdev 2026-08-29]
 
-## Durable evidence
-
-- The first-party [coding-agent example](https://github.com/vuejs-ai/vue-tui/tree/3e44c9a266e52ebeba2db669b4bb96521b9e2f3a/examples/coding-agent) exercises streaming, tool execution, approval, and `@vue-tui/runtime/inline` `Static` output, although much of its higher-level interaction behavior is still application code.
-- Reproducible issues such as [`v-show` #246](https://github.com/vuejs-ai/vue-tui/issues/246) and [`useInput` ownership #250](https://github.com/vuejs-ai/vue-tui/issues/250) are evidence for Vue-contract and interaction gaps; they do not define the product alone.
-
-Reconsider the vouched direction only when representative journeys or real consumers contradict it, or when measured limitations make the current product or package boundaries untenable. New API names, component shapes, scenario ordering, and release plans remain separate decisions until reviewed and vouched.
+A Vue developer can build, test, and ship a complex interactive terminal application without reimplementing shared rendering, layout, input, live-update coordination, and terminal-lifecycle foundations. Simpler, short-lived, or non-interactive uses are supported coherently by the same architecture.
