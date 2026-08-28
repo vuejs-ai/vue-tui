@@ -1,5 +1,7 @@
 # Product intent
 
+This record covers vue-tui as one product. Runtime occupies much of it because Runtime is the core product layer and carries the framework's foundational responsibilities; the direction also applies to the higher-level packages and official tooling that complete the product.
+
 ## Positioning
 
 [VOUCHED @hyfdev 2026-08-29]

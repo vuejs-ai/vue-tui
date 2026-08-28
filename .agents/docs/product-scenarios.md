@@ -15,7 +15,7 @@ Useful evidence identifies the user action, visible result, failure, terminal ho
 3. the proposed package owns the behavior; and
 4. the result can be verified at the appropriate layer, including a real PTY when the claim concerns the visible terminal or terminal lifecycle.
 
-Package admission is deliberately separate. Runtime candidates follow the [reusable Runtime rule](./intent.md#reusable-runtime-behavior). Higher-level visual components follow the [`@vue-tui/components` inclusion bar](./components-api-design.md#inclusion-bar--product-driven-and-evidence-backed). Independent headless behavior and official tooling follow the ownership test in [package layers](./package-layers.md).
+Product intent applies across all vue-tui packages and official tooling. Once a problem qualifies as product work, package placement and package-specific admission remain separate: behavior that requires Runtime ownership follows the [reusable Runtime direction](./intent.md#reusable-runtime-behavior), higher-level visual components follow the [`@vue-tui/components` inclusion bar](./components-api-design.md#inclusion-bar--product-driven-and-evidence-backed), and independent headless behavior and official tooling follow the ownership test in [package layers](./package-layers.md).
 
 ## How product work is prioritized
 

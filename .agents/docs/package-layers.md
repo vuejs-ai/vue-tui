@@ -4,8 +4,10 @@
 > dependency direction between them, and where a new piece of code (a component vs a hook)
 > belongs. The three-layer set, the one-way dependency direction, and the split between
 > component-tied hooks (`components`) and independent hooks (`use`) are **[VOUCHED @hyfdev]**.
-> Runtime admission is governed by [intent.md](./intent.md#reusable-runtime-behavior);
-> higher-level component admission is governed by
+> Product direction for vue-tui as a whole lives in [intent.md](./intent.md). Within that
+> direction, [reusable Runtime behavior](./intent.md#reusable-runtime-behavior) sets the
+> product bar for generic behavior that requires Runtime ownership. Higher-level component
+> catalog admission follows the package-specific rule in
 > [components-api-design.md](./components-api-design.md). Neither rule is duplicated here.
 
 ## The layers
@@ -41,4 +43,4 @@ Being implemented as a composable does not make something Runtime work. Being im
 
 ## Enforcement
 
-`@vue-tui/use` and `@vue-tui/components` are replaceable higher layers and use Runtime exactly like third parties. Public-layer import tests enforce that they do not reach Runtime source or internal entries. Adding a layer does not itself justify adding behavior; Runtime and Components use their separate admission rules.
+`@vue-tui/use` and `@vue-tui/components` are replaceable higher layers and use Runtime exactly like third parties. Public-layer import tests enforce that they do not reach Runtime source or internal entries. Adding a layer does not itself justify adding behavior; every candidate must remain consistent with the product intent and satisfy the evidence requirements, placement test, and any package-specific inclusion rule.

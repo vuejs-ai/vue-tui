@@ -1,6 +1,6 @@
 # @vue-tui/components API design
 
-This record applies only to the higher-level `@vue-tui/components` package. It does not decide admission into `@vue-tui/runtime`; Runtime follows the separate [reusable Runtime rule](./intent.md#reusable-runtime-behavior).
+This record applies only to the higher-level `@vue-tui/components` package. It supplements the [product-wide intent](./intent.md) with package-specific catalog and API rules. Runtime-specific direction remains part of that product intent because Runtime is vue-tui's core product layer; this record neither replaces the product intent nor defines the Runtime contract.
 
 `@vue-tui/components` currently exports `Newline`, `ScrollBox`, `Spacer`, `Spinner`, and `Table`. Component-specific contracts live in [ScrollBox](./components/scroll-box.md), [Spinner](./components/spinner.md), and [Table](./components/table.md).
 
