@@ -1,4 +1,4 @@
-# Package Layers & Dependency Direction
+# Package architecture
 
 > Records how vue-tui's packages are layered by responsibility, the strict one-way
 > dependency direction between them, and where a new piece of code (a component vs a hook)

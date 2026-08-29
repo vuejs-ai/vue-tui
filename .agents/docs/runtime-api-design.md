@@ -1,6 +1,6 @@
 # @vue-tui/runtime API design
 
-This record owns the non-obvious application-facing design and implemented contract of `@vue-tui/runtime`. The [Runtime public API decision ledger](./runtime-public-api-decisions.md) is authoritative for Yunfei's judgments. Export declarations, public type tests, behavior tests, and package-export tests remain authoritative for exact machine-checkable inventory.
+This record owns the non-obvious application-facing design and implemented contract of `@vue-tui/runtime`. The [Runtime API decision ledger](./runtime-api-decisions.md) is authoritative for Yunfei's judgments. Export declarations, public type tests, behavior tests, and package-export tests remain authoritative for exact machine-checkable inventory.
 
 ## Supported package entries
 
@@ -38,7 +38,7 @@ Caller-supplied streams are borrowed. Runtime removes its listeners and restores
 
 ## Host and rendering-mode contract
 
-The [rendering-mode matrix](./rendering-mode-matrix.md) is the canonical visual-host contract. TTY Inline owns a main-screen live region, TTY Fullscreen owns the alternate-screen viewport, and non-TTY stdout selects the final-document host for either request. Input capability resolves independently from the output surface. Inline and Fullscreen are both first-class modes, but their different screen ownership remains explicit.
+The [Runtime rendering modes](./rendering-modes.md) record is the canonical visual-host contract. TTY Inline owns a main-screen live region, TTY Fullscreen owns the alternate-screen viewport, and non-TTY stdout selects the final-document host for either request. Input capability resolves independently from the output surface. Inline and Fullscreen are both first-class modes, but their different screen ownership remains explicit.
 
 `Static` is available only from `/inline`; an effective visual Fullscreen surface rejects its presence before committing output or a new frame.
 

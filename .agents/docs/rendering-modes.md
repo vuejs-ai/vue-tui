@@ -1,8 +1,8 @@
-# Rendering mode and host behavior matrix
+# Runtime rendering modes
 
 This is the canonical visual-host contract for mounted Runtime rendering. Public callers request Inline or Fullscreen; Runtime resolves that request with stdout capabilities into an effective surface. Input, color, deterministic observation, and scheduling are separate concerns and do not create additional public rendering modes.
 
-The product direction is in [intent.md](./intent.md#rendering-modes). Exact accepted API judgments are in the [Runtime decision ledger](./runtime-public-api-decisions.md).
+The product direction is in [intent.md](./intent.md#rendering-modes). Exact accepted API judgments are in the [Runtime decision ledger](./runtime-api-decisions.md).
 
 ## Resolution model
 

@@ -1,8 +1,8 @@
-# Runtime public API decisions
+# Runtime API decisions
 
 Judgments Yunfei actually expressed about the target public surface of `@vue-tui/runtime` — selections, acceptances, and rejections. A finished implementation, a passed review, resemblance to a peer, or silence is not acceptance. Never invent a rationale. Entries record the judgment, not the full API contract; [Runtime API design](./runtime-api-design.md) records the non-obvious implemented contract, with exact executable shape in code and tests. Edit entries in place; git keeps history.
 
-The three-layer direction is not duplicated here: `runtime ← use ← components`, with independent higher-level behavior in the optional, replaceable `@vue-tui/use` layer. Application-facing higher layers use only public Runtime APIs, and Runtime exposes only behavior that requires Runtime ownership. See [Package Layers & Dependency Direction](./package-layers.md).
+The three-layer direction is not duplicated here: `runtime ← use ← components`, with independent higher-level behavior in the optional, replaceable `@vue-tui/use` layer. Application-facing higher layers use only public Runtime APIs, and Runtime exposes only behavior that requires Runtime ownership. See [Package architecture](./package-architecture.md).
 
 The exact export inventory is guarded in code and tests. Entries below record only Yunfei's expressed judgments; evidence-determined technical conclusions belong in the API contract rather than this ledger.
 

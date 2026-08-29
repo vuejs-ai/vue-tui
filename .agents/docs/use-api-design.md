@@ -1,6 +1,6 @@
 # @vue-tui/use API design
 
-This record applies only to `@vue-tui/use`: reusable headless Vue behavior built entirely from supported public `@vue-tui/runtime` APIs. Package placement is governed by [package layers](./package-layers.md); exact exports and types are enforced by source declarations and public API tests.
+This record applies only to `@vue-tui/use`: reusable headless Vue behavior built entirely from supported public `@vue-tui/runtime` APIs. Package placement is governed by [package architecture](./package-architecture.md); exact exports and types are enforced by source declarations and public API tests.
 
 The root currently exports `useKeyInput`, `useTextInput`, and `useInputWhileMounted`. The `/components` entry exports the renderless `UseInputWhileMounted` companion.
 
@@ -8,7 +8,7 @@ The root currently exports `useKeyInput`, `useTextInput`, and `useInputWhileMoun
 
 An API belongs in `@vue-tui/use` when it expresses reusable Vue coordination that is not the internal state or required companion of a specific rendered component and does not require Runtime-private renderer, terminal, layout, paint, protocol, or application-lifecycle ownership. It may observe a caller-selected vnode as a generic Vue lifetime signal and may select or coordinate public Runtime facts, but it must preserve the Runtime contract rather than invent a second input, focus, or rendering model.
 
-New APIs still require [qualifying product evidence](./product-scenarios.md#qualifying-evidence) and must pass the shared [placement test](./package-layers.md#placement-test); this record does not create a separate package roadmap. The current input selectors establish that a higher-layer API may improve Vue authoring without adding a new Runtime capability, provided it preserves the exact event object and subscription behavior.
+New APIs still require [qualifying product evidence](./product-priorities.md#qualifying-evidence) and must pass the shared [placement test](./package-architecture.md#placement-test); this record does not create a separate package roadmap. The current input selectors establish that a higher-layer API may improve Vue authoring without adding a new Runtime capability, provided it preserves the exact event object and subscription behavior.
 
 ## Input selector composables
 
@@ -33,7 +33,7 @@ The return value is one stable Vue function ref that the caller binds directly t
 
 The paired `<UseInputWhileMounted>` component is exported from `@vue-tui/use/components`. It renders only its default slot, emits `input` during its own mounted lifetime, and accepts a reactive optional `type` prop that narrows the emitted event. Changing or hiding only the slot content does not deactivate the wrapper.
 
-The root stays composable-only. A renderless companion belongs on `/components`, not in the visual `@vue-tui/components` catalog, because it is another authoring form of independent headless behavior. The general entry-point ruling is vouched in [package layers](./package-layers.md#renderless-companions-of-independent-hooks).
+The root stays composable-only. A renderless companion belongs on `/components`, not in the visual `@vue-tui/components` catalog, because it is another authoring form of independent headless behavior. The general entry-point ruling is vouched in [package architecture](./package-architecture.md#renderless-companions-of-independent-hooks).
 
 ## Vue and public types
 

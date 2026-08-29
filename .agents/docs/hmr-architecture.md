@@ -1,6 +1,6 @@
 # Dev-server and HMR architecture
 
-This record defines how `@vue-tui/vite` runs a terminal application during development, how updates reach it, and how terminal ownership survives errors and reloads. Verification strategy lives in [hmr-testing.md](./hmr-testing.md); production rendering-mode behavior lives in [rendering-mode-matrix.md](./rendering-mode-matrix.md).
+This record defines how `@vue-tui/vite` runs a terminal application during development, how updates reach it, and how terminal ownership survives errors and reloads. Verification strategy lives in [hmr-testing.md](./hmr-testing.md); production rendering-mode behavior lives in [rendering-modes.md](./rendering-modes.md).
 
 Compatibility is pinned exactly to Vite 8.2.1, `@vitejs/plugin-vue-jsx` 5.1.5, and `unplugin-vue` 7.2.0. Moving a pin requires rechecking compiler configuration, the module-runner HMR seams, real SFC and JSX updates, and the packed starter.
 
