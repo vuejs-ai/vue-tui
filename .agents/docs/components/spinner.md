@@ -15,9 +15,9 @@ A pure composition of `<Text>` plus a component-local timer — no Runtime hook 
 - **Escape hatch:** `frames: string[]` + `interval?: number` override `type`. A `cli-spinners`
   entry (`{ interval, frames }`) can be spread in verbatim. Empty `frames` and an unknown `type`
   both fall back to `dots`; `interval` overrides in either mode.
-- **No `cli-spinners` dependency.** This is a _set-membership_ decision under the inclusion bar,
-  recorded here — **not** an Ink divergence (`ink-spinner`/`cli-spinners` are third-party npm, not
-  Ink-core v7.0.4, which has no Spinner; there is nothing to diverge from).
+- **No `cli-spinners` dependency.** This is a first-party catalog decision under the inclusion bar,
+  recorded here. `ink-spinner` and `cli-spinners` are third-party packages, so their catalogs do
+  not define the first-party vue-tui component or preset set.
 
 ## Behavior
 

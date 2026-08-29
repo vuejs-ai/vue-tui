@@ -7,10 +7,8 @@ import { Box, Text } from "@vue-tui/runtime";
 // position:"absolute" children — an absolutely-positioned child is placed
 // against its containing block, the **padding box** (the area inside the
 // borders; padding itself does NOT inset it), not the (nonexistent) content
-// rect, so the zero-content guard must not suppress it. Ink v7.0.4 paints
-// these (verified by running real Ink); vue-tui previously suppressed ALL
-// children. Flow children stay suppressed (the blessed degenerate-box
-// divergence).
+// rect, so the zero-content guard must not suppress it. Flow children remain
+// suppressed because no positive content rectangle exists.
 //
 // Assertions use exact frames (not `toContain`) so they pin WHERE the child
 // lands — the padding-box edge — distinguishing it from the border box and
@@ -37,9 +35,8 @@ test("absolute child paints at the padding-box edge when content area is zero (w
 test("absolute child positions against the padding box, not the content box", async () => {
   // Discriminator: with border=1 AND padding=1, the padding-box edge is at
   // row 1 / col 1 (inside the border, before padding). A content-box containing
-  // block would instead put X at row 2 / col 2. Verified byte-identical in real
-  // Ink v7.0.4. This is the assertion that would have caught a "border-box" vs
-  // "padding-box" mistake.
+  // block would instead put X at row 2 / col 2. This distinguishes the
+  // padding-box contract from border-box or content-box placement.
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box
@@ -62,8 +59,8 @@ test("absolute child positions against the padding box, not the content box", as
 });
 
 test("flow (non-absolute) child stays suppressed when the content area is zero", async () => {
-  // The blessed degenerate-box divergence: a normal flow child in a zero-content
-  // box does NOT paint (avoids Ink's zero-width-text leak). This must stay true.
+  // A normal flow child in a zero-content box does not paint because it has no
+  // positive layout rectangle.
   const { lastFrame } = await render(
     defineComponent(() => () => (
       <Box>

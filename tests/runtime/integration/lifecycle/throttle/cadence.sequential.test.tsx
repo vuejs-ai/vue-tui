@@ -6,9 +6,10 @@ import { createInternalMountOptions } from "../../../../../packages/runtime/dist
 import { captureWrites, makeFakeStdin, makeFakeWritable } from "../test-streams.ts";
 import { FAKE_TIMER_OPTS } from "./harness.ts";
 
+// Case shape adapted from Ink v7.0.4:
+// https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/test/render.tsx#L859-L900
 test.sequential("throttle renders to maxFps", async () => {
-  // Port of Ink's "throttle renders to maxFps" — verifies leading+trailing
-  // throttle pattern with maxFps=1 (1000ms window).
+  // Verify the leading-and-trailing pattern at maxFps=1 (1000ms window).
   vi.useFakeTimers(FAKE_TIMER_OPTS);
   try {
     const msg = shallowRef("Hello");
@@ -63,10 +64,7 @@ test.sequential("throttle renders to maxFps", async () => {
   }
 });
 
-// Audit e29 (verified vs real Ink v7.0.4): Ink's render throttle is
-// es-toolkit/compat `throttle(fn, wait, {leading, trailing})`, i.e.
-// `debounce(fn, wait, {leading, trailing, maxWait: wait})`, whose trailing
-// timer is RE-ARMED on every call — the trailing commit fires at
+// The trailing timer is re-armed on every call, so its commit fires at
 // lastCall+wait. A window-anchored timer (windowStart+wait) fires a full
 // window early; a first-deferred-call anchor (firstDeferred+wait) is also
 // wrong, and only this multi-deferred-call shape discriminates it: with
@@ -110,12 +108,12 @@ test.sequential("trailing commit fires at lastCall+wait, re-armed per deferred c
     await nextTick();
 
     // t0+1799: both wrong anchors (t0+1000 window, t0+1400 first-deferred)
-    // would have committed by now — Ink's lastCall+wait anchor has not.
+    // would have committed by now; the lastCall+wait anchor has not.
     vi.advanceTimersByTime(999);
     expect(has("vC")).toBe(false);
 
     // t0+1800 = lastCall (t0+800) + wait (1000): the trailing commit fires,
-    // and the intermediate "vB" collapsed into it (Ink-identical).
+    // and the intermediate "vB" collapsed into it.
     vi.advanceTimersByTime(1);
     expect(has("vC")).toBe(true);
     expect(has("vB")).toBe(false);
@@ -130,8 +128,7 @@ test.sequential("sustained deferred calls hold a ~wait cadence (maxWait edge)", 
   // Re-arming the trailing timer per call must NOT turn the throttle into a
   // debounce that starves forever: es-toolkit's maxWait (= wait) commits
   // synchronously when a call arrives a full window after the first deferral.
-  // Shape verified vs real Ink v7.0.4 (audit e29 sustained-burst cadence):
-  // calls every 100ms at wait=1000ms — leading at call 1 (t0+100), call 2
+  // Calls every 100ms at wait=1000ms: leading at call 1 (t0+100), call 2
   // (t0+200) starts the deferral window, so the calls at t0+1200 (k=12) and
   // t0+2200 (k=22) hit the maxWait edge and commit; the burst tail lands as
   // a trailing commit at lastCall+wait (t0+3500).

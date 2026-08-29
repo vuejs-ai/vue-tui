@@ -1,10 +1,5 @@
-// Lazy cursor-hide parity (Ink v7.0.4). Ink hides the cursor LAZILY: log-update
-// hides on the first render that actually writes (log-update.ts:55-59), and the
-// onRender outer gate `output !== lastOutput || log.isCursorDirty()`
-// (ink.tsx:1094) skips log-update entirely for an empty frame (both ""). So an
-// interactive app whose root renders nothing emits no cursor escape on its
-// initial commit; vue-tui must match. Teardown may still restore cursor
-// visibility.
+// Cursor hiding is output-driven: an empty initial frame writes no cursor escape,
+// while the first non-empty frame hides it. Teardown may still restore visibility.
 //
 // These run under a real PTY whose TERM/COLORTERM advertise truecolor, so
 // the genuine interactive log-update path is exercised, not the deterministic
@@ -18,8 +13,7 @@ const NEL = "\x1bE";
 it("interactive empty app (() => null) emits NO cursor-hide escape", async () => {
   const output = await run("cursor-empty-app");
   expect(output).toContain("exited");
-  // The bug: vue-tui eagerly hid the cursor at mount even though nothing
-  // renders. Ink emits no hide escape for an empty initial frame.
+  // Nothing rendered, so mount must not hide or advance the cursor.
   expect(output).not.toContain(HIDE);
   expect(output).not.toContain(NEL);
 });

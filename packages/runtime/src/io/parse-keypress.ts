@@ -1,5 +1,5 @@
-// Ported from Ink's parse-keypress.ts
-// @see https://github.com/vadimdemedes/ink
+// Parser structure adapted from Ink v7.0.4:
+// https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/src/parse-keypress.ts
 
 import { kittyModifiers } from "./kitty-keyboard.ts";
 
@@ -9,15 +9,11 @@ const metaKeyCodeRe = /^(?:\x1b)([a-zA-Z0-9])$/;
 
 const fnKeyRe = /^(?:\x1b+)(O|N|\[|\[\[)(?:(\d+)(?:;(\d+))?([~^$])|(?:1;)?(\d+)?([a-zA-Z]))/;
 
-// Kitty keyboard-protocol query-response (ESC[?Nu). Ink has NO equivalent here:
-// it filters these only in its detection lifecycle (ink.tsx), the layer vue-tui
-// mirrors in kitty-keyboard.ts. But that detection layer does NOT cover the real
-// input pipeline — in `enabled` mode it never runs, and in `auto` mode its
-// onData listener and the stdin controller's handleData both subscribe to the
-// same 'data' event, so it can't stop a query-response reaching parseKeypress.
-// This regex is the load-bearing second net that keeps a stray query-response
-// from surfacing as spurious input. See .agents/docs/ink-divergences.md and the
-// "kitty query-response - end-to-end filtering" tests for the proof.
+// Kitty keyboard-protocol query-response (ESC[?Nu). Detection does not cover the
+// complete input pipeline: enabled mode skips probing, and auto mode's detector
+// and stdin controller both observe the same data event. This parser-level net
+// prevents a response from surfacing as user input; the end-to-end Kitty
+// query-response tests pin the complete path.
 const kittyQueryResponseRe = /^\x1b\[\?\d+u$/;
 
 const keyName: Record<string, string> = {

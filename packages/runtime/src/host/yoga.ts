@@ -106,8 +106,8 @@ export function attachYoga(node: YogaCarrier): void {
   if (node.type === "tui-static") {
     (node.yoga as YogaNode).setDisplay(Yoga.DISPLAY_NONE);
   }
-  // Box nodes match Ink's defaults: row direction, shrinkable, no wrap.
-  // These are set at the yoga level so they work regardless of whether props
+  // Box defaults are row direction, shrinkable, and no-wrap. These are set at
+  // the yoga level so they work regardless of whether props
   // are passed through Vue's reactive system (which may include undefined
   // overrides or border defaults). User-provided props override these via
   // patchProp which runs after attachYoga.
@@ -117,9 +117,9 @@ export function attachYoga(node: YogaCarrier): void {
     (node.yoga as YogaNode).setFlexWrap(Yoga.WRAP_NO_WRAP);
     (node.yoga as YogaNode).setFlexGrow(0);
   }
-  // Text nodes match Ink's <ink-text> defaults: row direction, shrinkable.
-  // Although text nodes rarely have yoga-carrying children, this ensures
-  // consistent layout behavior matching Ink.
+  // Text defaults are row direction and shrinkable. Although text nodes rarely
+  // have yoga-carrying children, applying the defaults here keeps layout
+  // consistent for every host construction path.
   if (node.type === "tui-text") {
     (node.yoga as YogaNode).setFlexDirection(Yoga.FLEX_DIRECTION_ROW);
     (node.yoga as YogaNode).setFlexShrink(1);
@@ -167,10 +167,8 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
   //   else   → setWidthAuto() — this is the load-bearing fallback (like flexBasis's
   //     setFlexBasisAuto): Vue's [Number, String] prop validation only WARNS on a
   //     bad runtime value (e.g. width={false}/{}/[]) and still forwards it, so
-  //     without this branch the raw setWidth(false) THROWS ("Invalid value false
-  //     for setWidth") and crashes the render where Ink renders fine via auto.
-  // null/undefined also land in the else branch → auto (the G19 removal reset,
-  // equivalent to the prior setWidth("auto")).
+  //     without this branch the raw setWidth(false) throws and crashes render.
+  // null/undefined also land in the else branch and reset to auto.
   width: (n, v) => {
     if (typeof v === "number") {
       n.setWidth(v);
@@ -190,30 +188,21 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
       n.setHeightAuto();
     }
   },
-  // Mirror Ink's applyDimensionStyles minWidth branch exactly (styles.ts:684-690):
-  //   string → setMinWidthPercent(Number.parseInt(v, 10))
-  //   else   → setMinWidth(v ?? 0) — number falls here (= setMinWidth(v)), and so
-  //     does a junk value (e.g. minWidth={false} → setMinWidth(false), which THROWS
-  //     in yoga exactly as it does in Ink, since `?? 0` only catches null/undefined).
-  //     Ink has no auto fallback for min/max, so we faithfully forward junk to the
-  //     cell setter and match Ink's behavior, including its throw.
-  // Ink default: minWidth=0 (yoga default) → null/undefined reset to 0 on removal. (G19)
+  // Minimum dimensions accept percentage strings or cell numbers. Nullish
+  // removal resets to zero; other off-contract values reach Yoga and may throw.
   minWidth: (n, v) =>
     typeof v === "string"
       ? n.setMinWidthPercent(Number.parseInt(v, 10))
       : n.setMinWidth(v == null ? 0 : (v as number)),
-  // Mirror Ink's minHeight branch (styles.ts:692-698); see minWidth above.
-  // Ink default: minHeight=0 (yoga default) → null/undefined reset to 0 on removal. (G19)
+  // minHeight follows the same value and reset contract as minWidth.
   minHeight: (n, v) =>
     typeof v === "string"
       ? n.setMinHeightPercent(Number.parseInt(v, 10))
       : n.setMinHeight(v == null ? 0 : (v as number)),
-  // Ink default: flexGrow=0 (Box.tsx hardcodes flexGrow:0). Reset to 0 on removal. (G19)
+  // Flex removals restore the Box defaults established by attachYoga().
   flexGrow: (n, v) => n.setFlexGrow(v == null ? 0 : (v as number)),
-  // Ink default: flexShrink=1 (Box.tsx hardcodes flexShrink:1). Reset to 1 on removal. (G19)
   flexShrink: (n, v) => n.setFlexShrink(v == null ? 1 : (v as number)),
-  // Ink default: flexBasis=auto (yoga default), reset via the else branch on removal. (G19)
-  // Mirror Ink's flexBasis branch exactly (styles.ts:547-555):
+  // flexBasis accepts cell numbers and percentage strings:
   //   number → setFlexBasis (absolute cells)
   //   string → setFlexBasisPercent(Number(v without "%")) — the public
   //     validator admits only canonical percentages and preserves decimals.
@@ -221,8 +210,8 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
   //   else   → setFlexBasisAuto()  — this is the load-bearing fallback: Vue's
   //     [Number, String] prop validation only WARNS on a bad runtime value
   //     (e.g. flexBasis={false}/{}/[]) and still forwards it, so without this
-  //     branch setFlexBasis(false) THROWS where Ink renders fine via auto.
-  // null/undefined also lands in the else branch → auto (the G19 removal reset).
+  //     branch setFlexBasis(false) throws during render.
+  // null/undefined also lands in the else branch and resets to auto.
   flexBasis: (n, v) => {
     if (typeof v === "number") {
       n.setFlexBasis(v);
@@ -232,16 +221,12 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
       n.setFlexBasisAuto();
     }
   },
-  // Ink default: flexDirection=row (Box.tsx hardcodes flexDirection:'row'). Reset to ROW on removal. (G19)
+  // Remaining flex removals restore the local layout defaults.
   flexDirection: (n, v) =>
     n.setFlexDirection(v == null ? Yoga.FLEX_DIRECTION_ROW : toFlexDirection(v as string)),
-  // Ink default: flexWrap=nowrap (Box.tsx hardcodes flexWrap:'nowrap'). Reset to NO_WRAP on removal. (G19)
   flexWrap: (n, v) => n.setFlexWrap(v == null ? Yoga.WRAP_NO_WRAP : toFlexWrap(v as string)),
-  // Ink default: alignItems=stretch (yoga default). Reset to STRETCH on removal. (G19)
   alignItems: (n, v) => n.setAlignItems(v == null ? Yoga.ALIGN_STRETCH : toAlign(v as string)),
-  // Ink default: alignSelf=auto (yoga default). Reset to AUTO on removal. (G19)
   alignSelf: (n, v) => n.setAlignSelf(v == null ? Yoga.ALIGN_AUTO : toAlign(v as string)),
-  // Ink default: justifyContent=flex-start (yoga default). Reset to FLEX_START on removal. (G19)
   justifyContent: (n, v) =>
     n.setJustifyContent(v == null ? Yoga.JUSTIFY_FLEX_START : toJustify(v as string)),
   // Each physical gutter depends on its axis-specific value and the broad gap.
@@ -256,14 +241,13 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
   // axis shorthand, the all-edges shorthand), and per yoga precedence the
   // more-specific edge OVERRIDES the shorthand even when set to 0 — so a single
   // yoga setter that sees one value can't reconcile the family. In particular,
-  // withdrawing `marginTop` from `margin={5} marginTop={8}` used to setMargin(
-  // EDGE_TOP,0), and EDGE_TOP=0 still overrides EDGE_ALL=5, collapsing the top
-  // margin to 0 instead of falling back to the surviving margin={5}. patchProp
+  // withdrawing `marginTop` from `margin={5} marginTop={8}` cannot set
+  // EDGE_TOP=0 because that still overrides EDGE_ALL=5. patchProp
   // owns the joint reconciliation via reconcileMarginEdges / reconcilePaddingEdges
   // (below), which read the full el.props and resolve each physical edge with
   // explicit precedence. These no-op entries exist only so isYogaProp still routes
-  // margin/padding props through the yoga branch (which also stores them into
-  // el.props for the reconcile). (G19; mirrors the border reconcile pattern.)
+  // margin/padding props through the yoga branch, which also stores them in
+  // el.props for reconciliation.
   margin: () => {},
   marginX: () => {},
   marginY: () => {},
@@ -284,7 +268,7 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
   // here: an edge's width depends on BOTH borderStyle and that edge's per-edge
   // prop together, and a yoga setter only sees one value. patchProp owns the
   // joint reconciliation via reconcileBorderEdges (below), which reads the full
-  // el.props and mirrors Ink's applyBorderStyles. These no-op entries exist only
+  // el.props. These no-op entries exist only
   // so isYogaProp still routes border props through the yoga branch (which also
   // stores them into el.props for the paint pass).
   borderStyle: () => {},
@@ -298,26 +282,21 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
   // visible default. Public BoxProps intentionally do not expose `display`.
   display: (n, v) =>
     n.setDisplay(v != null && v !== "flex" ? Yoga.DISPLAY_NONE : Yoga.DISPLAY_FLEX),
-  // Ink does NOT call setOverflow on yoga — it only clips visually in paint.
-  // Calling setOverflow(HIDDEN) would prevent nodes from expanding beyond
-  // their bounds during layout, which differs from Ink's behavior.
+  // Overflow is a paint-time clip. Calling Yoga setOverflow(HIDDEN) here would
+  // also constrain layout and prevent overflow-visible descendants from
+  // receiving their intended geometry.
   overflow: (_n, _v) => {},
   // Yoga does not support per-axis overflow; these are accepted silently.
   overflowX: (_n, _v) => {},
   overflowY: (_n, _v) => {},
-  // Mirror Ink's applyDimensionStyles maxWidth branch (styles.ts:700-714):
-  //   string → setMaxWidthPercent(Number.parseInt(v, 10))
-  //   else   → setMaxWidth(v) — number falls here; a junk value (maxWidth={false})
-  //     forwards to setMaxWidth(false), which THROWS in yoga exactly as in Ink (Ink
-  //     has no auto fallback for max). We map null/undefined → NaN here (yoga's "no
-  //     max", the G19 removal reset) because Vue's host renderer can deliver raw
-  //     null and setMaxWidth(null) throws ("Cannot read properties of null"); NaN is
-  //     equivalent to Ink's else with an absent/undefined value.
+  // Maximum dimensions accept percentage strings or cell numbers. A nullish
+  // removal maps to Yoga's NaN "no maximum" value because setMaxWidth(null)
+  // throws; other off-contract values reach Yoga and may throw.
   maxWidth: (n, v) =>
     typeof v === "string"
       ? n.setMaxWidthPercent(Number.parseInt(v, 10))
       : n.setMaxWidth(v == null ? (NaN as never) : (v as number)),
-  // Mirror Ink's maxHeight branch (styles.ts:708-714); see maxWidth above.
+  // maxHeight follows the same value and reset contract as maxWidth.
   maxHeight: (n, v) =>
     typeof v === "string"
       ? n.setMaxHeightPercent(Number.parseInt(v, 10))
@@ -326,19 +305,16 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
     v == null ? n.setAspectRatio(undefined as never) : n.setAspectRatio(v as number),
   alignContent: (n, v) =>
     v == null ? n.setAlignContent(Yoga.ALIGN_FLEX_START) : n.setAlignContent(toAlign(v as string)),
-  // Ink default: position=relative (yoga default). Reset to RELATIVE on removal. (G19)
+  // Removing position restores relative positioning.
   position: (n, v) => n.setPositionType(toPosition(v as string | undefined)),
-  // Mirror Ink's applyPositionStyles branch exactly (styles.ts:428-441):
+  // Position offsets accept percentage strings or cell numbers:
   //   string → setPositionPercent(edge, Number.parseFloat(value)) — so a
   //     bare-numeric string like top="50" is 50% of the container, NOT 50 absolute
-  //     cells. NOTE: Ink uses parseFloat for positions (preserving fractions) vs
-  //     parseInt for dimensions (above) — that distinction is intentional, keep it.
+  //     cells. parseFloat preserves fractional percentages; dimension strings
+  //     use the separate conversion documented above.
   //   else   → setPosition(edge, value) — number falls here; a junk value
-  //     (top={false}) forwards to setPosition(edge, false), which THROWS in yoga
-  //     exactly as in Ink (Ink has no auto fallback for positions). We map
-  //     null/undefined → NaN here (yoga's auto, the G19 removal reset), the
-  //     equivalent of Ink's else with an absent value (Vue can deliver raw null,
-  //     and setPosition(edge, null) throws).
+  //     (top={false}) reaches Yoga and may throw. Nullish removal maps to Yoga's
+  //     NaN auto value because setPosition(edge, null) throws.
   top: (n, v) =>
     typeof v === "string"
       ? n.setPositionPercent(Yoga.EDGE_TOP, Number.parseFloat(v))
@@ -419,9 +395,8 @@ export const BORDER_PROPS = new Set([
 ]);
 
 /**
- * Recompute all four yoga border-edge widths from a box's full prop set, mirroring
- * Ink's applyBorderStyles (styles.ts:729-763): the per-side width is
- * `borderStyle ? 1 : 0`, then each edge is forced to 0 when that edge's per-edge
+ * Recompute all four Yoga border-edge widths from a Box's complete prop set. The
+ * per-side width is `borderStyle ? 1 : 0`, then each edge is forced to 0 when its
  * prop is explicitly `false`. So a per-edge toggle can only SUBTRACT an edge — it
  * can NEVER add width without a borderStyle. This is the joint computation a
  * single yoga setter cannot do (it sees only one value), and it must run on ANY
@@ -465,21 +440,19 @@ export const PADDING_PROPS = new Set([
 export const GUTTER_PROPS = new Set(["gap", "rowGap", "columnGap"]);
 
 // A prop counts as "present" only when its el.props value coerces to a FINITE
-// number. Spacing props are typed `number` (box-props.ts), matching Ink, whose
-// margin/padding are number-only; numeric STRINGS are still accepted because Vue
-// delivers a static template attribute (`<Box margin="5">`) as the string "5".
+// number. Spacing props are typed `number` in box-props.ts; numeric strings are
+// still accepted because Vue delivers a static template attribute
+// (`<Box margin="5">`) as the string "5".
 //
 // Three reasons a value FALLS THROUGH (not present → next precedence level
 // axis → all → 0, instead of resolving to 0):
 //   1. withdrawn prop (null/undefined),
-//   2. present-but-non-finite number (NaN/±Infinity from a bad user calc like 0/0)
-//      — preserves the prior setMargin(EDGE_TOP, NaN) → yoga-treats-as-unset
-//      fallback, which the now-zeroed composite edges can no longer provide
-//      implicitly, so it is made explicit here, and
-//   3. an off-contract non-numeric string ("50%", "foo", …). The old per-setter
-//      code forwarded such strings raw to yoga (so "50%" incidentally became a
-//      yoga percent and "foo" threw); normalizing them to not-set is consistent
-//      with the typed number contract + Ink. The empty string "" is excluded too,
+//   2. present-but-non-finite number (NaN/±Infinity from a bad user calc like 0/0),
+//      which must retain Yoga's treat-as-unset behavior even though composite
+//      edges are explicitly zeroed, and
+//   3. an off-contract non-numeric string ("50%", "foo", …). Normalizing these
+//      to absent keeps the runtime behavior aligned with the typed number
+//      contract. The empty string "" is excluded too,
 //      since `Number("") === 0` would otherwise make `marginTop=""` resolve to 0
 //      while every other non-numeric string falls through — an inconsistency, not
 //      a contract worth keeping.
@@ -497,19 +470,15 @@ function present(props: Record<string, unknown>, key: string): boolean {
  * then the four physical edges are set and the composite edges (ALL/HORIZONTAL/
  * VERTICAL) are ZEROED so nothing layers on top of them.
  *
- * Why this and not the obvious per-setter mapping (margin→EDGE_ALL, marginX→
- * EDGE_HORIZONTAL, marginTop→EDGE_TOP, …): an edge depends on up to THREE props
+ * A per-setter mapping cannot work (margin→EDGE_ALL, marginX→
+ * EDGE_HORIZONTAL, marginTop→EDGE_TOP, …): an edge depends on up to three props
  * together and a single yoga setter sees only one. Per yoga edge precedence a more
- * specific edge OVERRIDES a composite EVEN WHEN SET TO 0, so resetting a withdrawn
- * `marginTop` to 0 (the old code) still beats a surviving `margin={5}` →
- * `getComputedMargin(TOP)` collapsed to 0 instead of 5. Resolving every physical
+ * specific edge overrides a composite even when set to 0, so resetting a withdrawn
+ * `marginTop` to 0 would still beat a surviving `margin={5}`. Resolving every physical
  * edge from el.props and zeroing the composites removes that layering entirely, so
- * a withdrawn override falls back to whatever shorthand still applies. Verified
- * against yoga-layout@3.2.1 to produce identical getComputedMargin for the SET path
- * as the old per-setter code across representative combinations. (G19)
+ * a withdrawn override falls back to whatever shorthand still applies.
  *
- * NOTE the EDGE_START/END (not LEFT/RIGHT) mapping for left/right is preserved from
- * the prior margin setters — margin uses start/end edges, padding uses left/right.
+ * Margin maps left/right to EDGE_START/END; padding uses EDGE_LEFT/RIGHT.
  */
 export function reconcileMarginEdges(node: YogaCarrier, props: Record<string, unknown>): void {
   const y = node.yoga as YogaNode;
@@ -532,7 +501,7 @@ export function reconcileMarginEdges(node: YogaCarrier, props: Record<string, un
 /**
  * Padding analogue of {@link reconcileMarginEdges}. Same precedence and composite-
  * zeroing, but padding maps left/right to EDGE_LEFT/EDGE_RIGHT (margin uses
- * START/END) — preserving the prior padding setters' edge mapping. (G19)
+ * START/END).
  */
 export function reconcilePaddingEdges(node: YogaCarrier, props: Record<string, unknown>): void {
   const y = node.yoga as YogaNode;
@@ -567,7 +536,7 @@ export function reconcileGutters(node: YogaCarrier, props: Record<string, unknow
 }
 
 const RESETTABLE_PROPS = new Set([
-  // Already handled undefined in their setters (reset to yoga/Ink default on removal):
+  // These setters already restore their local default on removal:
   "width",
   "height",
   "maxWidth",
@@ -578,13 +547,12 @@ const RESETTABLE_PROPS = new Set([
   "right",
   "bottom",
   "left",
-  // G19: newly resettable — setters now reset to yoga/Ink default on undefined.
+  // These properties also restore their local layout defaults on removal.
   // Defaults: margin/padding/minWidth/minHeight/gap*/columnGap/rowGap → 0;
   //           flexGrow → 0; flexShrink → 1; flexBasis → auto;
   //           flexDirection → ROW; flexWrap → NO_WRAP;
   //           alignItems → STRETCH; alignSelf → AUTO;
   //           justifyContent → FLEX_START; position → RELATIVE.
-  // (Matches Ink styles.ts apply blocks + Box.tsx hardcoded defaults.)
   "minWidth",
   "minHeight",
   "flexGrow",
@@ -613,12 +581,9 @@ const RESETTABLE_PROPS = new Set([
   "paddingLeft",
   "paddingRight",
   "position",
-  // display: removing/undefining `display` resets to the DEFAULT (visible,
-  // DISPLAY_FLEX) — the setter already maps undefined → DISPLAY_FLEX. This is a
-  // DELIBERATE divergence from Ink (which hides on a present-undefined `display`):
-  // render = f(current props), so a withdrawn prop returns to the default, just
-  // like flexDirection/flexWrap (G19). See .agents/docs/ink-divergences.md
-  // ("Removing `display` resets to the default").
+  // Removing `display` resets to the visible DISPLAY_FLEX default. Layout is a
+  // function of current props, so a withdrawn value cannot retain stale hidden
+  // state; flexDirection and flexWrap follow the same reset rule.
   "display",
 ]);
 
@@ -640,20 +605,18 @@ export function applyYogaProp(
   // semantics — undefined means "no border", which the setter implements
   // by zeroing all four edge widths.
   //
-  // G19: RESETTABLE_PROPS setters handle undefined by resetting to the yoga/Ink
-  // default. But we only call them when the prop had a real prior value (prev
+  // RESETTABLE_PROPS setters restore the local default. Call them only when the
+  // prop had a real prior value (prev
   // is neither null nor undefined) — this prevents two cases from clobbering
   // legitimately-set props:
   //   1. Vue calls patchProp(el, key, null, undefined) for every declared prop
   //      that is absent on the first mount (old=null, new=undefined).
   //   2. Vue calls patchProp(el, key, null, undefined) for props absent in a
   //      shorthand/longhand sibling (e.g. margin=undefined after marginTop=4).
-  // On actual removal the old value is the previously-set number/string, e.g.
+  // On actual removal the prior value is the configured number/string, e.g.
   // patchProp(el, 'marginTop', 4, undefined) — prev=4 satisfies the guard.
-  // This matches Ink's reconciler which only emits undefined for props that
-  // existed in the old vnode and were dropped from the new one.
   //
-  // Blocker 2: Vue's HOST renderer passes next=null (not undefined) when a key
+  // Vue's host renderer passes next=null (not undefined) when a key
   // disappears from a reactive `v-bind` object. So `value == null` (null OR
   // undefined) is treated as
   // removal — forwarding raw null to a yoga dimension setter would write NaN/0
@@ -662,7 +625,7 @@ export function applyYogaProp(
     if (key === "borderStyle") {
       // borderStyle: null/undefined always means "no border" — fall through to setter.
     } else if (RESETTABLE_PROPS.has(key) && prev !== null && prev !== undefined) {
-      // Prop was explicitly removed (defined → null/undefined): reset to yoga/Ink default.
+      // Prop was explicitly removed (defined → null/undefined): restore its default.
     } else {
       return;
     }

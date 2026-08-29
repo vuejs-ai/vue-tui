@@ -10,12 +10,9 @@ import { Box, Text } from "@vue-tui/runtime";
 // stale height while paint uses the new wrap mode → layout and paint disagree:
 // stale blank rows (wrap→truncate) or stranded siblings.
 //
-// We anchor each frame against Ink v7.0.4 rendered standalone in *each* mode
-// (the layout Ink produces when its measure func is correctly invalidated):
+// The expected fresh layouts for the two modes are:
 //   wrap     -> "aaaa\nbbbb\ncccc\nZZZZ"
 //   truncate -> "aaaa …\nZZZZ"
-// (Ink itself has this latent bug on a wrap-ONLY change — see ink-divergences.md
-// "Re-measure text when the `wrap` prop changes at runtime".)
 
 // Box width 6, column layout. "aaaa bbbb cccc" is 14 cols.
 //  - wrap:     wraps to 3 rows ("aaaa" / "bbbb" / "cccc"), sentinel on row 4
@@ -41,8 +38,7 @@ test("wrap -> truncate re-measures: text collapses, sentinel rises (no stale bla
   await nextTick();
 
   // After re-measure the text is one truncated row and the sentinel rises to
-  // row 2. Before the fix the cached 3-row height persists, leaving stale blank
-  // rows and stranding the sentinel: "aaaa …\n\n\nZZZZ" (matches buggy Ink).
+  // row 2; a stale three-row height would leave blank rows and strand it.
   expect(lastFrame()).toBe("aaaa …\nZZZZ");
 });
 
@@ -64,8 +60,7 @@ test("truncate -> wrap re-measures: text grows to wrapped rows, sentinel descend
   wrap.value = "wrap";
   await nextTick();
 
-  // After re-measure the text occupies 3 wrapped rows and the sentinel descends
-  // to row 4. Before the fix the cached 1-row height persists, so the wrapped
-  // rows overflow past the reserved space / overwrite the sentinel.
+  // After re-measure the text occupies three wrapped rows and the sentinel
+  // descends to row 4; a stale one-row height would overwrite it.
   expect(lastFrame()).toBe("aaaa\nbbbb\ncccc\nZZZZ");
 });

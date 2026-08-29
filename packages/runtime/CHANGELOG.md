@@ -87,15 +87,14 @@ experimental (`0.0.x`). Not recommended for production yet.
   bracketed paste; `kittyFlags`, `kittyModifiers`, and related types.
 - **Authoring** — Vue SFC `<template>`, JSX/TSX, and render functions.
 
-### Built on Ink, adapted to Vue
+### Ink-derived starting point
 
-Modeled on React Ink (pinned to v7.0.4): every Ink component (6) and hook (13)
-has a same-named equivalent, with `createApp().mount()` replacing Ink's
-`render()`. Parity is verified against real Ink output captured as byte-exact
-fixtures (Ink is not a runtime, test, or CI dependency). Where vue-tui differs —
-`shallowRef` reactive state, declarative prop resets, `rawMode: 'always'`, and a
-few fixes for verified Ink rendering bugs — it's deliberate and documented in the
-divergence log. Parity never outranks correctness.
+Runtime's first release started from React Ink v7.0.4. It provided same-named
+equivalents for six components and 13 hooks, with `createApp().mount()` replacing
+Ink's `render()`, and used captured Ink output as byte-exact fixtures. Vue APIs and
+selected terminal behavior differed where the release chose a Vue-specific
+contract or fixed a verified rendering issue. Ink was not a runtime, test, or CI
+dependency.
 
 ### Internal API (unstable)
 

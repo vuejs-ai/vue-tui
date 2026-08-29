@@ -12,23 +12,17 @@ Never import Runtime source paths, raw `tui-*` hosts, Yoga nodes, or `@vue-tui/r
 
 ## Inclusion bar — product-driven and evidence-backed
 
-[VOUCHED @hyfdev 2026-07-10]
-
 A component earns its place by closing a recurring need in an [active product scenario](./product-scenarios.md#active-application-scenarios) or a real consumer. A representative journey is product evidence: when it repeatedly hand-rolls the same difficult interaction, the project may add a first-party component proactively instead of waiting for a separate community request. Demonstrated broader community demand remains equally valid.
 
-"Ink (or Textual, OpenTUI, or any framework) has it" is not a reason on its own. Another project can show that a problem exists, but vue-tui still needs evidence that the problem belongs in its own scenario journeys or consumer workflows.
+"A peer framework has it" is not a reason on its own. Another project can show that a problem exists, but vue-tui still needs evidence that the problem belongs in its own scenario journeys or consumer workflows.
 
 The public piece must remain generic. Provider protocols, agent or tool-call models, Git and database schemas, monitor collectors, and purely application-specific visual treatment stay in applications or specialized libraries. Repeated behavior may become a component, an independent composable, or a missing runtime capability; the scenario does not predetermine the layer.
 
-This **extends** the [alignment-is-a-means principle](./ink-divergences.md) to a different axis.
-That principle governs _behavior_ (match Ink only where Ink is already correct); this one governs
-_set-membership_ (which components exist at all). "Ink has it" justifies neither — but for a
-component we _do_ ship, we still borrow proven behavior where it fits (see _Vue-idiomatic,
-Ink-inspired_).
+The [peer-framework policy](./peer-frameworks.md) governs behavioral evidence after a local need is established. A peer may reveal conventions and edge cases for a component vue-tui has reason to ship; no peer catalog decides which components belong here.
 
-## Vue-idiomatic, Ink-inspired
+## Vue-native, evidence-informed
 
-A component should feel like Vue through props, models, events, slots, refs, lifecycle, and composables. Peer frameworks are bounded behavioral evidence, not API or catalog templates. Correctness and Vue philosophy outrank parity; exact Ink relationships belong in [ink-divergences.md](./ink-divergences.md).
+A component should feel like Vue through props, models, events, slots, refs, lifecycle, and composables. [Peer frameworks](./peer-frameworks.md) are bounded behavioral evidence, not API or catalog templates. Product intent, correctness, and Vue philosophy decide the local API.
 
 Prefer declarative state. Use an exposed imperative handle only for an action such as scrolling that cannot be represented honestly as a prop, model, event, or slot. Component-owned timers are ordinary higher-layer behavior; only direct terminal or commit-scheduler ownership requires Runtime.
 

@@ -51,30 +51,26 @@ test("wrapText truncate cuts with ellipsis", () => {
   expect(wrapText("abcdefgh", 5, "truncate")).toEqual(["abcd…"]);
 });
 
-test("wrapText at width 0 wraps non-empty text onto its own line (Ink parity)", () => {
-  // Ink has NO width<=0 guard: wrapAnsi("A", 0, {hard:true, trim:false}) = "\nA",
-  // so a 0-width text occupies a SECOND row (height 2). This is what makes Ink
-  // render "B\nA" for a 0-width Box beside a sibling, instead of dropping the text.
+test("wrapText at width 0 places non-empty text on its own row", () => {
+  // wrapAnsi("A", 0, {hard:true, trim:false}) = "\nA", so zero-width text
+  // occupies a second row instead of disappearing.
   expect(wrapText("A", 0, "wrap")).toEqual(["", "A"]);
   expect(wrapText("A", 0, "hard")).toEqual(["", "A"]);
 });
 
-test("wrapText at width 0 keeps EMPTY text empty (no spurious blank row)", () => {
+test("wrapText at width 0 keeps empty text to one empty row", () => {
   // Empty text measures width 0 (≤ 0), so wrapAnsi("", 0) = "" → [""] (height 1).
-  // The 0-width fix must not turn empty text into an extra row.
   expect(wrapText("", 0, "wrap")).toEqual([""]);
 });
 
 test("wrapText at width 0 truncates to empty", () => {
-  // cliTruncate("A", 0) = "" — matches Ink's truncate path at a 0-width cell.
+  // cliTruncate("A", 0) = "" for a zero-width cell.
   expect(wrapText("A", 0, "truncate")).toEqual([""]);
 });
 
 test("wrapText at width 0 keeps SGR codes intact on a styled string (no byte-split)", () => {
-  // wrap-ansi@10 byte-splits the escapes of a STYLED string at width<=0
-  // (wrapAnsi("\x1b[41mA\x1b[49m", 0) = "\x1b\n[\n4\n1\nm\nA\n…"), which corrupted the
-  // frame to "B\n[". wrapText now splits ANSI-awarely: leading "" + one entry per grapheme
-  // with its SGR span preserved, matching Ink's per-grapheme colored output.
+  // wrap-ansi@10 byte-splits the escapes of a styled string at width<=0.
+  // wrapText instead emits a leading empty row and one ANSI-preserving row per grapheme.
   expect(wrapText("\x1b[41mA\x1b[49m", 0, "wrap")).toEqual(["", "\x1b[41mA\x1b[49m"]);
   expect(wrapText("\x1b[41mAB\x1b[49m", 0, "wrap")).toEqual([
     "",
@@ -91,7 +87,7 @@ test("wrapText at width 0 keeps SGR codes intact on a styled string (no byte-spl
 
 test("wrapText at width 0 keeps a wide (CJK) glyph whole and styled", () => {
   // A 2-column glyph must NOT be column-sliced in half; slice-ansi keeps it whole and
-  // re-emits its bg span — matching Ink's "\x1b[41m你\x1b[49m" on its own row.
+  // re-emits its background span on the glyph's own row.
   expect(wrapText("\x1b[41m你好\x1b[49m", 0, "wrap")).toEqual([
     "",
     "\x1b[41m你\x1b[49m",
@@ -120,30 +116,27 @@ test("wrapText at width 0 splits each hard-newline line independently", () => {
   expect(wrapText("A\nB", 0, "wrap")).toEqual(["", "A", "", "B"]);
 });
 
-test("wrapText at width 0 places a ZERO-WIDTH char on its OWN row (line-count parity)", () => {
-  // Reviewer reproducer 1: the old column-stepping slice glued the ZWSP (U+200B) onto the
-  // next grapheme and advanced only 1 column, yielding ["", "A", "​B"] (count 3). wrap-ansi
-  // places the ZWSP on its own row: ["", "A", "​", "", "B"] (count 5) — required for height
-  // parity with Ink (wrong line count → wrong yoga height).
+test("wrapText at width 0 places a zero-width character on its own row", () => {
+  // wrap-ansi places the ZWSP (U+200B) on its own row, preserving the Yoga
+  // height implied by the produced lines.
   expect(wrapText("A​B", 0, "wrap")).toEqual(["", "A", "​", "", "B"]);
 });
 
 test("wrapText at width 0 does NOT drop text after a leading zero-width + wide glyph", () => {
-  // Reviewer reproducer 2: the old `if (cellWidth === 0) break` abandoned the rest of the
-  // line when a zero-width char preceded a wide glyph, so "​中" returned [""] (中 GONE).
-  // wrap-ansi keeps everything: ["​", "", "中"].
+  // A leading zero-width character occupies its own row without terminating the
+  // grapheme walk; the following wide glyph remains present.
   expect(wrapText("​中", 0, "wrap")).toEqual(["​", "", "中"]);
 });
 
-test("wrapText at width 0 in HARD mode drops a blank row at every interior word boundary (Ink parity)", () => {
-  // Ink's wrap-text.ts uses `wordWrap:false` for `hard` mode but NOT for `wrap`: at width 0
-  // that makes wrap-ansi emit an EXTRA blank row before each interior word's first grapheme.
+test("wrapText at width 0 in hard mode adds a blank row at each interior word boundary", () => {
+  // `hard` uses `wordWrap:false`, unlike `wrap`. At width 0 this makes wrap-ansi
+  // emit an extra blank row before each interior word's first grapheme.
   // wrapAnsi("a b c", 0, {hard:true, trim:false, wordWrap:false}) =
   //   ["","a"," ","","b"," ","","c"]  (height 8)
   // whereas `wrap` mode (no wordWrap:false) =
   //   ["","a"," ","b"," ","c"]        (height 6).
   // Measuring `hard` with `wrap` structure UNDER-counts the height, so a sibling laid out below
-  // this node lands one row too high vs Ink. The fix threads the wrap mode into wrapZeroWidthAnsi.
+  // this node lands one row too high. The mode must reach wrapZeroWidthAnsi.
   expect(wrapText("a b c", 0, "hard")).toEqual(["", "a", " ", "", "b", " ", "", "c"]);
   // `wrap` mode at width 0 stays UNCHANGED (no wordWrap:false → no extra blank rows).
   expect(wrapText("a b c", 0, "wrap")).toEqual(["", "a", " ", "b", " ", "c"]);
@@ -164,7 +157,7 @@ test("wrapText at width 0 in HARD mode re-styles correctly across the extra blan
 });
 
 // Load-bearing lock: in HARD mode wrapZeroWidthAnsi's LINE STRUCTURE must EXACTLY equal
-// wrap-ansi's authoritative width-0 layout WITH `wordWrap:false` (Ink wrap-text.ts hard path),
+// wrap-ansi's width-0 layout with `wordWrap:false`,
 // across the same battery used for `wrap` mode below.
 test("wrapText at width 0 in HARD mode matches wrap-ansi's wordWrap:false width-0 layout for the full battery", () => {
   const battery = [
@@ -230,7 +223,7 @@ test("wrapText at width 0 matches wrap-ansi's plain width-0 layout for the full 
 
 test("wrapText at width 0 preserves SGR styling per non-empty row with a zero-width char", () => {
   // A styled input whose painted span straddles a zero-width char: each non-empty output row
-  // keeps its SGR span, and the line count matches the PLAIN version (structure parity).
+  // keeps its SGR span, and the line count matches the plain version.
   const styled = "\x1b[41mA​B\x1b[49m";
   const plainStructure = wrapAnsi("A​B", 0, { hard: true, trim: false }).split("\n");
   const got = wrapText(styled, 0, "wrap");
@@ -300,8 +293,7 @@ test("measureTextNatural uses widest line and raw line count", () => {
   expect(measureTextNatural("")).toEqual({ width: 0, height: 1 });
 });
 
-// Ink measure-text.tsx:24-34 (widest-line width, `text.split('\n').length`
-// height): a TRAILING newline produces an extra (empty) trailing line, and a
+// A trailing newline produces an extra empty trailing line, and a
 // string of only newlines is all empty lines. height = number of \n-separated
 // segments; width = widest line.
 test("measureTextNatural counts the trailing-newline empty line", () => {

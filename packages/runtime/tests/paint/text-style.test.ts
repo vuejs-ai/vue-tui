@@ -48,20 +48,13 @@ test("ansi256 background color applies chalk.bgAnsi256", () => {
   expect(applyChalk("x", { backgroundColor: "ansi256(194)" })).toBe(chalk.bgAnsi256(194)("x"));
 });
 
-// G68 follow-up: ANSI-form color strings must be validated exactly like Ink's
-// colorize.ts (commit 40b3a75). Confirmed against /tmp/ink-40b3a75 by running
-// its compiled colorize at chalk.level 1:
-//   colorize("X","ansi256(foo)", *)  -> "X"            (regex capture fails)
-//   colorize("X","ansi(194)",    *)  -> "X"            (ansi(...) is NOT a form)
-//   colorize("X","ansi256(194)", fg) -> ESC[38;5;194m X ESC[39m
-// Before this fix applyColor emitted a NaN SGR (ESC[38;5;NaNm) for ansi256(foo)
-// and wrongly colored ansi(194).
-test("unparseable ansi256(foo) emits no codes (Ink validation)", () => {
+// Functional color parsing accepts ansi256(N) only when N is numeric.
+test("unparseable ansi256(foo) emits no codes", () => {
   expect(applyChalk("X", { color: "ansi256(foo)" })).toBe("X");
   expect(applyChalk("X", { backgroundColor: "ansi256(foo)" })).toBe("X");
 });
 
-test("ansi(194) is not a supported Ink form, emits no codes", () => {
+test("ansi(194) is not a supported form and emits no codes", () => {
   expect(applyChalk("X", { color: "ansi(194)" })).toBe("X");
   expect(applyChalk("X", { backgroundColor: "ansi(194)" })).toBe("X");
 });
@@ -72,29 +65,25 @@ test("valid ansi256(194) still colors after hardening", () => {
 });
 
 test("multiple modifiers chain", () => {
-  // Ink nests each style as its own chalk wrap in order
-  // dim,color,bg,bold,italic,underline,strikethrough,inverse.
+  // Each style is its own Chalk wrap in the documented order.
   // bold then underline => underline(bold(x)).
   expect(applyChalk("x", { bold: true, underline: true })).toBe(chalk.underline(chalk.bold("x")));
 });
 
-// G68: Ink (Text.tsx transform) applies each enabled style as its OWN nested
-// chalk call in the exact order dim,color,bg,bold,italic,underline,
-// strikethrough,inverse. Byte sequences below confirmed against the Ink
-// reference at /tmp/ink-40b3a75 (commit 40b3a75) by running chalk@level 1.
-test("color+bold nests bold outside color (Ink order)", () => {
+// The nesting order is dim,color,bg,bold,italic,underline,strikethrough,inverse.
+test("color+bold nests bold outside color", () => {
   // ESC[1m ESC[31m X ESC[39m ESC[22m
   expect(applyChalk("X", { color: "red", bold: true })).toBe(chalk.bold(chalk.red("X")));
   expect(applyChalk("X", { color: "red", bold: true })).toBe("[1m[31mX[39m[22m");
 });
 
-test("dim+bold re-opens bold after dim's SGR-22 reset (Ink order)", () => {
+test("dim+bold re-opens bold after dim's SGR-22 reset", () => {
   // ESC[1m ESC[2m X ESC[22m ESC[1m ESC[22m
   expect(applyChalk("X", { dimColor: true, bold: true })).toBe(chalk.bold(chalk.dim("X")));
   expect(applyChalk("X", { dimColor: true, bold: true })).toBe("[1m[2mX[22m[1m[22m");
 });
 
-test("color+backgroundColor nests bg outside color (Ink order)", () => {
+test("color+backgroundColor nests bg outside color", () => {
   // ESC[44m ESC[31m X ESC[39m ESC[49m
   expect(applyChalk("X", { color: "red", backgroundColor: "blue" })).toBe(
     chalk.bgBlue(chalk.red("X")),
@@ -112,10 +101,8 @@ test("level 0 emits no ANSI codes regardless of styles", () => {
   ).toBe("X");
 });
 
-// A12: a chalk-MODIFIER name as a BACKGROUND is what Ink colorize.ts throws on
-// (`'bold' in chalk` true, but `chalk.bgBold` is not a function). vue-tui detects
-// it during component render so Vue's normal error propagation applies. Every
-// other Ink-compatible form is valid.
+// A Chalk modifier has no matching background method (`chalk.bgBold`, etc.).
+// vue-tui rejects it during component render so Vue error handling applies.
 test("isInvalidBackgroundColor: chalk modifier names are invalid backgrounds", () => {
   for (const m of [
     "bold",
@@ -168,7 +155,7 @@ test("assertValidForegroundColor throws only for chalk keys that are not methods
   expect(() => assertValidForegroundColor("level")).toThrow(/color/i);
   expect(() => assertValidForegroundColor("level", "borderTopColor")).toThrow(/borderTopColor/);
 
-  // Valid foreground forms and unknown strings keep Ink's bare-text fallback.
+  // Valid foreground forms and unknown strings keep the bare-text fallback.
   expect(isInvalidForegroundColor("bold")).toBe(false);
   expect(isInvalidForegroundColor("red")).toBe(false);
   expect(isInvalidForegroundColor("#abcdef")).toBe(false);
@@ -176,9 +163,8 @@ test("assertValidForegroundColor throws only for chalk keys that are not methods
   expect(isInvalidForegroundColor(undefined)).toBe(false);
 });
 
-// Foreground is UNAFFECTED: `color="bold"` resolves `chalk.bold` (a real fn) and
-// applies the modifier — Ink does NOT throw on a foreground modifier name, and
-// neither does vue-tui. (Only the bg path has the missing-`bg*`-method problem.)
+// `color="bold"` resolves to the callable chalk.bold method. Only the background
+// path has the missing-bg-method problem.
 test("foreground modifier name still applies (no validation on color)", () => {
   expect(applyChalk("X", { color: "bold" })).toBe(chalk.bold("X"));
 });

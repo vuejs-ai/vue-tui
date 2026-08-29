@@ -3,11 +3,10 @@ import { beforeAll, describe, expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, Text } from "@vue-tui/runtime";
 
-// Full transition matrix for the "re-measure text when `wrap` changes at
-// runtime" divergence (see .agents/docs/ink-divergences.md). The sibling
-// `text-wrap-remeasure.test.tsx` covers the two directions of the original
-// run-verified case; this file proves the GENERAL declarative invariant across
-// all five public wrap modes:
+// Full transition matrix for re-measuring text when `wrap` changes at runtime.
+// The sibling `text-wrap-remeasure.test.tsx` covers wrap → truncate and
+// truncate → wrap;
+// this file proves the declarative invariant across all five public wrap modes:
 //
 //   changing `wrap` at runtime produces the EXACT SAME frame as mounting with
 //   that `wrap` from the start  (i.e. measure always equals paint).

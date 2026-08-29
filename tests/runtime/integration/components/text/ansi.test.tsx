@@ -44,11 +44,9 @@ test("preserve OSC hyperlink sequences in text", async () => {
 
 // ESC#8 (DECALN) is an Fe-type sequence with an intermediate byte that sanitizeAnsi
 // strips at PAINT time. This is a WIDTH mis-measure: raw string-width("A\x1b#8BC") is
-// 2, but paint strips ESC#8 and emits the 3-column "ABC". Before parity gap #9 the
-// MEASURE path flattened the RAW string, so the raw width (2) UNDER-sized the yoga
-// cell; at a tight width the trailing "C" was clipped (vue rendered "AB"). Ink
-// measures the SANITIZED squash (squash-text-nodes.ts:45 / dom.ts:227), so the cell
-// is sized to the visible "ABC" and survives even at width 3.
+// 2, but paint strips ESC#8 and emits the 3-column "ABC". Measuring the raw string
+// would under-size the Yoga cell and clip the trailing C at a tight width. Measure
+// and paint must both use the sanitized visible text.
 test("strip complete ESC#8 (DECALN) sequence without clipping at a tight width", async () => {
   // width 3 is exactly the SANITIZED visible width ("ABC"); the raw string measures
   // narrower (2), so a raw measure undersizes the cell and drops the trailing "C".
@@ -145,15 +143,15 @@ test("hard-wrap single-word BEL-terminated OSC hyperlink", async () => {
   expect(stripAnsi(output)).toBe("abcde\nfghij");
 });
 
-// FIXED by parity gap #9 (sanitize-before-measure), exercising the NESTED-leaf squash
-// path. The text "ab" + green "CD" + "\x1b[2K" (erase-line CSI) + "ef" sanitizes to the
+// This exercises sanitize-before-measure through the nested-leaf squash path. The
+// text "ab" + green "CD" + "\x1b[2K" (erase-line CSI) + "ef" sanitizes to the
 // 6-visible-column "abCDef". Unlike the ESC#8 case, this is NOT a width mis-measure:
 // raw and sanitized string-width are EQUAL (both count \x1b[2K as zero). The break is
-// in the WRAP step — wrap-ansi doesn't recognise the \x1b[2K CSI, so before the fix it
-// received the raw "abCD\x1b[2Kef" and returned it un-wrapped on one line; at width 4
-// the trailing "ef" overflowed the single-line cell and was clipped (vue dropped it).
-// Ink measures+wraps the SANITIZED squash → "abCDef" wraps at width 4 to "abCD\nef".
-// This proves the fix flows through flattenLeaves' nested squash recursion,
+// in the wrap step: wrap-ansi doesn't recognise the \x1b[2K CSI and would treat
+// the raw "abCD\x1b[2Kef" as one unwrapped line. At width 4
+// the trailing "ef" overflowed the single-line cell and was clipped. The sanitized
+// "abCDef" instead wraps at width 4 to "abCD\nef". This proves the contract flows
+// through flattenLeaves' nested squash recursion,
 // not just the single-leaf path.
 test("hard-wrap text containing an inline erase-line (\\x1b[2K) sequence across nested Text", async () => {
   const output = renderToString(
@@ -170,8 +168,7 @@ test("hard-wrap text containing an inline erase-line (\\x1b[2K) sequence across 
   expect(stripAnsi(output)).toBe("abCD\nef");
   // Exact-byte lock against an SGR-ordering / reset regression: each wrapped line must
   // re-open and close its own bold (\x1b[1m … \x1b[22m), and the nested green must open
-  // and reset (\x1b[32m … \x1b[39m) INSIDE line 1's bold span. Byte-for-byte identical
-  // to Ink v7.0.4's renderToString for this input (verified against /tmp/ink @ v7.0.4).
+  // and reset (\x1b[32m … \x1b[39m) inside line 1's bold span.
   const line1 = chalk.bold(`ab${chalk.green("CD")}`);
   const line2 = chalk.bold("ef");
   expect(output).toBe(`${line1}\n${line2}`);
@@ -180,7 +177,6 @@ test("hard-wrap text containing an inline erase-line (\\x1b[2K) sequence across 
 // ST-terminated (ESC\) OSC-8 hyperlink, single long word, hard-wrapped at width 5.
 // The wrap protection covers both OSC terminators (BEL and ST), so the word breaks
 // at the cell boundary exactly like its BEL-terminated sibling above: "abcde\nfghij".
-// Verified against Ink v7.0.4 (un-skipped — vue produces Ink's identical output).
 test("hard-wrap single-word ST-terminated OSC hyperlink", async () => {
   const hyperlink = "\x1b]8;;https://example.com\x1b\\abcdefghij\x1b]8;;\x1b\\";
   const output = renderToString(
@@ -207,8 +203,6 @@ test("link ansi escapes are closed properly", async () => {
     defineComponent(() => () => <Text>{ansiEscapes.link("Example", "https://example.com")}</Text>),
     { width: 100 },
   );
-  // Lock the EXACT bytes: the OSC-8 hyperlink must round-trip unchanged (open + label +
-  // close). Ink components.tsx: t.is(output, ']8;;https://example.comExample]8;;') —
-  // identical to ansiEscapes.link(...) byte-for-byte.
+  // Lock the exact bytes: the OSC-8 hyperlink must round-trip unchanged.
   expect(output).toBe(ansiEscapes.link("Example", "https://example.com"));
 });

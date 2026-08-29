@@ -37,7 +37,9 @@ test("content composes repeated newlines", async () => {
   expect(lastFrame()).toBe("Hello\n\nWorld");
 });
 
-// --- Ink text tests ---
+// Cases in the basic and wrapping sections were adapted from Ink v7.0.4:
+// https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/test/text.tsx
+// --- Basic text ---
 
 test("<Text> with undefined children", async () => {
   const { lastFrame } = await render(
@@ -55,7 +57,7 @@ test("<Text> with null children", async () => {
   expect(lastFrame()).toBe("");
 });
 
-// --- Ink text/wrapping tests ---
+// --- Text wrapping ---
 
 test("text", async () => {
   const { lastFrame } = await render(
@@ -135,7 +137,9 @@ test("truncate text in the end", async () => {
   expect(lastFrame()).toBe("Hello …");
 });
 
-// --- Component edge case tests (ported from Ink components.tsx) ---
+// Some edge cases were adapted from Ink v7.0.4:
+// https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/test/components.tsx
+// --- Component edge cases ---
 
 test("ignore empty text node", async () => {
   const { lastFrame } = await render(
@@ -168,9 +172,7 @@ test("number", async () => {
   expect(lastFrame()).toBe("1");
 });
 
-// Ink components.tsx:80-88,363-372: a fragment nested inline inside <Text> is
-// flattened into the surrounding text run, so "Hello " + <>World</> squashes to
-// "Hello World" (the fragment contributes no layout of its own).
+// A fragment nested inside Text is transparent to inline composition.
 test("inline fragment inside <Text> flattens into the text run", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (
@@ -183,8 +185,7 @@ test("inline fragment inside <Text> flattens into the text run", async () => {
   expect(lastFrame()).toBe("Hello World");
 });
 
-// A top-level fragment wrapping a single <Text> renders as that text — the
-// fragment is transparent at the root, matching Ink's root-fragment handling.
+// A top-level fragment wrapping a single Text remains transparent at the root.
 test("top-level fragment wrapping a <Text> renders the text", async () => {
   const { lastFrame } = await render(
     defineComponent(() => () => (

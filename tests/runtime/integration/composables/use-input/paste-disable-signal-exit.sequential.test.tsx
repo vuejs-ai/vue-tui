@@ -91,7 +91,7 @@ const PasteApp = defineComponent(() => {
 });
 
 describe("bracketed-paste disable on signal exit", () => {
-  test("a signal-driven teardown writes the paste-OFF escape SYNCHRONOUSLY (Finding A parity)", async () => {
+  test("a signal-driven teardown writes the paste-off escape synchronously", async () => {
     const { stdout, asyncWrites, readSyncBytes, cleanup } = makeFdBackedStdout();
     const stdin = makeFakeStdin();
 
