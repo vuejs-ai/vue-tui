@@ -1,6 +1,7 @@
 import Yoga from "yoga-layout";
 import type { Direction, Node as YogaNode } from "yoga-layout";
 import type { TuiBox, TuiNode, TuiRoot, TuiStatic, TuiText } from "./nodes.ts";
+import { hasAuthoredFlexShrink } from "./yoga.ts";
 
 type YogaCarrier = TuiRoot | TuiBox | TuiText | TuiStatic;
 type ContainerWithChildren = TuiRoot | TuiBox | TuiText | TuiStatic;
@@ -94,49 +95,65 @@ function applyZeroContentGuards(node: TuiNode, guarded: Map<YogaNode, number>): 
 }
 
 /**
- * Lay out against a page's row bound while the root's auto-sized in-flow children
- * keep their natural height.
+ * Keep a vertical stack from being squeezed below its own content.
  *
- * The document hosts — `renderToString()` and the mounted non-TTY host — model one
- * finite page, and a child the author gave an explicit height is fitted to it as
- * asked. A child with no height of its own has nothing to fit: shrinking it only
- * collapses the content inside it, so the document would lose rows from its middle
- * instead of overflowing the page and being clipped from row zero.
+ * WORKAROUND for a Yoga feature gap; see the removal note at the end.
  *
- * Only style inputs decide this — no measured value is read back into layout.
+ * CSS pairs `flex-shrink: 1` with `min-height: auto` — an automatic minimum
+ * that stops a flex item from being squeezed below the size of its content.
+ * Content that does not fit overflows the container and is clipped. Yoga
+ * implements the shrinking and not the minimum, so a stack of items in a
+ * container shorter than they are is compressed instead: each item receives a
+ * fraction of a row, the fractions round, and every item that rounds to zero
+ * disappears from the middle of the document.
+ *
+ * An item with no height of its own is already exactly as tall as its content,
+ * so CSS's automatic minimum leaves it nothing to give up: "cannot shrink" is
+ * the exact CSS answer for it, and that is the value supplied here. An item
+ * sized larger than its content could give up the difference under CSS and
+ * keeps it here, so it overflows and is clipped rather than losing rows.
+ *
+ * Only the vertical axis is guarded. A row squeezed past its content turns into
+ * wrapped or truncated text, which keeps the content addressable, and `Table`
+ * sizes its columns with exactly that. A column squeezed past its content has
+ * no such fallback, because a terminal row cannot be partly drawn.
+ *
+ * An authored `flexShrink` is left alone: this supplies a default, it does not
+ * override a decision.
+ *
+ * REMOVE THIS once the layout engine is Taffy, which implements the automatic
+ * minimum size natively. Deleting `pinVerticalAxisAgainstShrinking`, its call
+ * below, and `hasAuthoredFlexShrink` in `host/yoga.ts` restores plain
+ * flex behavior with no other change.
  */
-export function calculateBoundedLayoutWithContentGuards(
-  root: TuiRoot,
-  width: number | undefined,
-  height: number,
-): () => void {
-  const pinned: Array<[YogaNode, number]> = [];
-  for (const child of root.children) {
-    if (!hasYoga(child)) continue;
-    const node = child.yoga;
-    if (node.getPositionType() === Yoga.POSITION_TYPE_ABSOLUTE) continue;
-    if (node.getHeight().unit !== Yoga.UNIT_AUTO) continue;
-    if (node.getFlexBasis().unit !== Yoga.UNIT_AUTO) continue;
-    pinned.push([node, node.getFlexShrink()]);
-    node.setFlexShrink(0);
-  }
-  const restorePinned = () => {
-    for (const [node, flexShrink] of pinned) node.setFlexShrink(flexShrink);
-    pinned.length = 0;
-  };
+function pinVerticalAxisAgainstShrinking(node: TuiNode, pinned: Array<[YogaNode, number]>): void {
+  if (!hasChildren(node)) return;
+  const stacksVertically =
+    hasYoga(node) &&
+    (node.yoga.getFlexDirection() === Yoga.FLEX_DIRECTION_COLUMN ||
+      node.yoga.getFlexDirection() === Yoga.FLEX_DIRECTION_COLUMN_REVERSE);
 
-  let restoreGuards: () => void;
-  try {
-    restoreGuards = calculateLayoutWithContentGuards(root, width, height);
-  } catch (error) {
-    restorePinned();
-    throw error;
+  for (const child of node.children) {
+    if (stacksVertically && hasYoga(child)) {
+      const yoga = child.yoga;
+      // `TextProps` carries no `flexShrink`, so a text host's value is always the
+      // one Text itself sets to shrink inside a no-wrap row — a horizontal
+      // decision, never an authored vertical one.
+      const authored = child.type !== "tui-text" && hasAuthoredFlexShrink(yoga);
+      // Absolutely-positioned children are placed against the containing block
+      // instead of being distributed along the main axis, so no free space is
+      // taken from them and there is nothing to guard.
+      if (
+        yoga.getPositionType() !== Yoga.POSITION_TYPE_ABSOLUTE &&
+        yoga.getFlexShrink() !== 0 &&
+        !authored
+      ) {
+        pinned.push([yoga, yoga.getFlexShrink()]);
+        yoga.setFlexShrink(0);
+      }
+    }
+    pinVerticalAxisAgainstShrinking(child, pinned);
   }
-
-  return () => {
-    restoreGuards();
-    restorePinned();
-  };
 }
 
 export function calculateLayoutWithContentGuards(
@@ -146,6 +163,8 @@ export function calculateLayoutWithContentGuards(
   direction: Direction = Yoga.DIRECTION_LTR,
 ): () => void {
   const guarded = new Map<YogaNode, number>();
+  const pinned: Array<[YogaNode, number]> = [];
+  pinVerticalAxisAgainstShrinking(root, pinned);
   // Restore in reverse insertion order so a parent hidden after its child is
   // un-hidden first — mirror of how the success closure restores.
   const restore = () => {
@@ -153,6 +172,8 @@ export function calculateLayoutWithContentGuards(
       node.setDisplay(display);
       activeContentGuards.delete(node);
     }
+    for (const [node, flexShrink] of pinned) node.setFlexShrink(flexShrink);
+    pinned.length = 0;
   };
 
   try {

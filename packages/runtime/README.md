@@ -139,6 +139,39 @@ Runtime does not export layout conveniences as separate components. Write line b
 <Box :flexGrow="1" :flexShrink="1" />
 ```
 
+### Sizing a region to the terminal
+
+`flexGrow` divides the free space inside a parent, so a parent sized by its own content has none to divide. An application's outermost `Box` is content-sized unless it is given a height, and an Inline root is content-sized by design — it lays out at the document's natural height. Under either, `flexGrow` has no effect: a region with content of its own is as tall as that content, and a region that takes its height from its parent — an empty `Box`, or a `ScrollBox` — is zero rows tall and paints nothing. This is `flex-grow` inside a content-sized container, and it has the same fix: give the container a height.
+
+```vue
+<script setup lang="ts">
+import { computed } from "vue";
+import { Box, Text, useLayoutSize } from "@vue-tui/runtime";
+import { ScrollBox } from "@vue-tui/components";
+
+const { height } = useLayoutSize();
+// `height` is `Infinity` when output has no vertical bound, and `Box`'s `height`
+// accepts integers only, so pick a page height for that case.
+const rows = computed(() => (Number.isFinite(height.value) ? height.value : 24));
+</script>
+
+<template>
+  <Box flexDirection="column" :height="rows">
+    <Text>header</Text>
+    <Box :flexGrow="1" :minHeight="0" flexDirection="column">
+      <ScrollBox>
+        <Text v-for="line in lines" :key="line">{{ line }}</Text>
+      </ScrollBox>
+    </Box>
+    <Text>footer</Text>
+  </Box>
+</template>
+```
+
+Every ancestor between the sized container and the growing region needs a height or a `flexGrow` of its own; one content-sized `Box` in the chain stops the space from reaching it.
+
+A container shorter than its content overflows it and is clipped, in the same rows as CSS: `flexShrink` still defaults to `1`, but Runtime supplies `0` to the children of a vertical stack for the duration of a layout pass, because Yoga has no `min-height: auto` to stop a squeezed child from vanishing. A `flexShrink` written on a Box is used as written. Set `overflow="hidden"` on a container whose overflow should not paint outside it.
+
 ## Composables
 
 | Composable                        | Description                                                                                                |

@@ -44,11 +44,17 @@ Inline renders on the main screen and must not erase terminal history or shell o
 Content taller than the surface is clipped, never compressed to fit. A row bound handed to the
 layout engine is absorbed by shrinkable children, which deletes rows from the middle of a
 document rather than from one end, so Inline applies the bound when choosing the window to paint
-and Fullscreen pins the root's auto-sized in-flow children against shrinking into its viewport.
-The [over-height ruling](./runtime-api-decisions.md#over-height-content-is-clipped-and-inline-keeps-the-newest-rows)
+while Fullscreen lays out at its exact viewport and lets the tree overflow it. The
+[over-height ruling](./runtime-api-decisions.md#over-height-content-is-clipped-and-inline-keeps-the-newest-rows)
 governs this and names the escapes it must not foreclose: `Static` commits rows to terminal
 scrollback, `ScrollBox` keeps content navigable inside a bounded region, coordinated `console`
 output reaches scrollback, and Fullscreen keeps history as application state.
+
+The same compression reaches any container an application sizes itself, so
+[the vertical axis does not shrink](./runtime-api-decisions.md#the-vertical-axis-does-not-shrink-below-its-content)
+below its content: Runtime supplies `flexShrink: 0` to the children of a vertical stack for one
+layout pass, standing in for the `min-height: auto` Yoga does not implement, and removes that
+workaround when the engine does.
 
 Runtime-generated Inline controls never use ED2, ED3, or Home to reset the main screen. An application that deliberately wants destructive main-screen behavior does so outside the mounted session or selects Fullscreen.
 

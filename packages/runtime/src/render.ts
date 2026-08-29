@@ -21,10 +21,7 @@ import {
   type StdinController,
 } from "./io/stdin-controller.ts";
 import { createRoot, type TuiNode, type TuiRoot, type TuiStatic } from "./host/nodes.ts";
-import {
-  calculateBoundedLayoutWithContentGuards,
-  calculateLayoutWithContentGuards,
-} from "./host/layout-guards.ts";
+import { calculateLayoutWithContentGuards } from "./host/layout-guards.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
 import {
@@ -2838,16 +2835,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           ? (renderSession.session.dimensions.layout.rows ?? undefined)
           : undefined;
         tuiRoot.yoga.setWidth(w);
-        // Fullscreen owns a fixed viewport, so layout gets that exact height while the
-        // root's auto-sized in-flow children are pinned against shrinking into it: an
-        // auto-sized child has no size of its own to fit, and shrinking it collapses
-        // the content inside it, which deletes rows from the middle of the document.
-        // Inline gets no row bound at all — the terminal rows choose which window
-        // stays redrawable, not how tall the document may be.
-        let restoreLayoutGuards =
-          exactViewportRows === undefined
-            ? calculateLayoutWithContentGuards(tuiRoot, w, undefined, Yoga.DIRECTION_LTR)
-            : calculateBoundedLayoutWithContentGuards(tuiRoot, w, exactViewportRows);
+        // Fullscreen owns a fixed viewport, so layout gets that exact height and the
+        // tree overflows it rather than being squeezed into it. Inline gets no row
+        // bound at all — the terminal rows choose which window stays redrawable, not
+        // how tall the document may be.
+        let restoreLayoutGuards = calculateLayoutWithContentGuards(
+          tuiRoot,
+          w,
+          exactViewportRows,
+          Yoga.DIRECTION_LTR,
+        );
         try {
           const computedRootHeight = Math.max(
             0,
