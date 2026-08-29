@@ -43,18 +43,13 @@ async function settle() {
   await Promise.resolve();
 }
 
-// Ink parity (App.tsx:331-344, pendingDisableRawModeRef): when a useInput
-// component is swapped for another in the SAME tick (v-if picks a different
+// When a useInput component is swapped for another in the same tick (v-if picks a different
 // child type), Vue unmounts the old (releaseRawMode → refs 0 → defers the
 // terminal disable to a microtask) THEN mounts the new (acquireRawMode → refs
 // back to 0→1). Raw mode is still physically enabled at that moment, so the
-// replacement must NOT re-issue stdin.setRawMode(true) or stdin.ref() — Ink
-// skips both via its pending-disable flag and cancels the queued disable.
-//
-// Before the fix vue re-ran both: a redundant setRawMode(true) ioctl AND a
-// second ref() whose matching unref never fired (the deferred disable saw
-// refs back > 0 and bailed), leaking the libuv ref. This locks one true call.
-test("a same-tick useInput swap does not re-issue setRawMode(true) or leak a ref (Ink parity)", async () => {
+// replacement must not re-issue stdin.setRawMode(true) or stdin.ref(). A second
+// ref would have no matching unref after the queued disable is cancelled.
+test("a same-tick useInput swap does not re-issue setRawMode(true) or leak a ref", async () => {
   const which = shallowRef<"a" | "b">("a");
 
   const A = defineComponent(() => {
@@ -84,7 +79,7 @@ test("a same-tick useInput swap does not re-issue setRawMode(true) or leak a ref
   await settle();
 
   // No second setRawMode(true) (raw mode never dropped), no setRawMode(false)
-  // either, and the ref balance stays at 1 — exactly Ink's behavior.
+  // either, and the ref balance stays at 1.
   expect(setRawModeCalls).toEqual([true]);
   expect(refCount()).toBe(1);
 
@@ -96,8 +91,8 @@ test("a same-tick useInput swap does not re-issue setRawMode(true) or leak a ref
   expect(refCount()).toBe(0);
 });
 
-// The same-tick swap detaches the old component's "data" listener synchronously
-// (clearInputState parity) and the replacement re-attaches its own on re-acquire.
+// The same-tick swap detaches the old component's data listener synchronously,
+// and the replacement re-attaches its own listener on acquisition.
 // This guards that re-acquire still wires input: a regression that skipped the
 // listener re-attach (over-aggressively treating the swap as a pure no-op) would
 // leave the replacement deaf.
@@ -139,20 +134,16 @@ test("the replacement useInput after a same-tick swap still receives input", asy
   app.unmount();
 });
 
-// Ink parity (App.tsx:618-631): Ink's unmount-cleanup effect disables raw mode
-// SYNCHRONOUSLY when `rawModeEnabledCount > 0 || pendingDisableRawModeRef.current`,
-// during React's synchronous unmount. vue defers the disable to a microtask (to
-// survive same-tick swaps), but teardown must still force it synchronously —
+// Vue defers a normal raw-mode disable to a microtask so same-tick swaps can
+// retain the physical mode, but application teardown must force it synchronously —
 // otherwise the signal-exit path (teardown(true), which re-raises the signal
 // synchronously without draining microtasks) leaves the terminal in raw mode:
 // after Ctrl+C the shell stops echoing keystrokes.
 //
-// This asserts the SYNCHRONOUS checkpoint right after unmount(), with NO await,
-// because that is exactly what the signal path observes. Before the fix the
-// disable sat in the still-queued microtask (dispose() skipped it because Vue's
-// unmount had already zeroed this controller's local ref count); setRawModeCalls
-// was [true] at this point and only became [true, false] after a drain.
-test("teardown disables raw mode synchronously so a signal exit can't leave the terminal raw (Ink parity)", async () => {
+// This asserts the synchronous checkpoint immediately after unmount(), with no
+// await, because that is exactly what the signal path observes. The disable
+// cannot remain queued for a later microtask.
+test("teardown disables raw mode synchronously so a signal exit cannot leave the terminal raw", async () => {
   const App = defineComponent(() => {
     useInput(() => undefined);
     return () => <Text>listening</Text>;
@@ -184,16 +175,9 @@ test("teardown disables raw mode synchronously so a signal exit can't leave the 
 
 // Two independent apps (separate createApp/stdout) sharing ONE stdin. The
 // terminal raw-mode toggle is refcounted per-stdin (shared) so the first app's
-// unmount can't drop raw mode while the second still needs it — vue's deliberate
-// improvement over Ink, whose per-App counts let the first unmount disable raw
-// for everyone. But the INPUT listener is per-controller: each app attaches its
-// own "data" handler, so BOTH receive every keystroke (vue's push model has no
-// drain race), and the second keeps receiving after the first unmounts.
-//
-// Before the per-controller-listener fix the "data" handler was attached only
-// when the SHARED refcount went 0→1, so the second app's handler never attached
-// and it was permanently deaf (worse than Ink, which at least self-heals when
-// the first app unmounts).
+// unmount cannot drop raw mode while the second still needs it. The input
+// listener is per-controller: each app attaches its own "data" handler, so both
+// receive every keystroke and the second remains wired after the first unmounts.
 test("two apps sharing one stdin both receive input; the second keeps receiving after the first unmounts", async () => {
   const aKeys: string[] = [];
   const bKeys: string[] = [];

@@ -175,9 +175,8 @@ export function createVirtualText(): TuiVirtualText {
 }
 
 export function createTextLeaf(value: string): TuiTextLeaf {
-  // Coerce any non-string at the host text sink, matching Ink's setTextNodeValue
-  // (dom.ts: `if (typeof text !== 'string') text = String(text)`), which
-  // createTextNode also routes through. Vue's runtime-core already stringifies
+  // Coerce any private raw-host value at the text sink, which createTextNode also
+  // routes through. Vue's runtime-core already stringifies
   // text/number children, so this is a defensive safety-net for direct host-op
   // calls. Guard on typeof so normal string values are untouched (no double-work).
   return trackTuiNode({

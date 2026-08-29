@@ -23,7 +23,6 @@ export interface StdinContext {
 
 export const AppContextKey: InjectionKey<AppContext> = Symbol("vue-tui:app");
 export const StdinContextKey: InjectionKey<StdinContext> = Symbol("vue-tui:stdin");
-// Provided by <Text>; injected by nested <Text> to decide whether they render inline
-// `virtual-text` (inside a text context) or a standalone yoga `text`. Replaces the
-// former getCurrentInstance() parent-walk — see .agents/docs/component-authoring.md.
+// Every <Text> provides this key. Descendants inject it to select the inline
+// `virtual-text` host; an outer <Text> uses the Yoga-backed `text` host.
 export const TextContextKey: InjectionKey<true> = Symbol("vue-tui:text-context");

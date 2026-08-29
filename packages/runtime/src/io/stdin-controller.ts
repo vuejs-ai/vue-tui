@@ -62,7 +62,7 @@ interface RawModeState {
   // True between a last-release (refs→0) and the microtask that actually disables
   // raw mode. A same-tick re-acquire reads this to know raw mode is still
   // physically on, so it can skip re-issuing ref()/setRawMode(true) and cancel the
-  // queued disable — Ink's pendingDisableRawModeRef (App.tsx:335-336,361-368).
+  // queued disable.
   pendingDisable: boolean;
   baselineRaw: boolean;
   changedRawMode: boolean;
@@ -192,9 +192,9 @@ export function createStdinController(
   // Write terminal-mode escapes only when stdout can still take them.
   // `isTTY` stays cached-truthy after a stream is destroy()ed/end()ed, so gating
   // the restore write on isTTY alone throws ERR_STREAM_DESTROYED on a teardown
-  // where stdout is already gone. Mirror Ink's `canWriteToStdout` guard
-  // (App.tsx:620/633-635): isTTY AND `!destroyed && !writableEnded`. Matches the
-  // render-level writeBestEffort helper, which isn't in this function's scope.
+  // where stdout is already gone. Require isTTY AND
+  // `!destroyed && !writableEnded`, matching the render-level writeBestEffort
+  // helper that is outside this function's scope.
   function canWriteTerminalMode(): boolean {
     const stdout = appCtx.stdout;
     return Boolean(stdout.isTTY) && !stdout.destroyed && !stdout.writableEnded;
@@ -1182,8 +1182,8 @@ export function createStdinController(
       resumeAwaitingTerminalModes = false;
       runTerminalCleanup(() => reconcileBracketedPasteMode(sync));
       if (sync && reissueAbruptTerminalDisables) {
-        // Signal-exit path (Finding A): the paste-OFF escape must flush
-        // synchronously. By the time dispose() runs, Vue's unmount has usually
+        // The paste-off escape must flush synchronously on signal exit. By the
+        // time dispose() runs, Vue's unmount has usually
         // already disposed the semantic-input lease, which wrote `\x1b[?2004l`
         // ASYNC and zeroed the count — and that
         // async write is exactly what signal-exit's immediate re-raise can drop.

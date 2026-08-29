@@ -77,11 +77,11 @@ test("raw null does not corrupt a yoga dimension to NaN (Blocker 2)", () => {
   detachYoga(box);
 });
 
-// Family-recompute fallback: a withdrawn more-specific edge must fall back to the
-// surviving shorthand, NOT collapse to 0 (the bug). EDGE_TOP overrides EDGE_ALL
-// even at 0, so the old per-setter reset to 0 beat a surviving margin={5}. (G19)
+// A withdrawn more-specific edge falls back to the surviving shorthand.
+// EDGE_TOP overrides EDGE_ALL even at 0, so family reconciliation must recompute
+// the physical edge instead of assigning a reset value in isolation.
 
-test("withdrawn marginTop falls back to surviving margin shorthand, not 0 (G19)", () => {
+test("withdrawn marginTop falls back to surviving margin shorthand, not 0", () => {
   const box = freshBox();
   reconcileMarginEdges(box, { margin: 5, marginTop: 8 });
   box.yoga.calculateLayout(undefined, undefined, DIRECTION_LTR as never);
@@ -95,7 +95,7 @@ test("withdrawn marginTop falls back to surviving margin shorthand, not 0 (G19)"
   detachYoga(box);
 });
 
-test("withdrawn paddingLeft falls back to surviving padding shorthand, not 0 (G19)", () => {
+test("withdrawn paddingLeft falls back to surviving padding shorthand, not 0", () => {
   const box = freshBox();
   reconcilePaddingEdges(box, { padding: 4, paddingLeft: 7 });
   box.yoga.calculateLayout(undefined, undefined, DIRECTION_LTR as never);
@@ -108,13 +108,10 @@ test("withdrawn paddingLeft falls back to surviving padding shorthand, not 0 (G1
   detachYoga(box);
 });
 
-// Non-finite numeric edge (NaN/±Infinity, e.g. a user calc like 0/0): the OLD
-// per-setter code did setMargin(EDGE_TOP, NaN), which yoga treats as unset so the
-// edge fell back to the surviving shorthand → top = margin = 5. The reconcile must
-// preserve that by treating a present-but-non-finite value as ABSENT and falling
-// THROUGH to the next precedence level (axis → all → 0), not resolving it to 0.
+// A non-finite numeric edge is absent during precedence resolution, so the next
+// finite axis or all-edges shorthand supplies the physical edge.
 
-test("non-finite marginTop (NaN) falls through to surviving margin shorthand, not 0 (G19)", () => {
+test("non-finite marginTop (NaN) falls through to surviving margin shorthand, not 0", () => {
   const box = freshBox();
   reconcileMarginEdges(box, { margin: 5, marginTop: NaN });
   box.yoga.calculateLayout(undefined, undefined, DIRECTION_LTR as never);
@@ -123,7 +120,7 @@ test("non-finite marginTop (NaN) falls through to surviving margin shorthand, no
   detachYoga(box);
 });
 
-test("non-finite paddingLeft (NaN) falls through to surviving padding shorthand, not 0 (G19)", () => {
+test("non-finite paddingLeft (NaN) falls through to surviving padding shorthand, not 0", () => {
   const box = freshBox();
   reconcilePaddingEdges(box, { padding: 5, paddingLeft: NaN });
   box.yoga.calculateLayout(undefined, undefined, DIRECTION_LTR as never);
@@ -132,11 +129,9 @@ test("non-finite paddingLeft (NaN) falls through to surviving padding shorthand,
   detachYoga(box);
 });
 
-// Explicit zero is NOT non-finite — Number(0) is finite — so an explicit edge
-// override of 0 must STILL win over the shorthand (resolve to 0), distinct from
-// the NaN fall-through above.
+// Explicit zero is finite and therefore overrides a shorthand.
 
-test("explicit marginTop=0 overrides the margin shorthand → top is 0, not 5 (G19)", () => {
+test("explicit marginTop=0 overrides the margin shorthand → top is 0, not 5", () => {
   const box = freshBox();
   reconcileMarginEdges(box, { margin: 5, marginTop: 0 });
   box.yoga.calculateLayout(undefined, undefined, DIRECTION_LTR as never);
@@ -145,17 +140,13 @@ test("explicit marginTop=0 overrides the margin shorthand → top is 0, not 5 (G
   detachYoga(box);
 });
 
-// --- spacing value contract (PR #184) ------------------------------------
+// --- Spacing value contract ---
 //
-// Spacing props are typed `number` (box-props.ts) and Ink's margin/padding are
-// number-only. The family recompute resolves an edge from a value only when it
-// coerces to a FINITE number, with one carve-out for template ergonomics: a Vue
-// STATIC template attribute (`<Box margin="5">`) arrives as the numeric STRING
-// "5", which must still resolve to 5. Any OTHER non-numeric value ("50%", "foo",
-// "") is treated as not-set and falls through to the surviving shorthand — the
-// reconcile drops the OLD per-setter code's incidental, off-contract string
-// forwarding (setMargin(edge, "50%") → yoga percent; setMargin(edge, "foo") →
-// throw). These pin that contract so it can't silently drift.
+// Spacing props are typed `number`. An edge resolves only from a finite number,
+// with one accommodation for Vue templates: a static numeric attribute such as
+// `<Box margin="5">` arrives as a numeric string and resolves to 5. Other strings
+// are absent during precedence resolution and fall through to a surviving
+// shorthand.
 
 test('numeric string margin="5" resolves to 5 (static template attribute ergonomics)', () => {
   const box = freshBox();
@@ -178,11 +169,8 @@ test('numeric string marginTop="8" resolves to 8 and overrides the shorthand', (
   detachYoga(box);
 });
 
-test('non-numeric string marginTop="50%" falls through to the surviving margin shorthand (PR #184: no longer a yoga percent)', () => {
+test('non-numeric string marginTop="50%" follows the number-only contract', () => {
   const box = freshBox();
-  // OLD per-setter code forwarded "50%" raw → yoga read it as a 50% percent
-  // margin. The typed contract is number-only, so "50%" is now off-contract /
-  // not-set and the edge falls back to the surviving margin shorthand.
   reconcileMarginEdges(box, { margin: 5, marginTop: "50%" });
   box.yoga.calculateLayout(undefined, undefined, DIRECTION_LTR as never);
   expect(box.yoga.getComputedMargin(EDGE_TOP as never)).toBe(5);
@@ -190,7 +178,7 @@ test('non-numeric string marginTop="50%" falls through to the surviving margin s
   detachYoga(box);
 });
 
-test('non-numeric string paddingLeft="50%" falls through to the surviving padding shorthand (PR #184: no longer a yoga percent)', () => {
+test('non-numeric string paddingLeft="50%" follows the number-only contract', () => {
   const box = freshBox();
   reconcilePaddingEdges(box, { padding: 4, paddingLeft: "50%" });
   box.yoga.calculateLayout(undefined, undefined, DIRECTION_LTR as never);
@@ -199,10 +187,8 @@ test('non-numeric string paddingLeft="50%" falls through to the surviving paddin
   detachYoga(box);
 });
 
-test('junk string marginTop="foo" falls through to the surviving margin shorthand (PR #184: no longer throws)', () => {
+test('junk string marginTop="foo" follows the number-only contract', () => {
   const box = freshBox();
-  // OLD per-setter code did setMargin(EDGE_TOP, "foo") which threw; now it is
-  // not-set and falls back to the shorthand without throwing.
   expect(() => {
     reconcileMarginEdges(box, { margin: 5, marginTop: "foo" });
   }).not.toThrow();
@@ -212,12 +198,9 @@ test('junk string marginTop="foo" falls through to the surviving margin shorthan
   detachYoga(box);
 });
 
-// Empty-string tweak (PR #184): `Number("") === 0` would otherwise make
-// marginTop="" resolve to 0 (overriding the shorthand) while every other
-// non-numeric string falls through — `present()` excludes "" so the contract is
-// uniform: only numeric strings are coerced, all other strings fall through.
+// Empty strings are non-numeric input rather than an explicit zero.
 
-test('empty string marginTop="" falls through to the surviving margin shorthand, not 0 (PR #184 "" tweak)', () => {
+test('empty string marginTop="" follows the number-only contract', () => {
   const box = freshBox();
   reconcileMarginEdges(box, { margin: 5, marginTop: "" });
   box.yoga.calculateLayout(undefined, undefined, DIRECTION_LTR as never);
@@ -226,7 +209,7 @@ test('empty string marginTop="" falls through to the surviving margin shorthand,
   detachYoga(box);
 });
 
-test('empty string paddingLeft="" falls through to the surviving padding shorthand, not 0 (PR #184 "" tweak)', () => {
+test('empty string paddingLeft="" follows the number-only contract', () => {
   const box = freshBox();
   reconcilePaddingEdges(box, { padding: 4, paddingLeft: "" });
   box.yoga.calculateLayout(undefined, undefined, DIRECTION_LTR as never);
@@ -235,12 +218,10 @@ test('empty string paddingLeft="" falls through to the surviving padding shortha
   detachYoga(box);
 });
 
-// display: removing/undefining `display` resets to the DEFAULT (DISPLAY_FLEX =
-// visible), a DELIBERATE divergence from Ink (which hides on present-undefined).
-// See .agents/docs/ink-divergences.md ("Removing `display` resets to the
-// default"). These pin the yoga-level reset directly via getDisplay().
+// Removing or undefining `display` resets to the visible DISPLAY_FLEX default.
+// These tests pin the Yoga-level reset directly through getDisplay().
 
-test("removing display=none resets to DISPLAY_FLEX, not stale DISPLAY_NONE (display divergence)", () => {
+test("removing display=none resets to DISPLAY_FLEX instead of retaining DISPLAY_NONE", () => {
   const box = freshBox();
   applyYogaProp(box, "display", "none", undefined);
   expect(box.yoga.getDisplay()).toBe(DISPLAY_NONE);
@@ -265,7 +246,7 @@ test("null removal of display=none also resets to DISPLAY_FLEX (spread-props pat
   detachYoga(box);
 });
 
-test("absent-on-mount display (prev=null/undefined) does not force a reset write (display divergence)", () => {
+test("absent-on-mount display does not force a reset write", () => {
   // Guard check: on first mount Vue emits patchProp(el, 'display', null/undefined,
   // undefined) for an unset prop. With no prior real value the reset must NOT
   // fire — the node keeps yoga's default (DISPLAY_FLEX) regardless, so this only

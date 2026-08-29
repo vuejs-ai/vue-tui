@@ -43,14 +43,12 @@ describe("ansi-tokenizer", () => {
     expect(tokens[0]!.type).toBe("csi");
   });
 
-  test("empty string returns a single empty text token (Ink parity)", () => {
-    // Ink's tokenizeAnsi('') falls through to the no-control-chars branch and
-    // returns [{type:'text', value:''}] — it has no empty-string early return.
+  test("empty string returns a single empty text token", () => {
     const tokens = tokenizeAnsi("");
     expect(tokens).toEqual([{ type: "text", value: "" }]);
   });
 
-  // --- Ink parity tests ---
+  // CSI and OSC edge cases.
 
   test("tokenize plain text", () => {
     expect(tokenizeAnsi("hello")).toEqual([{ type: "text", value: "hello" }]);

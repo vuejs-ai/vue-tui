@@ -43,7 +43,7 @@ export interface KittyKeyboardController {
   /**
    * @param sync When true, write the disable-kitty escape synchronously
    * (fs.writeSync) so it reaches the fd before an abrupt signal-driven exit
-   * re-raises the signal (G18, Finding A). Defaults to async stream.write for
+   * re-raises the signal. Defaults to async stream.write for
    * the normal unmount path.
    */
   dispose(sync?: boolean): void;

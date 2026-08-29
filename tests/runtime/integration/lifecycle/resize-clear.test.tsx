@@ -148,12 +148,13 @@ test("narrowing a tall Inline frame never clears terminal history", async () => 
   app.unmount();
 });
 
-// Port of Ink render.tsx:814-847 ("rerender on resize"): a resize doesn't just
-// erase the old frame — it REFLOWS the content to the new width. A round-border
-// <Box> wrapping "Test" renders its top/bottom rule to fill the inner width, so
+// Case shape adapted from Ink v7.0.4:
+// https://github.com/vadimdemedes/ink/blob/40b3a7578811fd616341ca4e31cc7748aeeff12f/test/render.tsx#L814-L847
+// A resize reflows content to the new width. A round-border <Box> wrapping
+// "Test" renders its top/bottom rule to fill the inner width, so
 // the exact bytes of the first content write must be the box padded to width-10,
 // and the LAST content write after narrowing to 8 must be the box re-padded to
-// width-8. (Ink asserts boxen('Test'.padEnd(8)) then boxen('Test'.padEnd(6)).)
+// width-8.
 test("resize reflows content — first frame is width-10 box, last is re-padded to width-8", async () => {
   const stdout = makeFakeWritable({ columns: 10, rows: 100 });
   const stderr = makeFakeWritable({ columns: 10, rows: 100 });
@@ -172,8 +173,7 @@ test("resize reflows content — first frame is width-10 box, last is re-padded 
   await nextTick();
 
   // First content write: round-border box whose inner content row is "Test"
-  // padded to the 8-cell inner width (columns 10 minus the 2 border columns),
-  // matching Ink's boxen('Test'.padEnd(8), {borderStyle: 'round'}) + '\n'.
+  // padded to the 8-cell inner width (columns 10 minus the 2 border columns).
   const contentWrites = getContentWrites(writes);
   const width10Box = "╭────────╮\n│Test    │\n╰────────╯\n";
   expect(stripAnsi(contentWrites.find((write) => write.includes("Test"))!)).toBe(width10Box);
@@ -185,8 +185,7 @@ test("resize reflows content — first frame is width-10 box, last is re-padded 
   await nextTick();
   await nextTick();
 
-  // Last content write after resize: the SAME box re-padded to the new width
-  // (Ink's boxen('Test'.padEnd(6), {borderStyle: 'round'}) + '\n').
+  // Last content write after resize: the same box re-padded to the new width.
   const width8Box = "╭──────╮\n│Test  │\n╰──────╯\n";
   const contentWritesAfter = getContentWrites(writes);
   expect(stripAnsi(contentWritesAfter.at(-1)!)).toBe(width8Box);

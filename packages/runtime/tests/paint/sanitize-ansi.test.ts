@@ -127,7 +127,7 @@ describe("sanitize-ansi", () => {
     expect(sanitizeAnsiMultiline("\x1b]0;My Title\x07abcdefghij")).toBe("abcdefghij");
   });
 
-  // --- Ink parity tests below ---
+  // Hyperlink terminator variants.
 
   test("preserve OSC hyperlinks terminated by C1 ST", () => {
     const output = sanitizeAnsi("\u001b]8;;https://example.com\u009clink\u001b]8;;\u009c");

@@ -218,8 +218,7 @@ const FULLSCREEN_STATIC_ERROR =
   "[vue-tui] <Static> cannot render on an effective visual Fullscreen surface. Use Inline mode for terminal history, or keep history in application state (for example, ScrollBox).";
 
 // Module-level registry: maps each NodeJS.WriteStream to the one live TuiApp
-// that owns its renderer. Mirrors Ink's WeakMap<NodeJS.WriteStream, Ink> in
-// instances.ts. Keyed weakly so closed/GC'd streams don't leak memory.
+// that owns its renderer. Keyed weakly so closed/GC'd streams don't leak memory.
 // Only the app that successfully wired a renderer (mountedAsOwner=true) owns
 // the entry and removes it on teardown; a "no-op" second mount never touches it.
 const liveInstances = new WeakMap<NodeJS.WriteStream, TuiApp>();
@@ -336,13 +335,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   });
   exitPromise.catch(() => {});
 
-  // First-call-wins guard for exit() (Ink parity G33). Ink's handleAppExit
-  // returns early on `isUnmounted || isUnmounting`, so the FIRST exit() call
-  // captures the value/error and initiates teardown while any subsequent
-  // exit() is a complete no-op. This flag mirrors that guard: it is set
-  // synchronously by the first exit() so a re-entrant exit() (e.g. fired from
-  // inside an unmount-time write callback or a later Vue tick) cannot overwrite
-  // the recorded value or re-resolve the exit promise with a later value.
+  // The first accepted exit selects the result synchronously. A re-entrant or
+  // later exit cannot overwrite it while teardown or a later Vue tick runs.
   let exitInitiated = false;
 
   let mountedRoot: TuiRoot | null = null;
@@ -352,9 +346,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedResizeHandler: (() => void) | null = null;
   let mountedResizeRefresh: Promise<void> | null = null;
   let mountedExitListener: (() => void) | null = null;
-  // signal-exit unsubscribe fn (Ink parity G18). Registered at interactive
-  // mount so SIGINT/SIGTERM/SIGHUP route to teardown(); called in teardown()
-  // to remove the handler so it can't leak or double-run.
+  // Registered at interactive mount so terminating signals route through
+  // Runtime teardown; cooperative teardown removes exactly this registration.
   let mountedUnsubscribeExit: (() => void) | null = null;
   let mountedBeforeExitHandler: (() => void) | null = null;
   let mountedUnsubscribeSuspension: (() => void) | null = null;
@@ -407,9 +400,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   // teardown() evicts the entry. A mount() that hits the instance-reuse guard
   // wires nothing and leaves this (and all other mounted* state) untouched:
   // whether unmount()/teardown() have real work to do is derived from the
-  // actually-wired state, never from a sticky "was ever guarded" flag (audit
-  // e18 — a sticky flag let one guarded call disable teardown of a mount the
-  // app DID wire).
+  // actually-wired state, never from a sticky "was ever guarded" flag.
   let mountedAsOwner = false;
 
   function setAlternateScreenOwned(owned: boolean): void {
@@ -684,8 +675,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     }
     try {
       if (sync) {
-        // Signal-exit path (G18, Finding A): signal-exit re-raises the signal
-        // IMMEDIATELY after this callback returns (`{alwaysLast:false}`), so a
+        // Signal exit re-raises the signal immediately after this callback
+        // returns (`{alwaysLast:false}`), so a
         // bare async `stream.write()` can leave the restore bytes (show-cursor,
         // leave-alt-screen, disable-kitty) buffered and unflushed when the
         // process dies — the terminal stays corrupted. A synchronous fd write
@@ -846,8 +837,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // app's WeakMap entry. Derived from actual wired state, NOT a sticky
     // "was ever guarded" flag: a guarded mount() call is inert for that call
     // only and must never disable teardown of a mount this app DID wire
-    // (double-fire on its own live stdout, a later mount on a free stdout,
-    // or merely targeting another app's busy stream — audit e18).
+    // (double-fire on its own live stdout, a later mount on a free stdout, or
+    // merely targeting another app's busy stream).
     if (!mountedAppContext) return;
     if (teardownStarted) {
       // A later abrupt-exit request upgrades a deferred normal cleanup to the
@@ -1084,10 +1075,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         runBestEffort(unsubscribe);
       }
 
-      // Remove the signal-exit handler first (Ink parity G18, ink.tsx:765:
-      // `this.unsubscribeExit()`), but ONLY on the cooperative path, where it
-      // stops the handler from firing later (no leak, no double-run —
-      // teardownStarted also guards re-entry).
+      // Remove the signal-exit handler first only on the cooperative path, where
+      // it stops the handler from firing later. teardownStarted also guards re-entry.
       //
       // On a terminating path the unsubscribe is not merely redundant, it is
       // actively harmful. signal-exit@4 `emit()` iterates its LIVE listener
@@ -1146,7 +1135,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
       if (mountedKittyController) {
         // Disable-kitty is a restore escape: on the signal path it must flush
-        // synchronously too (Finding A).
+        // synchronously too.
         const kittyController = mountedKittyController;
         mountedEmergencyKittyController = kittyController;
         mountedKittyController = null;
@@ -1372,9 +1361,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       (options as { readonly patchConsole?: unknown }).patchConsole,
     );
     const onRender = internalOptions.onRender;
-    // Default maxFps to 30 to match Ink (ink.tsx: `options.maxFps ?? 30`), so
-    // the render throttle engages by default — without this the animation
-    // coalescing (G02) never kicks in on an unthrottled path.
+    // The default keeps the render throttle active so sustained animation
+    // updates are coalesced without requiring an option.
     const maxFps = internalOptions.maxFps ?? 30;
     const resolvedStdout = options.stdout ?? process.stdout;
     const resolvedStdin = options.stdin ?? process.stdin;
@@ -1966,9 +1954,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         if (!dynamicUpdatesLive) return;
         // Use `||` (not `??`): an EMPTY lastOutputToRender — its initial value before
         // the first content commit or the value the resize-boundary path assigns —
-        // must fall back to `lastOutput + "\n"`, matching Ink (ink.tsx:507). `??` only falls back for
-        // null/undefined, so an
-        // empty string would pass through and restore nothing after an external write.
+        // must fall back to `lastOutput + "\n"`. `??` only falls back for
+        // null/undefined, so an empty string would restore nothing after an
+        // external write.
         writer.write(frameState.lastOutputToRender || frameState.lastOutput + "\n");
       }
 
@@ -2014,7 +2002,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               }
               // Mirror the render path: wrap clear+write+restore in BSU/ESU when the
               // terminal supports synchronized updates, so the three-step sequence is
-              // atomic and prevents tear/flicker (Ink parity G09, ink.tsx:687-698).
+              // atomic and prevents tear/flicker.
               runCoordinatedWrite(() => {
                 writer.clear();
                 writeCommittedInlineOutput(stdout, outputData);
@@ -2046,9 +2034,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
                 writeRuntimeOutput(stderr, outputData);
                 return;
               }
-              // Per Ink ink.tsx:717-728: BSU/ESU are emitted on STDOUT (not stderr)
-              // because synchronized-update mode is a stdout capability, while the
-              // actual data goes to stderr. The sync gate also uses stdout's isTTY.
+              // BSU/ESU are emitted on stdout because synchronized-update mode is a
+              // stdout capability, while the actual data remains on stderr. The sync
+              // gate therefore also uses stdout's TTY capability.
               runCoordinatedWrite(() => {
                 writer.clear();
                 writeCommittedInlineOutput(stderr, outputData);
@@ -2061,18 +2049,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
       const appContext: AppContext = {
         exit(error?: Error) {
-          // First-call-wins guard (Ink parity G33, mirrors handleAppExit's
-          // `if (this.isUnmounted || this.isUnmounting) return;`): the FIRST
-          // exit() captures its value/error and initiates teardown; any
-          // SUBSEQUENT exit() is a no-op so it can neither overwrite the recorded
-          // value nor re-resolve the exit promise with a later value.
+          // The first exit captures its error and initiates teardown; later calls
+          // are inert so they cannot overwrite the selected result.
           //
-          // teardownStarted mirrors Ink's `isUnmounting` half of that guard:
-          // app.unmount() runs teardown()+resolveExit() WITHOUT setting
-          // exitInitiated, so a retained exit() (from useApp()) called re-entrantly DURING
-          // unmount teardown (or any exit() after unmount) would otherwise pass
-          // the exitInitiated check, overwrite the selected exit error
-          // and queue a microtask — letting that late value win over the unmount.
+          // app.unmount() runs teardown()+resolveExit() without setting
+          // exitInitiated, so a retained useApp().exit() called re-entrantly during
+          // unmount would otherwise overwrite the selected result and queue a later
+          // settlement microtask.
           // Gating on teardownStarted too makes exit() a no-op once unmount/
           // teardown is in progress. At the FIRST exit() both flags are false, so
           // a normal exit-from-Vue-cycle still proceeds.
@@ -2972,16 +2955,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         });
       }
 
-      // No eager mount-time cursor hide here (matching Ink). Ink hides the cursor
-      // LAZILY: the non-alt-screen hide comes from log-update's isTTY-gated
-      // cliCursor.hide on the first render that actually writes (log-update.ts:
-      // 55-59), and the onRender outer gate skips log-update entirely for an empty
-      // frame (ink.tsx:1094 `output !== lastOutput`, both "" on the first empty
-      // commit). So an interactive app whose root renders nothing emits ZERO
-      // cursor escapes, while a non-empty app hides on its first render via the
-      // same lazy path. The renderInteractive
-      // commit gate below mirrors that `output !== frameState.lastOutput` outer
-      // condition so the empty-frame skip (and thus the no-hide behavior) holds.
+      // Inline cursor ownership is lazy: an empty app emits no cursor escapes,
+      // while the first visible commit hides the cursor before writing.
       //
       // Fullscreen acquisition is lazy as well: after managed-input capability
       // preflight, the first input demand or commit enters the alternate screen
@@ -3018,7 +2993,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         throw mountError;
       }
 
-      // Only listen for resize when dynamic output is live (matching Ink).
+      // Only listen for resize when dynamic output is live.
       // A resize is a discrete event that changes the viewport, so it bypasses
       // the normal ~32ms commit throttle. Dimension facts update immediately,
       // then the newest resize waits for Vue consumers before one authoritative

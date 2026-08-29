@@ -45,6 +45,5 @@ export type { TuiInputEvent, TuiKey, TuiKeyName } from "./io/public-input.ts";
 export { useStdin, type UseStdinReturn } from "./composables/useStdin.ts";
 export { useLayoutSize, type UseLayoutSizeReturn } from "./composables/use-layout-size.ts";
 export { useBoxMetrics, type UseBoxMetricsReturn } from "./composables/use-box-metrics.ts";
-// `measureText` / `measureTextNatural` are deliberately NOT re-exported: Ink keeps
-// its `measure-text` module internal, and so do we. They remain internal helpers
-// (yoga.ts uses `measureTextNatural`). See .agents/docs/ink-divergences.md.
+// `measureText` / `measureTextNatural` remain private because they operate on
+// renderer-owned layout details rather than a stable application-facing fact.

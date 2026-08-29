@@ -15,8 +15,8 @@ export interface CommitSchedulerOptions {
   /**
    * Throttle window in ms — the leading+trailing commit interval. The caller
    * derives it from `maxFps` (`ceil(1000/maxFps)`, i.e. 34ms at the default
-   * maxFps=30, matching Ink). Unused when `immediate` is set (commits fire
-   * every tick); pass 0 there.
+   * maxFps=30). Unused when `immediate` is set (commits fire every tick); pass
+   * 0 there.
    */
   throttleMs: number;
   now?: () => number;
@@ -43,10 +43,7 @@ export function createCommitScheduler(
     for (const resolve of resolvers) resolve();
   }
 
-  // Throttle state (production only). This mirrors the OBSERVABLE timing of
-  // Ink's render throttle — es-toolkit/compat `throttle(fn, wait, {leading,
-  // trailing})`, i.e. `debounce(fn, wait, {leading, trailing, maxWait: wait})`
-  // — not its implementation (verified against real Ink v7.0.4, audit e29):
+  // Production throttling combines leading, trailing, and maximum-wait edges:
   //   - leading: a call with no active trailing window commits synchronously
   //     and arms the window;
   //   - trailing: EVERY deferred call re-arms the window, so the trailing
@@ -106,7 +103,7 @@ export function createCommitScheduler(
       // Reset eagerly (not only in doCommit): a deferred call must leave
       // `scheduled` false so the NEXT call re-enters this callback and
       // re-arms the trailing window — `lastCall+wait` only works if every
-      // call reaches the throttle, as every Ink `onRender` call does.
+      // call reaches the throttle.
       scheduled = false;
       if (immediate) {
         doCommit();
@@ -126,8 +123,8 @@ export function createCommitScheduler(
         return;
       }
       const isWindowActive = trailingTimer !== null;
-      // Ink parity (audit e29): every call re-anchors the trailing edge to
-      // now+wait, exactly like es-toolkit's debounce re-arming per call.
+      // Every call re-anchors the trailing edge to now+wait, matching ordinary
+      // debounce re-arming semantics.
       armTrailingWindow();
       if (isWindowActive) {
         // Inside an active window: defer to the trailing edge.

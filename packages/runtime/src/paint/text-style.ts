@@ -6,13 +6,9 @@ import type { TerminalStyle } from "./terminal-style.ts";
 // color environment just because Chalk was imported in this module.
 const chalkGrammar = new Chalk({ level: 1 });
 
-// Mirror Ink's colorize.ts (commit 40b3a75) EXACTLY for the accepted color
-// forms and its "no match -> bare text (no codes)" fallback. The regexes below
-// match Ink's `ansiRegex`/`rgbRegex` byte-for-byte so an unparseable or
-// unsupported color string produces no SGR codes (returning the chalk instance
-// unchanged) instead of emitting a NaN SGR. In particular Ink supports only
-// `ansi256(N)` (validated by a numeric capture) — `ansi(...)` is NOT a form and
-// must fall through to bare text.
+// Accepted functional colors are rgb(R,G,B) and ansi256(N). An unparseable or
+// unsupported string leaves the text unchanged instead of emitting an invalid
+// SGR sequence; ansi(N) is not an accepted form.
 const rgbRegex = /^rgb\(\s?(\d+),\s?(\d+),\s?(\d+)\s?\)$/;
 const ansi256Regex = /^ansi256\(\s?(\d+)\s?\)$/;
 
@@ -48,8 +44,7 @@ export function applyColor(
 ): ChalkInstance {
   if (style.colorLevel === 0) return c;
   if (typeof color !== "string") return c;
-  // Named chalk color (validated by presence of the method, like Ink's
-  // `color in chalk`): apply when known, otherwise fall through to bare text.
+  // Apply a named Chalk method when present; otherwise leave the text bare.
   const key = bg ? bgKey(color) : color;
   const named = chalkProperty(c, key);
   if (typeof named === "function") return named as ChalkInstance;
@@ -74,11 +69,10 @@ function bgKey(name: string): string {
 }
 
 /**
- * Detect a backgroundColor value that Ink's `colorize` would THROW on.
+ * Detect a backgroundColor value that resolves to a Chalk property but has no
+ * corresponding background method.
  *
- * Ink colorize.ts (commit 40b3a75): for a BACKGROUND it tests `isNamedColor` =
- * `color in chalk`; if so it builds `bg${Capitalize(color)}` and calls
- * `chalk[methodName]`. A chalk MODIFIER name (`bold`/`dim`/`italic`/`underline`/
+ * A Chalk modifier name (`bold`/`dim`/`italic`/`underline`/
  * `inverse`/`hidden`/`strikethrough`/`reset`/`overline`/`visible`) is `in chalk`
  * but has NO `bg*` method, so the call is `chalk[undefined-method](str)` and throws
  * "chalk.bgBold is not a function". A chalk COLOR name resolves to a real `bg*`
@@ -104,11 +98,10 @@ export function isInvalidBackgroundColor(color: unknown): boolean {
 }
 
 /**
- * Detect a foreground color value that Ink's `colorize` would THROW on.
+ * Detect a foreground color value that resolves to a non-callable Chalk property.
  *
- * Ink's foreground path calls `chalk[color](str)` when `color in chalk`. That
- * works for real colors and modifiers (`red`, `bold`) but throws for non-method
- * chalk properties such as `level`.
+ * Real colors and modifiers (`red`, `bold`) are callable, while properties such
+ * as `level` are not.
  */
 export function isInvalidForegroundColor(color: unknown): boolean {
   if (typeof color !== "string" || color.length === 0) return false;
@@ -117,9 +110,8 @@ export function isInvalidForegroundColor(color: unknown): boolean {
 }
 
 /**
- * Throw (during component render) if `color` is a chalk-modifier-name
- * backgroundColor — the exact case Ink's colorize.ts throws on. No-op for every
- * valid background form. `label` names the offending prop in the message.
+ * Throw during component render if `color` is a Chalk modifier used as a
+ * backgroundColor. `label` names the offending prop in the message.
  */
 export function assertValidBackgroundColor(color: unknown, label = "backgroundColor"): void {
   if (isInvalidBackgroundColor(color)) {
@@ -131,8 +123,8 @@ export function assertValidBackgroundColor(color: unknown, label = "backgroundCo
 }
 
 /**
- * Throw during component render for foreground color names that Ink's paint path
- * would throw on. `label` names the offending prop in the message.
+ * Throw during component render for foreground names that resolve to a
+ * non-callable Chalk property. `label` names the offending prop.
  */
 export function assertValidForegroundColor(color: unknown, label = "color"): void {
   if (isInvalidForegroundColor(color)) {
@@ -143,13 +135,11 @@ export function assertValidForegroundColor(color: unknown, label = "color"): voi
 }
 
 export function applyChalk(style: TerminalStyle, text: string, props: TextProps): string {
-  // Mirror Ink's Text.tsx `transform` (commit 40b3a75): apply each enabled
-  // style as its OWN nested chalk call, in the exact order
+  // Apply each enabled style as its own nested Chalk call, in the order
   // dim -> color -> backgroundColor -> bold -> italic -> underline ->
   // strikethrough -> inverse. This produces individually-balanced open/close
-  // pairs (e.g. dim+bold re-opens bold after dim's SGR-22 reset), which is
-  // byte-identical to Ink. A single chained ChalkInstance would emit a
-  // different, non-Ink byte sequence for any multi-style Text (G68).
+  // pairs (e.g. dim+bold re-opens bold after dim's SGR-22 reset). A single
+  // chained ChalkInstance would produce different reset placement.
   const chalk = style.chalk;
   let s = text;
   if (props.dimColor) s = chalk.dim(s);

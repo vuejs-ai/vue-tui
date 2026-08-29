@@ -129,8 +129,7 @@ function findRoot(node: TuiNode): TuiRoot | null {
 /**
  * Walk up the DOM tree to check if we're inside a text context. A bare-string
  * / nested <Text> child is valid inline text only under <Text> / virtual-text;
- * a <Box> directly inside a <Text> must throw the same dev error Ink throws for
- * isInsideText contexts.
+ * a <Box> directly inside a <Text> must throw a clear nesting error.
  */
 function isInsideTextContext(node: TuiContainer): boolean {
   let current: TuiContainer | null = node;
@@ -159,10 +158,8 @@ function hasNestedStatic(node: TuiNode, staticAncestor: boolean): boolean {
 
 /**
  * Find the nearest ancestor (inclusive of `start`) that OWNS the yoga measure
- * func used to size inline text — i.e. the node yoga must re-measure when a
- * descendant text-leaf changes. Mirrors Ink's findClosestYogaNode (dom.ts:248):
- * a <Text> always owns its measure func; virtual-text is climbed past to the
- * enclosing <Text>.
+ * function used to size inline text. A <Text> owns its measure function;
+ * virtual-text is climbed past to the enclosing <Text>.
  */
 function findMeasureOwner(start: TuiNode | null): TuiNode | null {
   let p: TuiNode | null = start;
@@ -174,13 +171,11 @@ function findMeasureOwner(start: TuiNode | null): TuiNode | null {
 }
 
 /**
- * Dirty the measure owner of a text-context parent after a STRUCTURAL change to
- * its children (insert / remove / move). Mirrors Ink marking the parent dirty in
- * appendChildNode / insertBeforeNode / removeChildNode for ink-text AND
- * ink-virtual-text parents (dom.ts:132,165,185) then climbing to the closest
- * yoga node (findClosestYogaNode, dom.ts:248). A no-op when `parent` is not a
- * text context (box / root / static structural changes are sized by yoga
- * directly, no measure func to invalidate).
+ * Dirty the measure owner of a text-context parent after a structural child
+ * change (insert, remove, or move), then climb through virtual-text to the
+ * enclosing Text. A no-op when `parent` is not a text context because Box, root,
+ * and Static structural changes are sized directly by Yoga, with no measure
+ * function to invalidate).
  */
 function dirtyTextMeasureOwner(parent: TuiNode): void {
   if (parent.type !== "tui-text" && parent.type !== "tui-virtual-text") {
@@ -381,9 +376,8 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     if (node.type !== "text-leaf") {
       throw new Error(`Cannot setText on ${node.type}`);
     }
-    // Coerce any non-string at the host text sink, matching Ink's setTextNodeValue
-    // (dom.ts: `if (typeof text !== 'string') text = String(text)`). Guard on
-    // typeof so normal string values are stored as-is (no double-work).
+    // Coerce private raw-host values at the text sink. Guard on typeof so normal
+    // string values are stored as-is.
     node.value = typeof text === "string" ? text : String(text);
     // An empty text-leaf can mount as a Vue fragment anchor (insert() exempts empty
     // leaves), then become non-empty content via setText. Re-validate with the SAME
@@ -398,8 +392,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     if (parent != null && isContainer(parent) && rejectsTextLeaf(parent, node.value)) {
       throw new Error(`Text string "${node.value}" must be rendered inside <Text> component`);
     }
-    // Bubble dirty up to the <Text> that owns the yoga measure func so yoga
-    // remeasures. Mirror Ink's markNodeAsDirty → findClosestYogaNode (dom.ts:248).
+    // Bubble dirty up to the <Text> that owns the Yoga measure function.
     const owner = findMeasureOwner(node.parent as TuiNode | null);
     if (owner?.type === "tui-text") {
       markTextDirty(owner);
@@ -439,7 +432,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       throw new Error(NESTED_STATIC_ERROR);
     }
 
-    // <Box> inside a text context is invalid (matches Ink's validation).
+    // A Box inside a text context cannot produce valid inline layout.
     if (child.type === "tui-box" && isInsideTextContext(parentC)) {
       throw new Error("<Box> can’t be nested inside <Text> component");
     }
@@ -462,10 +455,8 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
       const oldIdx = oldParent.children.indexOf(child as never);
       if (oldIdx >= 0) oldParent.children.splice(oldIdx, 1);
       removeYogaChild(oldParent, child);
-      // Mirror Ink's removeChildNode dirty-mark: detaching a child from a text
-      // context (text / virtual-text) must re-measure the OLD parent's measure
-      // owner. Ink dirties on remove from the old parent AND on append to the new
-      // (dom.ts:132,165,185). We dirty the old parent here unconditionally; if it
+      // Detaching a child from a text context must re-measure the old parent's
+      // measure owner. We dirty the old parent here unconditionally; if it
       // shares a measure owner with the new parent, the post-insert dirty below
       // just re-marks the same node (markDirty is idempotent), so no skip is needed.
       dirtyTextMeasureOwner(oldParent);
@@ -478,9 +469,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
 
     // A text-context parent (text / virtual-text) sizes its inline text via a
     // measure func; a STRUCTURAL change must re-mark the owning measure node
-    // dirty so yoga re-measures. Mirror Ink, which dirties the parent for
-    // ink-text AND ink-virtual-text in append/insert (dom.ts:132,165) then climbs
-    // to the closest yoga node (dom.ts:248).
+    // dirty so Yoga re-measures.
     dirtyTextMeasureOwner(parentC);
 
     onCommit();
@@ -503,8 +492,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     freeSubtreeYoga(child);
     child.parent = null as never;
     // Re-measure the owning measure node when an inline child is removed from a
-    // text context (mirror of the insert() dirty-mark; Ink dirties ink-text AND
-    // ink-virtual-text parents on remove, dom.ts:185). The owner may be an
+    // text context, mirroring the insert() dirty mark. The owner may be an
     // ancestor virtual-text's enclosing <Text>, so resolve it via
     // findMeasureOwner. `parent` still has its own parent chain (only
     // `child.parent` was cleared), so the walk starts from the immediate parent.
@@ -567,8 +555,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
         }
         // Border edge widths depend jointly on borderStyle AND each per-edge prop
         // (a yoga setter sees only one value), so any border-prop change triggers a
-        // full recompute from el.props — mirroring Ink's applyBorderStyles, which
-        // rewrites all four edges on any border change. The per-edge yoga setters
+        // full recompute from el.props. The per-edge Yoga setters
         // are intentional no-ops; this is the single source of truth. Reading
         // el.props (just updated above for STYLE_PROPS) means borderStyle flipping
         // in EITHER direction is handled: unset→set re-reserves, set→unset zeroes,
@@ -584,7 +571,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
         // from el.props — same pattern as border. The per-prop yoga setters are no-ops;
         // these reconcilers are the single source of truth. el.props was just updated
         // above (margin/padding keys are in STYLE_PROPS), so a withdrawn override
-        // correctly falls back to the surviving shorthand. (G19)
+        // correctly falls back to the surviving shorthand.
         if (MARGIN_PROPS.has(key)) {
           reconcileMarginEdges(el, (el as { props: Record<string, unknown> }).props);
         }
@@ -610,10 +597,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
         // paint disagree (stale blank rows on wrap→truncate; overflow / overwritten
         // siblings on truncate→wrap). markTextDirty forces a re-measure. Every other
         // STYLE_PROP here (color/bold/border colors/…) is paint-only and never alters
-        // measured dimensions, so `wrap` is the sole case. NOTE: this also fixes a
-        // latent bug present in Ink v7.0.4 itself — Ink's applyStyles ignores
-        // textWrap and never markDirty()s, so a wrap-only change goes stale there too
-        // (a deliberate, vouched divergence; see ink-divergences.md).
+        // measured dimensions, so `wrap` is the sole case.
         if (key === "wrap" && el.type === "tui-text") {
           markTextDirty(el);
         } else if (el.type === "tui-text") {

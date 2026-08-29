@@ -380,9 +380,8 @@ class Output {
           : null;
 
       // Safe early skip: entire write starts strictly PAST the right clip edge.
-      // Must be strict `>` (not `>=`), matching Ink output.ts:188 (`x > clip.x2`).
-      // The inner per-line clip below already uses strict `>`, so for ordinary
-      // writes x === clip.x2 still clips to empty → characters.length === 0 → skip.
+      // This must be strict `>` (not `>=`). The inner per-line clip below already
+      // uses strict `>`, so x === clip.x2 clips to an empty write normally.
       if (clipH && x > clipH.x2) continue;
 
       let offsetY = 0;
@@ -413,8 +412,7 @@ class Output {
           // inside it. Keep the first retained grapheme at its original surface
           // column instead of reflowing it left over the dropped cells. For
           // example, "中x" written at x=-1 drops "中" but keeps "x" at x=1,
-          // leaving x=0 blank. This deliberately differs from Ink, which resets
-          // the write origin to clip.x1 and shifts the retained text left.
+          // leaving x=0 blank.
           if (lineX < clipH.x1) lineX += this.caches.getSliceStart(line, from);
           const maxWidth = clipH.x2 - lineX;
           if (from > 0 || to < lineWidth) {
@@ -445,16 +443,13 @@ class Output {
           currentLine[offsetX - 1] = blankCell;
         }
 
-        // Normal relative output has NO x-bounds check here — matching Ink's Output write loop
-        // (output.ts:272-294), which writes `currentLine[offsetX] = character`
-        // and the trailing placeholder cells regardless of `this.width`. A wide
-        // char whose LEADING cell is in-bounds but whose TRAILING cell exceeds
-        // the width still renders its leading cell and OVERFLOWS the row; the
+        // Normal relative output has no x-bounds check here. A wide character
+        // whose leading cell is in bounds but whose trailing cell exceeds the
+        // width still renders its leading cell and overflows the row; the
         // past-width placeholder is dropped later as a sparse hole by
         // `line.filter(item => item !== undefined)` + `.trimEnd()` (see below).
-        // Guarding on width here (as vue once did) instead DROPPED the whole wide
-        // char — leading cell included — when only its trailing cell was past the
-        // edge, so an edge-aligned `aa你` rendered as `aa`. Box-level
+        // A whole-glyph width guard would drop the character, including its valid
+        // leading cell, when only its trailing cell exceeds the edge. Box-level
         // overflow:hidden clipping is handled separately above (the clipH sliceAnsi
         // path); this loop must not re-implement a second, glyph-truncating clip.
         // The one exception is the explicit fullscreen hard boundary below: a
@@ -504,23 +499,9 @@ class Output {
   }
 }
 
-// Compose a <Text>/<virtual-text> node's styled string by WRAPPING, matching
-// Ink's squash-text-nodes.ts + render-node-to-output.ts:136 model EXACTLY (and
-// REPLACING the old merge-down + per-leaf-applyChalk model, which closed the
-// parent's SGR at every nested-<Text> boundary so ancestor boolean styles —
-// bold/italic/underline/strikethrough/dim — did NOT survive across a nested
-// child; that was the bug).
-//
-// Ink: each <Text> renders an `ink-text` carrying its own chalk styling as
-// `internal_transform`. `squashTextNodes` concatenates a node's children — and
-// for each nested ink-text child it applies THAT CHILD's transform to the child's
-// own squashed text — but it does NOT apply the node's OWN transform. The node's
-// own transform is applied one level up: either by ITS parent's squash loop (when
-// the node is itself a nested child) or by the Output writer for the top-level
-// node (render-node-to-output.ts:136 pushes internal_transform as a per-line
-// transformer). The upshot: a Text's own style wraps the CONCATENATION of its
-// already-styled children, so `<Text bold>A<Text green>B</Text></Text>` becomes
-// `chalk.bold("A" + chalk.green("B"))` — bold stays OPEN across the green child.
+// Compose a Text node by styling its already-composed children as one sequence.
+// Parent modifiers remain active across nested Text boundaries, while a nested
+// explicit channel value overrides that channel for its own subtree.
 //
 // The surrounding Box background is the outermost Text's base. From there,
 // background follows the same structural channel cascade as foreground and
@@ -646,8 +627,7 @@ function applyOwnStyle(
   );
 }
 
-// Squash an array of inline children into styled text. Used by text /
-// virtual-text nodes (Ink squash-text-nodes.ts). `inheritedBg` is a base for
+// Squash an array of inline children into styled text. `inheritedBg` is a base for
 // nested Text descendants that inherit background through the parent's style
 // channel rather than receiving the surrounding Box value again.
 function squashInlineChildren(
@@ -705,23 +685,21 @@ function drawBorder(
 ): void {
   const style = props["borderStyle"] as string | BoxStyle | undefined;
   if (!style) return;
-  // Ink parity (render-border.ts:31-34): if borderStyle is already a BoxStyle object,
-  // use it directly; otherwise look it up by name in cliBoxes.
+  // A complete custom BoxStyle supplies its glyphs directly; a string selects a
+  // named cli-boxes frame.
   const chars: BoxStyle | undefined =
     typeof style === "string" ? (isBoxStyleName(style) ? cliBoxes[style] : undefined) : style;
   // Defensive internal fallback: an unknown borderStyle name has no entry in
   // cliBoxes, so silently draw no border rather than throw. This is unreachable
   // via the public API — the Box component validates an unknown non-empty
   // borderStyle string during render and throws there (caught by vue-tui's error
-  // boundary), so paint never sees an invalid name. A raw throw HERE would unwind
-  // through Vue's post-flush commit and wedge its internal flush state. (audit 2.3)
+  // boundary), so paint never sees an invalid name. A raw throw here would unwind
+  // through Vue's post-flush commit and wedge its internal flush state.
   if (!chars) return;
-  // No blanket min-size guard here — each edge is drawn independently when it is
-  // visible and its run length is ≥ 1. This matches Ink's render-border.ts which
-  // has no such guard and draws every edge on its own, so a 1-cell-tall box with
-  // only side rails still renders │X│ (G05), and a 1-cell-wide box with only
-  // top/bottom still renders the top/bottom glyph. Guard individual repeat()
-  // counts with Math.max(0, …) so a degenerate dimension doesn't throw.
+  // Draw each visible edge independently. A one-cell-tall box with only side
+  // rails still renders │X│, and a one-cell-wide box with only top/bottom still
+  // renders those glyphs. Clamp individual repeat counts so a degenerate
+  // dimension cannot throw.
   if (w < 1 || h < 1) return;
 
   const top = props["borderTop"] !== false;
@@ -744,18 +722,13 @@ function drawBorder(
     const edgeColor = stringProp(`border${capEdge}Color`) ?? borderColor;
     // Use nullish coalescing (not ||) so an explicit per-edge `false` wins over
     // generalDim — only `undefined` falls back to the general value.
-    // Mirrors Ink render-border.ts:54: `borderTopDimColor ?? borderDimColor`.
     const edgeDim = (props[`border${capEdge}DimColor`] as boolean | undefined) ?? generalDim;
-    // Ink parity (render-border.ts:44-52): an edge's background comes only from the
-    // per-edge or general border background — never from the Box's own backgroundColor.
+    // An edge's background comes only from the per-edge or general border
+    // background, never from the Box's content backgroundColor.
     const edgeBg = stringProp(`border${capEdge}BackgroundColor`) ?? borderBackgroundColor;
-    // Border SGR nesting deliberately differs from <Text>'s. Mirror Ink's
-    // render-border.ts stylePiece (commit 40b3a75, lines 7-20) EXACTLY:
-    // foreground innermost, then background, then `chalk.dim` OUTERMOST —
-    // i.e. chalk.dim(bg(fg(glyphs))). This is NOT applyChalk's order, whose
-    // dim-innermost nesting is correct for <Text> (Ink Text.tsx) and must
-    // stay unchanged. Routing edges through applyChalk would emit the bytes
-    // in the wrong order (bg, fg, dim) versus Ink's (dim, bg, fg).
+    // Border SGR nesting deliberately differs from Text: foreground is
+    // innermost, then background, with dim outermost. Routing edges through
+    // applyChalk would emit the channels in the wrong order for borders.
     let styled = s;
     if (edgeColor) {
       styled = applyColor(terminalStyle, terminalStyle.chalk, edgeColor, false)(styled);
@@ -780,10 +753,8 @@ function drawBorder(
     output.write(x, y + h - 1, [colorizeEdge(safeSliceEnd(raw, w), "bottom")]);
   }
 
-  // Ink parity (render-border.ts:133): vertical sides start at y + offsetY where
-  // offsetY = showTopBorder ? 1 : 0. Without this, the loop starting at i=1
-  // always skips row 0, shifting rails one row down when borderTop=false (G15).
-  // The run length equals h minus the visible top/bottom rows, clamped ≥ 0.
+  // Vertical sides begin below a visible top edge, or at row zero when the top
+  // edge is absent. Their run length excludes whichever horizontal edges exist.
   const offsetY = top ? 1 : 0;
   const verticalRun = Math.max(0, h - (top ? 1 : 0) - (bottom ? 1 : 0));
   for (let i = 0; i < verticalRun; i++) {
@@ -993,9 +964,8 @@ function paintNode(
   // this subtree, keep ordinary paint on its pre-measurement path.
   if (geometry && !geometry.hasObservedSubtree(node)) geometry = undefined;
 
-  // display:none — yoga collapses the node to zero size but still reports a
-  // layout; skip painting the subtree entirely (matches Ink's renderNodeToOutput
-  // early-return) so hidden content never leaks onto visible siblings.
+  // display:none collapses the node to zero size but still reports a layout;
+  // skip the subtree so hidden content never leaks onto visible siblings.
   const yogaNode = (node as { yoga?: { getDisplay?: () => number } }).yoga;
   if (yogaNode?.getDisplay?.() === Yoga.DISPLAY_NONE) {
     if (node.type === "tui-static") geometry?.recordSubtree(node, "unavailable");
@@ -1019,17 +989,9 @@ function paintNode(
       const h = Math.max(0, Math.floor(layout.height));
       // Parent-relative outer layout offsets — not terminal or root coordinates.
       geometry?.record(node, w, h, Math.floor(layout.left), Math.floor(layout.top));
-      // Split the Box's own bg from the value threaded to children — they use
-      // different fallback rules, mirroring Ink's two separate guards:
-      //   - FILL uses the Box's OWN bg with a FALSY guard (Ink render-background.ts:11
-      //     `if (!node.style.backgroundColor) return`), so an empty-string own-bg
-      //     (`backgroundColor=""`) paints NO fill. `fillBackground` itself also guards
-      //     `if (!color)`, but keep the own value here so a sized/bordered empty-bg Box
-      //     never fills its content area with an ancestor color Ink wouldn't emit.
-      //   - The value THREADED to children uses a TRUTHY fallback to `inheritedBg`
-      //     (Ink Box.tsx:103 `if (backgroundColor)` provide-guard), so an empty-string
-      //     own-bg does NOT override the ancestor's background context — descendants
-      //     keep inheriting it.
+      // Split the Box's own background from the value threaded to children. An
+      // empty string paints no fill and does not replace an inherited background,
+      // so descendants continue to inherit from the nearest non-empty Box value.
       const rawBg = node.props["backgroundColor"];
       const ownBg = typeof rawBg === "string" ? rawBg : undefined;
       const childBg = ownBg ? ownBg : inheritedBg;
@@ -1045,10 +1007,9 @@ function paintNode(
         fillBackground(output, terminalStyle, x + bl, y + bt, w - bl - br, h - bt - bb, ownBg);
       }
 
-      // Overflow clipping: clip children to the box content area (inside
-      // borders) when overflow/overflowX/overflowY is "hidden". Matches Ink's
-      // per-axis clip/unclip approach. Applied BEFORE the zero-content decision
-      // so a degenerate box's absolute children are still clipped by overflow.
+      // Overflow clipping limits children to the box content area (inside
+      // borders) when overflow/overflowX/overflowY is "hidden". Apply it before
+      // the zero-content decision so absolute children are still clipped.
       let clipped = false;
       const overflow = node.props["overflow"] as string | undefined;
       const overflowX = (node.props["overflowX"] as string | undefined) ?? overflow ?? "visible";
@@ -1092,8 +1053,7 @@ function paintNode(
       // A Box with no inner content area has no legal paint region for FLOW
       // children. Absolutely-positioned children, though, are placed against
       // their containing block — the padding box (inside the borders) — not the
-      // content rect, so Ink still paints them; paint just those and keep flow
-      // children suppressed.
+      // content rect; paint just those and keep flow children suppressed.
       if (contentMetrics.width === 0 || contentMetrics.height === 0) {
         for (const child of node.children) {
           const childYoga = (child as { yoga?: { getPositionType?: () => number } }).yoga;
@@ -1136,9 +1096,8 @@ function paintNode(
       }
       // Thread the INHERITED Box bg (NOT a pre-computed effective bg) into the
       // squash. The Text's own backgroundColor — including an explicit "" opt-out —
-      // is resolved against this inherited bg inside applyOwnStyle
-      // (`ownBackgroundColor ?? inheritedBg`, Ink Text.tsx:103-106), where it wraps
-      // the node's whole children concatenation alongside its boolean styles.
+      // is resolved against this inherited bg inside applyOwnStyle, where it
+      // wraps the node's complete child sequence alongside its boolean styles.
       // Wrap by quantizing Text's retained pre-pixel-grid width with the same
       // pure whole-cell rule used by measurement, clamped by the final parent
       // content box. The width can legitimately be 0 (flexBasis=0, width=0,
@@ -1147,7 +1106,7 @@ function paintNode(
       // the glyph onto its own second row exactly as measurement reported.
       const wrapWidth = getTextTerminalCellWidth(node);
       const { text, wrapped } = prepareTextPaint(node, terminalStyle, inheritedBg, wrapWidth);
-      // Skip writing empty text — matches Ink's behavior of not writing empty text nodes.
+      // Empty text has no cells to write.
       if (text === "") return;
       // Pad each line to the cell width with the INHERITED Box background only —
       // this fills the space behind the text with the Box's bg (the Box also fills
@@ -1157,8 +1116,8 @@ function paintNode(
       // its OWN glyphs, never the surrounding Box fill. The already-rendered glyphs
       // in `wrapped[i]` keep their effective bg, so a `backgroundColor=""` Text
       // stays bare even though we pad the trailing cells with the inherited bg.
-      // Pad to wrapWidth (NOT a ≥1-clamped width): at width 0 there is nothing to
-      // pad, matching Ink (getMaxWidth=0 → no padding). Clamping to 1 here would
+      // Pad to wrapWidth (not a ≥1-clamped width): at width 0 there is nothing to
+      // pad. Clamping to 1 here would
       // bg-pad the empty leading wrap line "" into a stray 1-cell fill that
       // collides with a row-sibling at the 0-width box origin.
       output.write(x0 + left, y0 + top, wrapped);
@@ -1197,19 +1156,14 @@ export function paintIsolated(
     return paintUnderRoot(nodes, width, terminalStyle, (iso) => iso.yoga.setWidth(width));
   }
 
-  // TWO-LEVEL structure, mirroring Ink's static layout (renderer.ts:30-37,
-  // ink.tsx:302-305, Static.tsx). Ink lays the static box out as a
-  // `position:absolute`, AUTO-width CHILD of the terminal-width root:
+  // Static history uses an absolute, auto-width box under a terminal-width root:
   //
   //   root (yogaNode.setWidth(terminalWidth))  ← containing block for TEXT wrap
   //     └─ staticNode (position:absolute, auto width, flexDirection:column…)
   //          └─ <static items…>
   //
-  // and then sizes the static OUTPUT grid from
-  // node.staticNode.yogaNode.getComputedWidth()/getComputedHeight()
-  // (renderer.ts:32-33) — the computed size of that absolute, auto-width node.
-  //
-  // Two consequences fall out of this, and BOTH must hold (G64):
+  // The output grid is sized from the computed static box, not the outer root.
+  // Two consequences must hold:
   //   • TEXT measures/wraps against the parent root's content width (= terminal
   //     width), so a plain wide <Text> wraps to the terminal and a percent-width
   //     child resolves its percent against the terminal.
@@ -1217,15 +1171,11 @@ export function paintIsolated(
   //     CONTENT and OVERFLOW past the terminal — the grid is the static node's
   //     content width, which can EXCEED the terminal width.
   //
-  // We reproduce this exactly: an outer iso ROOT fixed to `width` (the terminal
-  // containing block), and an inner iso BOX that copyStyle's the static node's
-  // resolved yoga (carrying flexDirection/padding/gap/justify/align AND an
-  // explicit width if one was set — G44) and stays `position:absolute` +
+  // An outer isolated root is fixed to `width`; an inner isolated box copies the
+  // Static node's resolved layout properties, including any explicit width, and
+  // stays `position:absolute` +
   // auto-width so it content-sizes and overflows. The output grid is sized from
   // the INNER box (not the root), so it equals the content width.
-  //
-  // (Supersedes b913386's single-root setMaxWidth(columns) approach, which
-  // CLAMPED overflow content to the terminal width instead of overflowing.)
   const iso = createIsoRoot({} as never);
   attachYoga(iso);
   iso.yoga.setWidth(width);
@@ -1234,30 +1184,29 @@ export function paintIsolated(
   attachYoga(staticBox);
   // copyStyle pulls every resolved layout prop off the static node's yoga
   // (flexDirection — incl. the <Static> column default — padding, margin, gap,
-  // justifyContent, alignItems, and an explicit width/height when set). This is
-  // the read-back equivalent of Ink reusing node.staticNode.yogaNode, without
-  // reparenting the live static node's own yoga children (the main-tree layout
-  // stays untouched). (G44)
+  // justifyContent, alignItems, and an explicit width/height when set), without
+  // reparenting the live static node's own yoga children. The main-tree layout
+  // stays untouched.
   staticBox.yoga.copyStyle(staticNode.yoga);
   // attachYoga() sets the static node's OWN yoga to display:none so it occupies
   // no space in the dynamic frame's main-tree layout (yoga.ts:64-68). copyStyle
   // drags that display:none onto the iso box — which would collapse it to 0x0
   // and paint nothing. Force it back to display:flex (it IS the painted box).
   staticBox.yoga.setDisplay(Yoga.DISPLAY_FLEX);
-  // Keep position:absolute (Static.tsx's default), the crux of the Ink model:
-  // as an absolute, auto-width child of the terminal-width root, the box's
+  // Keep position:absolute: as an absolute, auto-width child of the
+  // terminal-width root, the box's
   // children wrap their TEXT against the root's width while the box itself
   // content-sizes and may OVERFLOW the terminal. With no inset, an absolute box
-  // resolves to top:0/left:0, so its children paint at the grid origin. (G64)
+  // resolves to top:0/left:0, so its children paint at the grid origin.
   staticBox.yoga.setPositionType(Yoga.POSITION_TYPE_ABSOLUTE);
 
   iso.yoga.insertChild(staticBox.yoga, 0);
   iso.children.push(staticBox);
 
   // Parent the static content children UNDER the inner box (not the root), so
-  // they lay out within the absolute, auto-width static node — exactly the tree
-  // Ink builds. We temporarily move only the yoga parentage (never the DOM
-  // .parent — see below) and restore it in the finally block.
+  // they lay out within the absolute, auto-width static node. We temporarily
+  // move only the yoga parentage (never the DOM .parent) and restore it in the
+  // finally block.
   const yogaAdded: Array<{
     yoga: import("yoga-layout").Node;
     origParent: import("yoga-layout").Node | null;
@@ -1300,9 +1249,8 @@ export function paintIsolated(
       undefined,
       Yoga.DIRECTION_LTR,
     );
-    // Size the output grid from the INNER static box (mirroring Ink
-    // renderer.ts:32-33 reading node.staticNode.yogaNode.getComputed*), NOT the
-    // root — so the grid equals the content width and can exceed the terminal.
+    // Size the output grid from the inner static box, not the root, so the grid
+    // equals the content width and can exceed the terminal.
     const boxLayout = staticBox.yoga.getComputedLayout();
     const outW = Math.max(1, Math.floor(boxLayout.width));
     const outH = Math.max(1, Math.floor(boxLayout.height));
