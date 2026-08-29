@@ -12,7 +12,7 @@ Never import Runtime source paths, raw `tui-*` hosts, Yoga nodes, or `@vue-tui/r
 
 ## Inclusion bar — product-driven and evidence-backed
 
-A component earns its place by closing a recurring need supported by [qualifying product evidence](./product-priorities.md#qualifying-evidence). A representative journey is product evidence: when it repeatedly hand-rolls the same difficult interaction, the project may add a first-party component proactively instead of waiting for a separate community request. Demonstrated broader community demand remains equally valid.
+A component earns its place by closing a recurring need that qualifies as [product work](./intent.md#product-work). A representative journey is product evidence: when it repeatedly hand-rolls the same difficult interaction, the project may add a first-party component proactively instead of waiting for a separate community request. Demonstrated broader community demand remains equally valid.
 
 "A peer framework has it" is not a reason on its own. Another project can show that a problem exists, but vue-tui still needs evidence that the problem belongs in its representative workloads or consumer workflows.
 

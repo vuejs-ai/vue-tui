@@ -4,10 +4,9 @@ Open the narrowest record that owns the area being changed. Product direction an
 
 ## Product direction
 
-| When changing                                                                    | Read                                          | Ownership                                                                  |
-| -------------------------------------------------------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------- |
-| Product positioning, workloads, rendering-mode direction, boundaries, or success | [Product intent](./intent.md)                 | Authoritative product direction.                                           |
-| Evidence for product work or priority between valid problems                     | [Product priorities](./product-priorities.md) | Defines qualifying evidence and priority between valid framework problems. |
+| When changing                                                                                                                | Read                          | Ownership                        |
+| ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | -------------------------------- |
+| Product positioning, workloads, what qualifies as product work, priorities, rendering-mode direction, boundaries, or success | [Product intent](./intent.md) | Authoritative product direction. |
 
 ## Package boundaries and API design
 

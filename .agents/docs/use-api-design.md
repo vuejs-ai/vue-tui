@@ -8,7 +8,7 @@ The root currently exports `useKeyInput`, `useTextInput`, and `useInputWhileMoun
 
 An API belongs in `@vue-tui/use` when it expresses reusable Vue coordination that is not the internal state or required companion of a specific rendered component and does not require Runtime-private renderer, terminal, layout, paint, protocol, or application-lifecycle ownership. It may observe a caller-selected vnode as a generic Vue lifetime signal and may select or coordinate public Runtime facts, but it must preserve the Runtime contract rather than invent a second input, focus, or rendering model.
 
-New APIs still require [qualifying product evidence](./product-priorities.md#qualifying-evidence) and must pass the shared [placement test](./package-architecture.md#placement-test); this record does not create a separate package roadmap. The current input selectors establish that a higher-layer API may improve Vue authoring without adding a new Runtime capability, provided it preserves the exact event object and subscription behavior.
+New APIs still must qualify as [product work](./intent.md#product-work) and pass the shared [placement test](./package-architecture.md#placement-test); this record does not create a separate package roadmap. The current input selectors establish that a higher-layer API may improve Vue authoring without adding a new Runtime capability, provided it preserves the exact event object and subscription behavior.
 
 ## Input selector composables
 

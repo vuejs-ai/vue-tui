@@ -23,6 +23,16 @@ The product value is that a Vue developer can build and ship a reliable interact
 - **Complete development and verification.** First-party HMR and build tooling, component and interaction testing, real-terminal verification, starter material, and documented production build paths are product responsibilities for building, testing, and shipping complex interactive terminal applications. Problems in `@vue-tui/vite` and `@vue-tui/testing` are product work when they affect this path, not merely auxiliary repository maintenance. [VOUCHED @hyfdev 2026-08-29]
 - **Stable generic contracts.** Public APIs and user-consumable types should converge on a coherent and dependable 1.0 contract. [VOUCHED @hyfdev 2026-08-29]
 
+## Product work
+
+A proposed change qualifies as product work when it addresses a reproducible problem inside the [product boundaries](#product-boundaries), can keep any public contract generic, and can be verified at the appropriate layer.
+
+### Priority
+
+[VOUCHED @hyfdev 2026-08-29]
+
+Product work must address a reproducible problem that belongs to the framework. Among such problems, prioritize work that severely blocks complex interactive terminal applications or benefits multiple applications. Real consumers, representative workloads, repeated implementations, and test failures are all valid evidence; evidence sources have no fixed ranking. Work that affects only simple workloads has lower priority unless it exposes a correctness failure in shared foundations.
+
 ## Reusable Runtime behavior
 
 When a low-level interaction behavior recurs across multiple complex terminal applications, is generic rather than application-specific, and requires renderer or terminal ownership, it may become a first-party `@vue-tui/runtime` API or composable. The concrete Runtime shape follows the demonstrated problem rather than a predefined catalog. Higher-level component admission is governed separately by the [`@vue-tui/components` design principles](./components-api-design.md#inclusion-bar--product-driven-and-evidence-backed).
