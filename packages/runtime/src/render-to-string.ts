@@ -2,7 +2,10 @@ import { createRenderer, createVNode, type Component, type VNode } from "vue";
 import { Readable, Writable } from "node:stream";
 import Yoga from "yoga-layout";
 import { createRoot, type TuiNode } from "./host/nodes.ts";
-import { calculateLayoutWithContentGuards } from "./host/layout-guards.ts";
+import {
+  calculateBoundedLayoutWithContentGuards,
+  calculateLayoutWithContentGuards,
+} from "./host/layout-guards.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
 import { createHostYogaAllocationLedger } from "./host/yoga-allocation-ledger.ts";
@@ -182,11 +185,10 @@ function renderStringDocument(
         const naturalHeight = Math.max(0, Math.floor(root.yoga.getComputedLayout().height));
         if (naturalHeight > options.height) {
           restoreLayoutGuards();
-          restoreLayoutGuards = calculateLayoutWithContentGuards(
+          restoreLayoutGuards = calculateBoundedLayoutWithContentGuards(
             root,
             options.width,
             options.height,
-            Yoga.DIRECTION_LTR,
           );
         }
       }

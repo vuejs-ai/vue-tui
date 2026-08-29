@@ -21,7 +21,10 @@ import {
   type StdinController,
 } from "./io/stdin-controller.ts";
 import { createRoot, type TuiNode, type TuiRoot, type TuiStatic } from "./host/nodes.ts";
-import { calculateLayoutWithContentGuards } from "./host/layout-guards.ts";
+import {
+  calculateBoundedLayoutWithContentGuards,
+  calculateLayoutWithContentGuards,
+} from "./host/layout-guards.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
 import {
@@ -2563,15 +2566,19 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         width: number,
         viewportRows?: number,
         geometry?: InternalGeometryPaintFrame,
+        documentTop = 0,
       ): string {
         const output = paint(tuiRoot, {
           terminalStyle: renderSession.terminalStyle,
-          viewport: viewportRows === undefined ? undefined : { width, height: viewportRows },
+          viewport:
+            viewportRows === undefined
+              ? undefined
+              : { width, height: viewportRows, top: documentTop },
           geometry,
         });
-        // The hard paint viewport is the primary guard. Keep a final physical
-        // row bound as defense-in-depth for future paint extensions: Inline
-        // must never let an application frame exceed terminal-addressable rows.
+        // The hard paint viewport is the primary guard. Keep a final physical row
+        // bound as defense-in-depth for future paint extensions: no surface may hand
+        // the writer more rows than the window it asked for.
         return (boundedInlineSurface || boundedDocumentSurface) && viewportRows !== undefined
           ? output.split("\n").slice(0, viewportRows).join("\n")
           : output;
@@ -2831,47 +2838,35 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           ? (renderSession.session.dimensions.layout.rows ?? undefined)
           : undefined;
         tuiRoot.yoga.setWidth(w);
-        let restoreLayoutGuards = calculateLayoutWithContentGuards(
-          tuiRoot,
-          w,
-          exactViewportRows,
-          Yoga.DIRECTION_LTR,
-        );
+        // Fullscreen owns a fixed viewport, so layout gets that exact height while the
+        // root's auto-sized in-flow children are pinned against shrinking into it: an
+        // auto-sized child has no size of its own to fit, and shrinking it collapses
+        // the content inside it, which deletes rows from the middle of the document.
+        // Inline gets no row bound at all — the terminal rows choose which window
+        // stays redrawable, not how tall the document may be.
+        let restoreLayoutGuards =
+          exactViewportRows === undefined
+            ? calculateLayoutWithContentGuards(tuiRoot, w, undefined, Yoga.DIRECTION_LTR)
+            : calculateBoundedLayoutWithContentGuards(tuiRoot, w, exactViewportRows);
         try {
-          const maximumRows =
-            boundedInlineSurface || boundedDocumentSurface
-              ? (renderSession.session.dimensions.layout.rows ?? undefined)
-              : undefined;
-          if (maximumRows !== undefined && tuiRoot.yoga.getComputedLayout().height > maximumRows) {
-            // A permanent Yoga max-height changes how nested percentage heights
-            // resolve even when the natural tree is short (for example, 50% of a
-            // six-row Box incorrectly becomes 50% of the terminal). Compute the
-            // natural tree first, and only rerun with an exact available height
-            // when it actually exceeds the available maximum. This gives overflowing
-            // flex layouts a real rows-sized allocation without padding or
-            // perturbing short layouts.
-            restoreLayoutGuards();
-            restoreLayoutGuards = calculateLayoutWithContentGuards(
-              tuiRoot,
-              w,
-              maximumRows,
-              Yoga.DIRECTION_LTR,
-            );
-          }
           const computedRootHeight = Math.max(
             0,
             Math.floor(tuiRoot.yoga.getComputedLayout().height),
           );
-          const boundedViewportRows =
-            boundedInlineSurface || boundedDocumentSurface
-              ? Math.min(
-                  renderSession.session.dimensions.layout.rows ?? computedRootHeight,
-                  computedRootHeight,
-                )
-              : undefined;
-          const paintViewportRows = exactViewportRows ?? boundedViewportRows;
+          const terminalRows = renderSession.session.dimensions.layout.rows;
+          // Inline shows the trailing window of the document, so the newest rows stay
+          // visible while the window stays the size the terminal can redraw.
+          const inlineWindowRows = boundedInlineSurface
+            ? Math.min(terminalRows ?? computedRootHeight, computedRootHeight)
+            : undefined;
+          const documentWindowRows = boundedDocumentSurface
+            ? Math.min(terminalRows ?? computedRootHeight, computedRootHeight)
+            : undefined;
+          const paintViewportRows = exactViewportRows ?? inlineWindowRows ?? documentWindowRows;
+          const documentTop =
+            inlineWindowRows === undefined ? 0 : Math.max(0, computedRootHeight - inlineWindowRows);
           geometryFrame = mountedGeometry?.beginFrame();
-          const frame = renderFrame(w, paintViewportRows, geometryFrame);
+          const frame = renderFrame(w, paintViewportRows, geometryFrame, documentTop);
           renderObserver?.onCommit?.({
             dynamic: frame,
             staticOutput: hasStaticOutput ? staticOutput : "",

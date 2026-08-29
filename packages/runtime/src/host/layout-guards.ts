@@ -93,6 +93,52 @@ function applyZeroContentGuards(node: TuiNode, guarded: Map<YogaNode, number>): 
   return changed;
 }
 
+/**
+ * Lay out against a page's row bound while the root's auto-sized in-flow children
+ * keep their natural height.
+ *
+ * The document hosts — `renderToString()` and the mounted non-TTY host — model one
+ * finite page, and a child the author gave an explicit height is fitted to it as
+ * asked. A child with no height of its own has nothing to fit: shrinking it only
+ * collapses the content inside it, so the document would lose rows from its middle
+ * instead of overflowing the page and being clipped from row zero.
+ *
+ * Only style inputs decide this — no measured value is read back into layout.
+ */
+export function calculateBoundedLayoutWithContentGuards(
+  root: TuiRoot,
+  width: number | undefined,
+  height: number,
+): () => void {
+  const pinned: Array<[YogaNode, number]> = [];
+  for (const child of root.children) {
+    if (!hasYoga(child)) continue;
+    const node = child.yoga;
+    if (node.getPositionType() === Yoga.POSITION_TYPE_ABSOLUTE) continue;
+    if (node.getHeight().unit !== Yoga.UNIT_AUTO) continue;
+    if (node.getFlexBasis().unit !== Yoga.UNIT_AUTO) continue;
+    pinned.push([node, node.getFlexShrink()]);
+    node.setFlexShrink(0);
+  }
+  const restorePinned = () => {
+    for (const [node, flexShrink] of pinned) node.setFlexShrink(flexShrink);
+    pinned.length = 0;
+  };
+
+  let restoreGuards: () => void;
+  try {
+    restoreGuards = calculateLayoutWithContentGuards(root, width, height);
+  } catch (error) {
+    restorePinned();
+    throw error;
+  }
+
+  return () => {
+    restoreGuards();
+    restorePinned();
+  };
+}
+
 export function calculateLayoutWithContentGuards(
   root: TuiRoot,
   width?: number,

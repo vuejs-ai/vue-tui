@@ -233,7 +233,7 @@ test("document-host stream never owns raw mode or a terminal surface", async () 
   result.dispose();
 });
 
-test("Inline clamps tall dynamic output without padding short output", async () => {
+test("Inline keeps short output short and shows a tall document's newest rows", async () => {
   const short = await render(() => <Text>short</Text>, { columns: 20, rows: 3 });
   try {
     expect(short.lastFrame({ raw: true })).toBe("short");
@@ -252,7 +252,11 @@ test("Inline clamps tall dynamic output without padding short output", async () 
     { columns: 20, rows: 3 },
   );
   try {
-    expect(tall.lastFrame()).toBe("line 1\nline 2\nline 3");
+    // Five rows into three: the window is the trailing three, contiguous, so the
+    // newest line stays visible.
+    expect(tall.lastFrame()).toBe("line 3\nline 4\nline 5");
+    const screen = await tall.screen();
+    expect(screen.lines.map((line) => line.trimEnd())).toEqual(["line 3", "line 4", "line 5"]);
   } finally {
     tall.dispose();
   }
