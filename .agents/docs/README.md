@@ -4,9 +4,10 @@ Open the narrowest record that owns the area being changed. Product direction an
 
 ## Product direction
 
-| When changing                                                                                                                | Read                          | Ownership                        |
-| ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | -------------------------------- |
-| Product positioning, workloads, what qualifies as product work, priorities, rendering-mode direction, boundaries, or success | [Product intent](./intent.md) | Authoritative product direction. |
+| When changing                                                                                                                | Read                            | Ownership                                                                   |
+| ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------------------------------- |
+| Product positioning, workloads, what qualifies as product work, priorities, rendering-mode direction, boundaries, or success | [Product intent](./intent.md)   | Authoritative product direction.                                            |
+| Current work sequence, near-term focus, or whether an area is currently planned                                              | [Product roadmap](./roadmap.md) | Orders current work without redefining product intent or package contracts. |
 
 ## Package boundaries and API design
 
@@ -26,7 +27,6 @@ Open the narrowest record that owns the area being changed. Product direction an
 | Input events, stdin ownership, raw mode, or handler delivery              | [Runtime API design](./runtime-api-design.md#composable-contract) and [accepted input decisions](./runtime-api-decisions.md#useinput-exposes-one-tagged-text-key-and-paste-event-contract) | Runtime owns normalization and terminal demand; public delivery remains broadcast.  |
 | Focus, Box metrics, or a composable bound to a rendered component ref     | [Rendered-target design](./runtime-api-design.md#rendered-target-lifetime) and [Runtime API decisions](./runtime-api-decisions.md)                                                         | Vue refs stay public while Runtime privately follows current rendered availability. |
 | Terminal color, Text measurement, clipping, or a peer behavior comparison | [Runtime API design](./runtime-api-design.md), [Peer frameworks](./peer-frameworks.md), and [Runtime API decisions](./runtime-api-decisions.md)                                            | Current local contracts decide behavior; peers provide bounded evidence.            |
-| Renderer performance or benchmarks                                        | [Performance](./performance.md)                                                                                                                                                            | Reopens only from a representative measured failure.                                |
 
 ## Tooling and supporting records
 
