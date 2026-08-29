@@ -144,4 +144,35 @@ describe("parse-keypress", () => {
     expect(key.shift).toBe(true);
     expect(key.ctrl).toBe(false);
   });
+
+  // A two-code-point ESC form is the legacy Alt encoding. `ESC [` is the one
+  // exception: it introduces a control sequence and no terminal sends it as a key.
+
+  test("delivers Alt on a letter the shifted form distinguishes", () => {
+    const key = parseKeypress("\x1bO");
+    expect(key.name).toBe("o");
+    expect(key.meta).toBe(true);
+    expect(key.shift).toBe(true);
+    expect(key.ctrl).toBe(false);
+  });
+
+  test("delivers Alt on punctuation", () => {
+    for (const character of ["\\", "]", "^", "_", "-", "."]) {
+      const key = parseKeypress(`\x1b${character}`);
+      expect(key.name).toBe(character);
+      expect(key.meta).toBe(true);
+      expect(key.ctrl).toBe(false);
+    }
+  });
+
+  test("a lone CSI introducer is not a keypress", () => {
+    const key = parseKeypress("\x1b[");
+    expect(key.name).toBe("");
+    expect(key.meta).toBe(false);
+  });
+
+  test("a complete SS3 function key still wins over the Alt reading", () => {
+    expect(parseKeypress("\x1bOP").name).toBe("f1");
+    expect(parseKeypress("\x1bOP").meta).toBe(false);
+  });
 });

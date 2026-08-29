@@ -20,7 +20,7 @@ import {
   normalizeDevEntry,
   resolveConfiguredEntry,
 } from "./entry-match.ts";
-import { createWatcherUpdateTracker, type WatcherUpdateTracker } from "./watcher-update.ts";
+import type { WatcherUpdateTracker } from "./watcher-update.ts";
 
 class UnsupportedVueCompilerError extends Error {
   override readonly name = "VueTuiUnsupportedCompilerError";
@@ -37,7 +37,9 @@ async function closeLosingServer(server: ViteDevServer, error: unknown): Promise
 
 export function devPlugin(opts: {
   session: DevSessionRef;
-  watcherUpdates?: WatcherUpdateTracker;
+  // Written here in the `pre` hot-update hook and read by hmrErrorForwardingPlugin
+  // in the `post` one, so both plugins must be given the same tracker.
+  watcherUpdates: WatcherUpdateTracker;
 }): Plugin {
   // `entry` becomes the rooted form devEntryFromViteInput() produces (leading
   // "/" or a drive-letter path) once Vite resolves the top-level `input`. The SSR
@@ -45,7 +47,7 @@ export function devPlugin(opts: {
   // from config.root in configResolved.
   let entry = normalizeDevEntry();
   const session = opts.session;
-  const watcherUpdates = opts.watcherUpdates ?? createWatcherUpdateTracker();
+  const watcherUpdates = opts.watcherUpdates;
   let resolvedEntryAbs = entry;
   let preserveSymlinks = false;
   let closing = false;
@@ -119,7 +121,11 @@ export function devPlugin(opts: {
       // absolute module path EXACTLY against the entry resolved from the Vite root —
       // never a suffix match that could hit an unrelated file ending in the same path.
       if (moduleIdMatchesConfiguredEntry(id, resolvedEntryAbs, preserveSymlinks)) {
-        return { code: `import ${JSON.stringify(DEV_VMOD_ID)};\n` + code, map: null };
+        // No newline after the injected import: it shares line 1 with the entry's own
+        // first statement so every line keeps the number the author wrote, which is what
+        // `map: null` ("this transform did not move code") promises the rest of the
+        // toolchain. Only line 1's columns shift, by the length of this prefix.
+        return { code: `import ${JSON.stringify(DEV_VMOD_ID)};` + code, map: null };
       }
     },
     hotUpdate: {

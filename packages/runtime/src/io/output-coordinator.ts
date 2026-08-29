@@ -288,16 +288,31 @@ export function createOutputCoordinator(options?: {
           return current.fullyHanded;
         }
       }
+      current.fullyHanded = true;
+      if (current.bodyActive) {
+        // `run()` still owns this transaction and settles it from its own catch, so
+        // let a settlement observer's throw travel there unchanged.
+        reportFullyHanded(current);
+        return true;
+      }
+      // Resumed from a drain, nothing else will settle this transaction. A
+      // settlement observer runs arbitrary caller code — accepting a Static commit,
+      // publishing geometry — and a throw from it must not leave the coordinator
+      // busy, refusing every later write.
+      try {
+        reportFullyHanded(current);
+      } catch (error) {
+        fail(current, error, true);
+        return false;
+      }
+      finish(current);
+      return true;
     } catch (error) {
       const deferred = !current.bodyActive;
       fail(current, error, deferred);
       if (!deferred) throw error;
       return false;
     }
-    current.fullyHanded = true;
-    reportFullyHanded(current);
-    if (!current.bodyActive) finish(current);
-    return true;
   }
 
   function handoff(): boolean {

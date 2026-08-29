@@ -5,7 +5,17 @@ import { kittyModifiers } from "./kitty-keyboard.ts";
 
 const textDecoder = new TextDecoder();
 
-const metaKeyCodeRe = /^(?:\x1b)([a-zA-Z0-9])$/;
+// Alt on a legacy terminal is an ESC prefix on whatever key was pressed, so the
+// captured character is any single code point, not only a letter or digit. The
+// earlier branches already claim the ESC-prefixed forms that are named keys
+// (backspace, escape, space), and `$` keeps out anything longer than two code
+// points. Only `[` is excluded: `ESC [` is the CSI introducer and no terminal
+// sends it as a key, so a lone one is a control sequence the escape flush cut
+// short. Every other two-code-point form stays ambiguous by nature — `ESC O` is
+// both Alt+Shift+O and a truncated SS3 — and is read as the chord, because that
+// is the reading a keyboard produces and a truncated sequence is a slow-link
+// accident. Kitty's protocol is the unambiguous path when one is needed.
+const metaKeyCodeRe = /^\x1b(?!\[)(.)$/su;
 
 const fnKeyRe = /^(?:\x1b+)(O|N|\[|\[\[)(?:(\d+)(?:;(\d+))?([~^$])|(?:1;)?(\d+)?([a-zA-Z]))/;
 
@@ -572,9 +582,15 @@ export function parseKeypress(s: Uint8Array | string = ""): Keypress {
   } else if (s === " " || s === "\x1b ") {
     key.name = "space";
     key.meta = s.length === 2;
-  } else if (s.length === 1 && s <= "\x1a") {
+  } else if (s.length === 1 && s >= "\x01" && s <= "\x1a") {
     // ctrl+letter
     key.name = String.fromCharCode(s.charCodeAt(0) + "a".charCodeAt(0) - 1);
+    key.ctrl = true;
+  } else if (s === "\x00" || (s.length === 1 && s >= "\x1c" && s <= "\x1f")) {
+    // Ctrl clears the upper bits of the printable key, so 0x00 and 0x1c-0x1f are
+    // Ctrl with the ASCII characters at 0x40 and 0x5c-0x5f. A terminal sends 0x00
+    // for both Ctrl+@ and Ctrl+Space. 0x1b is the escape key, handled above.
+    key.name = String.fromCharCode(s.charCodeAt(0) + 0x40);
     key.ctrl = true;
   } else if (s.length === 1 && s >= "0" && s <= "9") {
     // number
@@ -587,10 +603,21 @@ export function parseKeypress(s: Uint8Array | string = ""): Keypress {
     key.name = s.toLowerCase();
     key.shift = true;
   } else if ((parts = metaKeyCodeRe.exec(s))) {
-    // meta+character key
-    key.name = parts[1]!.toLowerCase();
+    // Alt is a prefix, not a different key. Classify the byte after ESC exactly as
+    // it is classified on its own, so a control byte stays a Ctrl chord and a named
+    // key keeps its name; a byte with no identity of its own — punctuation, a
+    // letter, a digit — is the literal character that was typed.
+    const suffix = parts[1]!;
+    const alone = parseKeypress(suffix);
+    if (alone.name !== "") {
+      key.name = alone.name;
+      key.ctrl = alone.ctrl;
+      key.shift = alone.shift;
+    } else {
+      key.name = suffix.toLowerCase();
+      key.shift = /^[A-Z]$/.test(suffix);
+    }
     key.meta = true;
-    key.shift = /^[A-Z]$/.test(parts[1]!);
   } else if ((parts = fnKeyRe.exec(s))) {
     // `s` here is a terminal escape sequence (ASCII control chars + digits,
     // e.g. "\x1b[1;5A"), never user text, so it has no multi-codepoint

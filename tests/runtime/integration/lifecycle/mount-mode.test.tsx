@@ -208,3 +208,35 @@ test("a partial custom TTY size fails instead of borrowing process dimensions", 
   await app.waitUntilExit();
   expect(writes.join("")).toContain("Hello");
 });
+
+test("a non-TTY mount never probes the controlling terminal for a size it cannot use", async () => {
+  // A redirected or piped stdout reports neither `columns` nor `rows`.
+  const stdout = new PassThrough() as unknown as NodeJS.WriteStream;
+  Object.assign(stdout, { isTTY: false });
+  const { stream: stdin } = makeFakeStdin();
+  const stderr = makeFakeWritable();
+  let probeCalls = 0;
+  const app = createApp(App);
+
+  try {
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stdin,
+        stderr,
+        patchConsole: false,
+        [INTERNAL_TERMINAL_SIZE_PROBE]: () => {
+          probeCalls += 1;
+          return { kind: "unavailable" };
+        },
+      }),
+    );
+    await app.waitUntilRenderFlush();
+
+    // The probe opens /dev/tty and can spawn `tput`; every non-TTY surface resolves
+    // to the fixed modeled document before the result could be read.
+    expect(probeCalls).toBe(0);
+  } finally {
+    app.unmount();
+  }
+});

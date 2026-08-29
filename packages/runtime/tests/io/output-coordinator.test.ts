@@ -269,4 +269,67 @@ describe("output coordinator", () => {
     expect(later.chunks).toEqual([]);
     expect(coordinator.isBlocked()).toBe(false);
   });
+
+  test("a settlement observer that throws on the drain path still settles the transaction", async () => {
+    const deferredErrors: unknown[] = [];
+    const coordinator = createOutputCoordinator({
+      onDeferredError: (error) => deferredErrors.push(error),
+    });
+    const first = createWritable([false]);
+    const second = createWritable([true]);
+    const failure = new Error("settlement observer threw");
+
+    // Two streams: the first backpressures while the second is still pending, so the
+    // transaction is not fully handed until the drain resumes the pump.
+    const result = coordinator.run(
+      () => {
+        coordinator.write(first.stream, "a");
+        coordinator.write(second.stream, "b");
+      },
+      {
+        onFullyHanded: () => {
+          throw failure;
+        },
+      },
+    );
+    expect(coordinator.isBlocked()).toBe(true);
+
+    first.events.emit("drain");
+    await Promise.resolve();
+
+    // The observer runs caller code. A throw from it reports through the deferred
+    // channel; leaving the coordinator busy would refuse every later write.
+    expect(deferredErrors).toEqual([failure]);
+    expect(coordinator.isBlocked()).toBe(false);
+    await expect(readyOf(result)).rejects.toThrow(failure);
+  });
+
+  test("a settlement observer that throws inside the body reaches the caller", async () => {
+    const deferredErrors: unknown[] = [];
+    const coordinator = createOutputCoordinator({
+      onDeferredError: (error) => deferredErrors.push(error),
+    });
+    const stream = createWritable([true]);
+    const failure = new Error("settlement observer threw");
+
+    // Handed off without backpressure, so `run()` still owns the transaction: the
+    // throw is the caller's to see, and the transaction settles rather than failing.
+    let result: CoordinatedWriteResult | undefined;
+    expect(() => {
+      result = coordinator.run(
+        () => {
+          coordinator.write(stream.stream, "a");
+        },
+        {
+          onFullyHanded: () => {
+            throw failure;
+          },
+        },
+      );
+    }).toThrow(failure);
+
+    expect(result).toBeUndefined();
+    expect(deferredErrors).toEqual([]);
+    expect(coordinator.isBlocked()).toBe(false);
+  });
 });

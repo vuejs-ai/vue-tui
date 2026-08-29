@@ -417,3 +417,27 @@ test("blocked semantic-input changes retain only the final active state", async 
   slow.stream.destroy();
   stderr.destroy();
 }, 10_000);
+
+test("a patched console record during backpressured teardown does not deadlock exit", async () => {
+  const slow = createSlowWritable({ highWaterMark: 1, firstDelayMs: 120, laterDelayMs: 40 });
+  const { stream: stdin } = makeTrackedStdin();
+  const App = defineComponent(() => () => <Text>{"x".repeat(8_192)}</Text>);
+  const app = createApp(App);
+  app.mount(
+    createInternalMountOptions({
+      stdin,
+      stdout: slow.stream,
+      stderr: makeFakeWritable(),
+      maxFps: 0,
+      patchConsole: true,
+    }),
+  );
+  // Deliberately not flushed: the first frame is still draining, so teardown parks
+  // on the output coordinator with the console gate still closed.
+  await nextTick();
+
+  app.unmount();
+  console.log("done");
+
+  await expect(app.waitUntilExit()).resolves.toBeUndefined();
+}, 10_000);

@@ -1,5 +1,6 @@
-import { isRef, type MaybeRef, type MaybeRefOrGetter } from "vue";
+import { type MaybeRef, type MaybeRefOrGetter } from "vue";
 import { useInput, type TuiInputEvent } from "@vue-tui/runtime";
+import { resolveHandlerSource } from "./handler-source.ts";
 
 type KeyInputEvent = Extract<TuiInputEvent, { readonly type: "key" }>;
 
@@ -26,22 +27,7 @@ export function useKeyInput(
   handler: MaybeRef<(event: KeyInputEvent) => void>,
   options?: { readonly isActive?: MaybeRefOrGetter<boolean> },
 ): void {
-  if (typeof handler !== "function" && !isRef(handler)) {
-    throw new TypeError("useKeyInput() handler must be a function");
-  }
-
-  const callHandler =
-    typeof handler === "function"
-      ? handler
-      : (event: KeyInputEvent) => {
-          const currentHandler: unknown = handler.value;
-
-          if (typeof currentHandler !== "function") {
-            throw new TypeError("useKeyInput() handler must be a function");
-          }
-
-          currentHandler(event);
-        };
+  const callHandler = resolveHandlerSource<KeyInputEvent>("useKeyInput()", handler);
 
   useInput((event) => {
     if (event.type === "key") {

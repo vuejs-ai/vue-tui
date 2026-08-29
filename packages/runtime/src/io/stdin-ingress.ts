@@ -519,13 +519,35 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
 
     for (const byte of chunk.chunk) pendingBytes.push({ byte, recipients: chunk.recipients });
     const segments: DecodedSegment[] = [];
-    while (pendingBytes.length > 0) {
-      const leading = pendingBytes[0]!;
+    // Walk with a cursor and drop the consumed prefix once at the end. Consuming
+    // through `splice(0, n)` per scalar re-shifts the whole queue every time, which
+    // is quadratic in the chunk size: a one-megabyte paste arrives in one read.
+    let readIndex = 0;
+    while (readIndex < pendingBytes.length) {
+      const leading = pendingBytes[readIndex]!;
+
+      // Plain ASCII cannot start a multi-byte scalar, so a run of it decodes in one
+      // pass instead of allocating a Buffer and a string per byte.
+      if (leading.byte < 0x80) {
+        let runEnd = readIndex;
+        const bytes: number[] = [];
+        while (runEnd < pendingBytes.length) {
+          const entry = pendingBytes[runEnd]!;
+          if (entry.byte >= 0x80 || entry.recipients !== leading.recipients) break;
+          bytes.push(entry.byte);
+          runEnd++;
+        }
+        readIndex = runEnd;
+        appendDecodedSegment(segments, Buffer.from(bytes).toString("utf8"), leading.recipients);
+        continue;
+      }
+
       const length = expectedUtf8Length(leading.byte);
       let invalidAt: number | undefined;
-      const availableLength = Math.min(length, pendingBytes.length);
+      const remaining = pendingBytes.length - readIndex;
+      const availableLength = Math.min(length, remaining);
       for (let index = 1; index < availableLength; index++) {
-        const byte = pendingBytes[index]!.byte;
+        const byte = pendingBytes[readIndex + index]!.byte;
         if (
           (index === 1 && !isValidUtf8SecondByte(leading.byte, byte)) ||
           (index > 1 && !isContinuationByte(byte))
@@ -535,14 +557,19 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
         }
       }
 
-      if (length > 1 && invalidAt === undefined && pendingBytes.length < length) break;
+      if (length > 1 && invalidAt === undefined && remaining < length) break;
       // WHATWG/Node maximal-subpart behavior: a bad second byte replaces only
       // the lead; a bad later byte replaces the already-valid prefix once and
       // is then reprocessed as the start of the next scalar.
       const consumedLength = invalidAt ?? length;
-      const bytes = pendingBytes.splice(0, consumedLength).map((entry) => entry.byte);
+      const bytes: number[] = [];
+      for (let offset = 0; offset < consumedLength; offset++) {
+        bytes.push(pendingBytes[readIndex + offset]!.byte);
+      }
+      readIndex += consumedLength;
       appendDecodedSegment(segments, Buffer.from(bytes).toString("utf8"), leading.recipients);
     }
+    if (readIndex > 0) pendingBytes.splice(0, readIndex);
     return segments;
   }
 

@@ -3,7 +3,7 @@
  * and it is not a `*.test.tsx`, so Vitest never collects it. It exists purely so
  * `vue-tsc -p integration/types/fixtures/tsconfig.json` type-checks it.
  *
- * It pins the contract the `WithChildren` shim establishes under the automatic
+ * It pins the contract the `PublicComponent` shim establishes under the automatic
  * JSX runtime (`jsx: "react-jsx"`, this dir's tsconfig — the mode the main
  * external Runtime test tsconfig does NOT use): components accept JSX children while
  * their declared props stay fully validated. If the shim regresses in either

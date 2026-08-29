@@ -12,6 +12,7 @@ import {
   createObserverHarness,
   evaluatedModule,
 } from "./harness.ts";
+import { createWatcherUpdateTracker } from "../../src/watcher-update.ts";
 
 test("the runner observers normalize evaluator failures and ignore logger strings", async () => {
   const harness = createObserverHarness();
@@ -136,7 +137,7 @@ test("the observer delegates evaluator metadata, successful inline work, and ext
 });
 
 test("the observer rejects an existing SSR factory with a named conflict", () => {
-  const plugin = hmrErrorForwardingPlugin();
+  const plugin = hmrErrorForwardingPlugin({ watcherUpdates: createWatcherUpdateTracker() });
   const existingFactory = vi.fn();
 
   expect(() =>
@@ -157,7 +158,7 @@ test("the observer rejects an existing SSR factory with a named conflict", () =>
 });
 
 test("the observer rejects a factory that a later plugin installs over its own", () => {
-  const plugin = hmrErrorForwardingPlugin();
+  const plugin = hmrErrorForwardingPlugin({ watcherUpdates: createWatcherUpdateTracker() });
   const resolved = configEnvironmentHook(plugin)("ssr", {
     dev: {},
   } as EnvironmentOptions);
@@ -193,7 +194,10 @@ test("the observer does not participate in non-SSR environment configuration", (
     createRunnableDevEnvironment,
     createEvaluator,
   } as unknown as HmrErrorForwardingDependencies;
-  const plugin = hmrErrorForwardingPlugin({ dependencies });
+  const plugin = hmrErrorForwardingPlugin({
+    dependencies,
+    watcherUpdates: createWatcherUpdateTracker(),
+  });
 
   expect(
     configEnvironmentHook(plugin)("client", { dev: {} } as EnvironmentOptions),

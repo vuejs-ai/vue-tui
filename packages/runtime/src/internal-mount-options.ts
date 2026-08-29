@@ -43,10 +43,10 @@ const internalOptionKeys = [
  * Associate repository-only controls with an otherwise ordinary public-options
  * object through module-private state.
  *
- * This helper is built only into the repository's unpublished `/internal`
- * entry and Runtime-owned testing entry. The returned object contains only the
- * documented public keys, so inspecting it cannot reveal or recreate the
- * private controls.
+ * `mount()` rejects every key it does not document, so the returned object carries
+ * only public keys and the private controls travel beside it in this module's
+ * WeakMap. Built only into the repository's unpublished `/internal` entry and the
+ * Runtime-owned testing entry.
  */
 export function createInternalMountOptions(
   input: InternalMountOptionsInput = {},

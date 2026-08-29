@@ -76,13 +76,13 @@ import { Spinner } from "@vue-tui/components";
 
 ### Props
 
-| prop       | type                                  | default  | description                                |
-| ---------- | ------------------------------------- | -------- | ------------------------------------------ |
-| `type`     | preset name (e.g. `"dots"`, `"line"`) | `"dots"` | a built-in spinner animation               |
-| `frames`   | `string[]`                            | —        | custom animation frames (overrides `type`) |
-| `interval` | `number`                              | preset's | ms between frames                          |
-| `color`    | `Color` from `@vue-tui/runtime`       | —        | terminal color for the spinner glyph       |
-| `label`    | `string`                              | —        | text shown next to the spinner             |
+| prop       | type                                  | default  | description                                                                 |
+| ---------- | ------------------------------------- | -------- | --------------------------------------------------------------------------- |
+| `type`     | preset name (e.g. `"dots"`, `"line"`) | `"dots"` | a built-in spinner animation                                                |
+| `frames`   | `string[]`                            | —        | custom animation frames (overrides `type`)                                  |
+| `interval` | `number`                              | preset's | ms between frames; a non-integer or out-of-range value throws a `TypeError` |
+| `color`    | `Color` from `@vue-tui/runtime`       | —        | terminal color for the spinner glyph                                        |
+| `label`    | `string`                              | —        | text shown next to the spinner                                              |
 
 ## ScrollBox
 

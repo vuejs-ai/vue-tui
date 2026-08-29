@@ -31,6 +31,13 @@ describe("resolveSpinner", () => {
       interval: 80,
     });
   });
+  // Two shapes an inherited member can take: a function, and `__proto__`'s object.
+  test.each(["toString", "__proto__"])("inherited object member %s falls back to dots", (type) => {
+    expect(resolveSpinner({ type })).toEqual({
+      frames: PRESETS.dots.frames,
+      interval: 80,
+    });
+  });
   test("custom frames override type", () => {
     expect(resolveSpinner({ type: "line", frames: ["a", "b"] })).toEqual({
       frames: ["a", "b"],
@@ -51,5 +58,21 @@ describe("resolveSpinner", () => {
       frames: ["a"],
       interval: 50,
     });
+  });
+  test.each([0, -50, 0.5, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648])(
+    "rejects interval %p",
+    (interval) => {
+      expect(() => resolveSpinner({ interval })).toThrow(TypeError);
+      expect(() => resolveSpinner({ frames: ["a"], interval })).toThrow(TypeError);
+    },
+  );
+  test("names the received value without erasing its type", () => {
+    // `<Spinner interval="80" />` — a static template attribute is a string, and
+    // Vue does not coerce a `type: Number` prop.
+    expect(() => resolveSpinner({ interval: "80" as unknown as number })).toThrow('received "80"');
+    expect(() => resolveSpinner({ interval: Number.NaN })).toThrow("received NaN");
+    expect(() => resolveSpinner({ interval: Number.POSITIVE_INFINITY })).toThrow(
+      "received Infinity",
+    );
   });
 });

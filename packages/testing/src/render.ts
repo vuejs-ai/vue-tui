@@ -21,9 +21,9 @@ export interface RenderOptions {
   readonly exitOnCtrlC?: boolean;
   /** Retain renderer commits for `frames` and `lastFrame()`. @default true */
   readonly retainFrames?: boolean;
-  /** Deliberate layout and emulator width. @default 100 */
+  /** Deliberate emulator width, and layout width on a TTY stdout. @default 100 */
   readonly columns?: number;
-  /** Deliberate emulator height and TTY height. @default 100 */
+  /** Deliberate emulator height, and TTY height on a TTY stdout. @default 100 */
   readonly rows?: number;
   readonly props?: Record<string, unknown>;
 }

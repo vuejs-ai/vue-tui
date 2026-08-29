@@ -7,6 +7,13 @@ import { resolveSpinner } from "./spinners.ts";
 const props = defineProps(spinnerProps);
 
 const set = computed(() => resolveSpinner(props));
+
+// Read it here, in the setup body, so an unusable prop aborts setup before a timer
+// exists. Vue routes a throw from inside a computed or a watcher getter through its
+// error handler, which in a production build reports and continues — the immediate
+// watcher callback would then run with `undefined` and hand that straight to
+// `setInterval`, which fires about every millisecond.
+void set.value;
 const frame = shallowRef(0);
 let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -21,10 +28,9 @@ watch(
   (interval) => {
     stopTimer();
     frame.value = 0;
-    const delay = Number.isFinite(interval) ? Math.min(Math.max(1, interval), 2_147_483_647) : 100;
     timer = setInterval(() => {
       frame.value += 1;
-    }, delay);
+    }, interval);
   },
   { immediate: true },
 );

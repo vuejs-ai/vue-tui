@@ -9,6 +9,8 @@ npm install @vue-tui/runtime vue
 npm install -D @vue-tui/vite unplugin-vue vite
 ```
 
+`@vue-tui/vite` pins `@vue-tui/runtime`, `unplugin-vue`, `vite`, and the optional `@vitejs/plugin-vue-jsx` to exact versions rather than ranges, so the newest release of any of them fails to resolve. `npm info @vue-tui/vite peerDependencies` prints the versions to install; the [starter template](../../templates/vite) ships a matching set.
+
 ## Usage
 
 Use `unplugin-vue/vite` to compile SFCs. Use `@vitejs/plugin-vue-jsx` to compile JSX. The compilers create client render functions for Vue. During development, `vueTui()` starts the application with Vite's module runner and provides HMR.
@@ -29,7 +31,7 @@ Run `vite` directly, or run the package script with `vp run dev`. Both commands 
 
 `vueTui()` uses Vite's top-level `input`. It has no separate entry option. If the config does not set `input`, the development server uses `src/main.ts`. A standalone application must set `input`. Otherwise, Vite searches for an HTML entry during the production build. `vueTui()` supports one application entry and reports an error if `input` contains multiple entries.
 
-For JSX or TSX, install `@vitejs/plugin-vue-jsx`. Set `input` to the `.tsx` file.
+For JSX or TSX, install `@vitejs/plugin-vue-jsx` at the pinned version above. Set `input` to the `.tsx` file.
 
 ```ts
 import vueJsx from "@vitejs/plugin-vue-jsx";
