@@ -101,7 +101,7 @@ export function attachYoga(node: YogaCarrier): void {
   } else {
     node.yoga = createYogaNode();
   }
-  // Static nodes are painted via a separate channel (paintIsolated), so they
+  // Static nodes are painted from an independent layout region, so they
   // must not occupy space in the dynamic frame's yoga layout.
   if (node.type === "tui-static") {
     (node.yoga as YogaNode).setDisplay(Yoga.DISPLAY_NONE);

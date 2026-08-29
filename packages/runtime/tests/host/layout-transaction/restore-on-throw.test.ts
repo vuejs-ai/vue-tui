@@ -2,29 +2,18 @@ import { expect, test } from "vite-plus/test";
 // Keep the stable Yoga enum values local so this regression focuses on
 // Runtime's guard behavior rather than Yoga's generated enum surface.
 import {
-  calculateLayoutWithContentGuards,
   isContentLayoutGuarded,
-} from "../../../src/host/layout-guards.ts";
+  runLayoutTransaction,
+} from "../../../src/host/layout-transaction.ts";
 import { attachYoga, detachYoga } from "../../../src/host/yoga.ts";
 import { createBox, createRoot, createText } from "../../../src/host/nodes.ts";
 import type { AppContext } from "../../../src/context.ts";
 
 // yoga-layout YGEnums (generated/YGEnums.ts) — Display: Flex=0 (visible), None=1.
 const DISPLAY_NONE = 1;
-const DIRECTION_LTR = 1;
 
-// Regression: calculateLayoutWithContentGuards hides zero-content nodes
-// (setDisplay DISPLAY_NONE, prior display recorded in `guarded`) INSIDE its
-// for(;;) loop, then returns a restore closure on the NORMAL path only. If a
-// later loop iteration's calculateLayout throws — AFTER an earlier iteration
-// already hid a node — the function used to throw BEFORE returning that closure,
-// leaving the hidden node DISPLAY_NONE on the LIVE yoga tree forever:
-// applyZeroContentGuards short-circuits any DISPLAY_NONE node on the next
-// commit, so it is never un-hidden and the subtree stays permanently invisible
-// even after the offending input is gone. The two callers wrap the RETURNED
-// closure in try/finally, but that cannot help — the closure was never handed
-// back. The fix restores everything in `guarded` (reverse order) on the way out
-// before re-throwing, leaving the tree clean and propagating the original error.
+// A guard iteration may hide flow nodes before a later Yoga call throws. The
+// transaction restores every guarded display value before rethrowing the error.
 test("a throw on a later layout iteration restores nodes hidden by an earlier iteration", () => {
   // Minimal AppContext stand-in — the guard code never reads it.
   const root = createRoot({} as AppContext);
@@ -102,10 +91,15 @@ test("a throw on a later layout iteration restores nodes hidden by an earlier it
     // Sanity: nothing is hidden before layout runs.
     expect(hiddenChild.yoga.getDisplay()).not.toBe(DISPLAY_NONE);
 
-    // The original measure error must propagate UNCHANGED.
-    expect(() => calculateLayoutWithContentGuards(root, 80, 24, DIRECTION_LTR as never)).toThrow(
-      boom,
-    );
+    // The measure error propagates unchanged.
+    expect(() =>
+      runLayoutTransaction({
+        dynamicRoot: root,
+        staticRoots: [],
+        columns: 80,
+        dynamicHeight: { mode: "exact", rows: 24 },
+      }),
+    ).toThrow(boom);
 
     // The throw genuinely happened on a LATER outer iteration (the loop ran
     // calculateLayout at least twice), not within the first pass.
@@ -115,9 +109,7 @@ test("a throw on a later layout iteration restores nodes hidden by an earlier it
     // throwing pass started — so there was genuinely something to leak.
     expect(hiddenWasAlreadyHiddenWhenThrowingPassBegan).toBe(true);
 
-    // The bug: the node hidden in iteration 1 must NOT be left DISPLAY_NONE on the
-    // live yoga tree. Before the fix this fails (it stays hidden forever); after
-    // the fix the catch restores it before re-throwing.
+    // The node hidden in iteration 1 is restored before the error escapes.
     expect(hiddenChild.yoga.getDisplay()).not.toBe(DISPLAY_NONE);
     expect(isContentLayoutGuarded(hiddenChild)).toBe(false);
   } finally {
@@ -146,11 +138,16 @@ test("temporary content guards are observable only until the layout restore", ()
   zeroBox.children.push(child);
   zeroBox.yoga.insertChild(child.yoga, 0);
 
-  const restore = calculateLayoutWithContentGuards(root, 10, 2, DIRECTION_LTR as never);
+  const layout = runLayoutTransaction({
+    dynamicRoot: root,
+    staticRoots: [],
+    columns: 10,
+    dynamicHeight: { mode: "exact", rows: 2 },
+  });
   expect(child.yoga.getDisplay()).toBe(DISPLAY_NONE);
   expect(isContentLayoutGuarded(child)).toBe(true);
 
-  restore();
+  layout.dispose();
   expect(child.yoga.getDisplay()).not.toBe(DISPLAY_NONE);
   expect(isContentLayoutGuarded(child)).toBe(false);
 });

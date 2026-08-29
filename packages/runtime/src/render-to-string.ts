@@ -1,13 +1,12 @@
 import { createRenderer, createVNode, type Component, type VNode } from "vue";
 import { Readable, Writable } from "node:stream";
-import Yoga from "yoga-layout";
 import { createRoot, type TuiNode } from "./host/nodes.ts";
-import { calculateLayoutWithContentGuards } from "./host/layout-guards.ts";
+import { runLayoutTransaction } from "./host/layout-transaction.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
 import { createHostYogaAllocationLedger } from "./host/yoga-allocation-ledger.ts";
 import { paint } from "./paint/paint.ts";
-import { prepareStaticOutput } from "./paint/static-channel.ts";
+import { findStatics, prepareStaticOutput } from "./paint/static-channel.ts";
 import { AppContextKey, StdinContextKey, type AppContext, type StdinContext } from "./context.ts";
 import { createInternalInputSubscriptions } from "./io/input-subscriptions.ts";
 import { createRenderedTargetController, setRenderedTargetController } from "./rendered-target.ts";
@@ -137,7 +136,6 @@ function renderStringDocument(
   try {
     attachYoga(root);
     rootAttached = true;
-    root.yoga.setWidth(options.width);
 
     // Provide isolated string-host contexts so shared components can inject
     // their normal services without acquiring a terminal.
@@ -165,44 +163,29 @@ function renderStringDocument(
     renderCompleted = true;
     renderedTargets.reconcile();
 
-    // Finite height is a maximum available root layout bound. Map public
-    // Infinity to the private unbounded representation (`null`) and never pass
-    // JavaScript Infinity into Yoga. Compute natural height first so short
-    // documents are not padded or percentage-perturbed against an artificial max.
-    let restoreLayoutGuards = calculateLayoutWithContentGuards(
-      root,
-      options.width,
-      undefined,
-      Yoga.DIRECTION_LTR,
-    );
+    const layout = runLayoutTransaction({
+      dynamicRoot: root,
+      staticRoots: findStatics(root),
+      columns: options.width,
+      dynamicHeight:
+        options.height === null ? { mode: "unbounded" } : { mode: "at-most", rows: options.height },
+    });
     let output: string;
     let capturedStaticOutput = "";
+    let preparedStatic: ReturnType<typeof prepareStaticOutput>;
     try {
-      if (options.height !== null) {
-        const naturalHeight = Math.max(0, Math.floor(root.yoga.getComputedLayout().height));
-        if (naturalHeight > options.height) {
-          restoreLayoutGuards();
-          restoreLayoutGuards = calculateLayoutWithContentGuards(
-            root,
-            options.width,
-            options.height,
-            Yoga.DIRECTION_LTR,
-          );
-        }
-      }
-
       // String rendering has no physical handoff. Snapshot every complete open
-      // Static subtree only after mount, then accept that local document prefix
-      // before painting the mutable region that excludes Static hosts.
-      const preparedStatic = prepareStaticOutput(root, options.width, renderSession.terminalStyle);
+      // Static subtree after mount while its transaction-owned geometry is
+      // available. Acceptance follows transaction disposal below so callbacks
+      // cannot observe temporary Yoga parentage.
+      preparedStatic = prepareStaticOutput(layout, renderSession.terminalStyle);
       capturedStaticOutput = preparedStatic.output;
-      preparedStatic.accept();
 
       // Paint the computed layout without manufacturing a hard paint viewport for
       // short documents. Yoga already applied a finite height bound when content
       // exceeded it; shorter output stays unpadded. Clip only by line count so
       // ordinary horizontal overflow behavior matches the previous unbounded paint.
-      output = paint(root, { terminalStyle: renderSession.terminalStyle });
+      output = paint(layout.dynamicRoot, { terminalStyle: renderSession.terminalStyle });
       if (options.height !== null && output !== "") {
         const lines = output.split("\n");
         if (lines.length > options.height) {
@@ -210,8 +193,9 @@ function renderStringDocument(
         }
       }
     } finally {
-      restoreLayoutGuards();
+      layout.dispose();
     }
+    preparedStatic.accept();
 
     // Run component and host cleanup before deciding whether the first
     // uncaught lifecycle error should propagate to the caller.

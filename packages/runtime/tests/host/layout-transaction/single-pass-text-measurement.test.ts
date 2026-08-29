@@ -1,7 +1,7 @@
 import Yoga from "yoga-layout";
 import { expect, test } from "vite-plus/test";
 import type { AppContext } from "../../../src/context.ts";
-import { calculateLayoutWithContentGuards } from "../../../src/host/layout-guards.ts";
+import { runLayoutTransaction } from "../../../src/host/layout-transaction.ts";
 import { createBox, createRoot, createText, createTextLeaf } from "../../../src/host/nodes.ts";
 import { attachYoga, bindTextMeasure, detachYoga } from "../../../src/host/yoga.ts";
 
@@ -44,11 +44,16 @@ test("fractional text measurement completes in one layout call", () => {
     return realCalculateLayout(...(args as Parameters<typeof realCalculateLayout>));
   };
 
-  const restore = calculateLayoutWithContentGuards(root, 20, 24, Yoga.DIRECTION_LTR);
+  const layout = runLayoutTransaction({
+    dynamicRoot: root,
+    staticRoots: [],
+    columns: 20,
+    dynamicHeight: { mode: "exact", rows: 24 },
+  });
   try {
     expect(layoutCalls).toBe(1);
   } finally {
-    restore();
+    layout.dispose();
     column.yoga.removeChild(measuredText.yoga);
     detachYoga(measuredText);
     root.yoga.freeRecursive();

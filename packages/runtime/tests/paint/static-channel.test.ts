@@ -1,15 +1,35 @@
 import { expect, test } from "vite-plus/test";
-import { createBox, createComment, createStatic } from "../../src/host/nodes.ts";
+import type { AppContext } from "../../src/context.ts";
+import { runLayoutTransaction } from "../../src/host/layout-transaction.ts";
+import { createBox, createComment, createRoot, createStatic } from "../../src/host/nodes.ts";
 import { buildNodeOps } from "../../src/host/node-ops.ts";
-import { detachYoga } from "../../src/host/yoga.ts";
-import { prepareStaticOutput as prepareStaticOutputForStyle } from "../../src/paint/static-channel.ts";
+import { attachYoga, detachYoga } from "../../src/host/yoga.ts";
+import {
+  findStatics,
+  prepareStaticOutput as prepareStaticOutputForStyle,
+} from "../../src/paint/static-channel.ts";
 import { createTerminalStyle } from "../../src/paint/terminal-style.ts";
 
 const terminalStyle = createTerminalStyle(3);
-const prepareStaticOutput = (
-  root: Parameters<typeof prepareStaticOutputForStyle>[0],
-  columns: number,
-) => prepareStaticOutputForStyle(root, columns, terminalStyle);
+const prepareStaticOutput = (root: Parameters<typeof findStatics>[0], columns: number) => {
+  const dynamicRoot = createRoot({} as AppContext);
+  attachYoga(dynamicRoot);
+  try {
+    const layout = runLayoutTransaction({
+      dynamicRoot,
+      staticRoots: findStatics(root),
+      columns,
+      dynamicHeight: { mode: "unbounded" },
+    });
+    try {
+      return prepareStaticOutputForStyle(layout, terminalStyle);
+    } finally {
+      layout.dispose();
+    }
+  } finally {
+    detachYoga(dynamicRoot);
+  }
+};
 
 const ops = buildNodeOps({ onCommit: () => {} });
 
