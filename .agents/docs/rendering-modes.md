@@ -92,7 +92,6 @@ Acquisition and release are lifecycle transactions. Runtime rolls back every res
 ## Evidence
 
 - [`render-session.test.ts`](../../packages/runtime/tests/render-session.test.ts) pins pure surface resolution, including identical non-TTY results for both requested modes.
-- [`ownership.test.ts`](../../packages/runtime/tests/host/layout-transaction/ownership.test.ts) keeps renderer and paint code on their sides of the layout transaction boundary.
 - [`alternate-screen.test.tsx`](../../tests/runtime/integration/lifecycle/alternate-screen.test.tsx) covers alternate-screen acquisition, non-TTY behavior, and restoration.
 - Runtime PTY suites under [`tests/runtime/e2e/pty`](../../tests/runtime/e2e/pty) cover Inline history, Fullscreen origin, resize, suspension, external output, and teardown on a real terminal.
 - `@vue-tui/testing` integration suites verify that modeled hosts preserve the same production contracts while exposing deterministic observation.
