@@ -37,8 +37,10 @@ function devStreams(columns = 80, rows = 24): DevStreams {
 
 test("dev overlay preserves the user root and full reload abandons stream observers", async () => {
   const out: string[] = [];
-  // Four user rows plus the five-row error panel exceed this viewport by one,
-  // so retaining row 3 proves Inline did not shrink the user frame.
+  // Four user rows plus the five-row error panel exceed this viewport by one. The
+  // window is the trailing eight rows, so the first user row leaves it while rows 1
+  // through 3 stay contiguous — which is what proves Inline clipped rather than
+  // compressed the user frame.
   const { stdout, stderr, stdin } = devStreams(80, 8);
   stdout.on("data", (chunk) => out.push(String(chunk)));
   const handlers = new Map<string, (payload: unknown) => void>();
@@ -101,8 +103,12 @@ test("dev overlay preserves the user root and full reload abandons stream observ
   await app.waitUntilRenderFlush();
   expect(out.join("")).toContain("BUILD-FAIL-XYZ"); // overlay rendered the error
   const inlineErrorFrame = frames.at(-1)!;
-  expect(inlineErrorFrame).toContain("INLINE-USER-ROW-0");
-  expect(inlineErrorFrame).toContain("INLINE-USER-ROW-3");
+  expect(inlineErrorFrame).not.toContain("INLINE-USER-ROW-0");
+  expect(inlineErrorFrame.split("\n").slice(0, 3)).toEqual([
+    "INLINE-USER-ROW-1",
+    "INLINE-USER-ROW-2",
+    "INLINE-USER-ROW-3",
+  ]);
   expect(inlineErrorFrame.indexOf("INLINE-USER-ROW-3")).toBeLessThan(
     inlineErrorFrame.indexOf("Build Error"),
   );

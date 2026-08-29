@@ -34,11 +34,27 @@ Non-TTY behavior is independent of input. `useInput()` may still observe bytes f
 Inline renders on the main screen and must not erase terminal history or shell output that existed before the application. Runtime therefore:
 
 - establishes a fresh row before its first visible managed write without emitting a destructive full-screen clear;
-- bounds over-height layout to the available terminal rows and clips paint to the terminal;
+- gives layout no row bound and shows the trailing terminal-sized window of the resulting
+  document, so the newest rows stay visible and the rows above the window are never written;
 - replaces only the currently known live region;
 - leaves accepted `Static` blocks, coordinated external output, and snapshots abandoned by resize in terminal-owned scrollback;
 - starts a fresh bounded region after a real resize instead of erasing or attempting to rewrite reflowed history;
 - leaves the final live content on the main screen and ensures later shell output starts below a full-height frame.
+
+Content taller than the surface is clipped, never compressed to fit. A row bound handed to the
+layout engine is absorbed by shrinkable children, which deletes rows from the middle of a
+document rather than from one end, so Inline applies the bound when choosing the window to paint
+while Fullscreen lays out at its exact viewport and lets the tree overflow it. The
+[over-height ruling](./runtime-api-decisions.md#over-height-content-is-clipped-and-inline-keeps-the-newest-rows)
+governs this and names the escapes it must not foreclose: `Static` commits rows to terminal
+scrollback, `ScrollBox` keeps content navigable inside a bounded region, coordinated `console`
+output reaches scrollback, and Fullscreen keeps history as application state.
+
+The same compression reaches any container an application sizes itself, so
+[the vertical axis does not shrink](./runtime-api-decisions.md#the-vertical-axis-does-not-shrink-below-its-content)
+below its content: Runtime supplies `flexShrink: 0` to the children of a vertical stack for one
+layout pass, standing in for the `min-height: auto` Yoga does not implement, and removes that
+workaround when the engine does.
 
 Runtime-generated Inline controls never use ED2, ED3, or Home to reset the main screen. An application that deliberately wants destructive main-screen behavior does so outside the mounted session or selects Fullscreen.
 
@@ -46,7 +62,7 @@ Runtime-generated Inline controls never use ED2, ED3, or Home to reset the main 
 
 Fullscreen enters the alternate screen only after preflight succeeds. Runtime then owns a fixed `columns × rows` viewport with a stable origin:
 
-- Yoga receives the complete viewport dimensions and paint is clipped to them;
+- Yoga receives the complete viewport dimensions and paint is clipped to them, from row zero;
 - ordinary frames may replace changed rows, while initial paint, resize, continuation, and uncertain output state repaint the complete viewport;
 - the physical cursor is hidden while Runtime owns the viewport and restored on release;
 - coordinated console output is followed by a clear/home repaint so the viewport remains coherent;

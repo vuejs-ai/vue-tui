@@ -70,6 +70,17 @@ function releaseTextYogaConfig(): void {
 
 // --- yoga node lifecycle seam --------------------------------------------
 
+// Nodes carrying a flexShrink the author wrote, rather than the Box or Text
+// default attachYoga() establishes. The vertical-axis guard in
+// host/layout-guards.ts supplies the value CSS would have derived and must
+// therefore leave an authored choice alone. Remove this with that guard.
+const authoredFlexShrink = new WeakSet<YogaNode>();
+
+/** Whether this node's `flexShrink` came from the author rather than the default. */
+export function hasAuthoredFlexShrink(node: YogaNode): boolean {
+  return authoredFlexShrink.has(node);
+}
+
 export function createYogaNode(): YogaNode {
   return Yoga.Node.create();
 }
@@ -201,7 +212,11 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
       : n.setMinHeight(v == null ? 0 : (v as number)),
   // Flex removals restore the Box defaults established by attachYoga().
   flexGrow: (n, v) => n.setFlexGrow(v == null ? 0 : (v as number)),
-  flexShrink: (n, v) => n.setFlexShrink(v == null ? 1 : (v as number)),
+  flexShrink: (n, v) => {
+    if (v == null) authoredFlexShrink.delete(n);
+    else authoredFlexShrink.add(n);
+    n.setFlexShrink(v == null ? 1 : (v as number));
+  },
   // flexBasis accepts cell numbers and percentage strings:
   //   number → setFlexBasis (absolute cells)
   //   string → setFlexBasisPercent(Number(v without "%")) — the public

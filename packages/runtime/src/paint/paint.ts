@@ -897,8 +897,16 @@ export interface PaintOptions {
    * and to exclude cells outside the addressable surface. Semantic geometry is
    * recorded from accepted layout and is not clipped: a Box lying entirely
    * outside the viewport still reports its rectangle to `useBoxMetrics()`.
+   *
+   * `top` is the first document row the surface shows, so a caller can paint a
+   * window further down a taller document without paying for the rows above it.
+   * It defaults to zero, which paints from the top of the document.
    */
-  readonly viewport?: { readonly width: number; readonly height: number };
+  readonly viewport?: {
+    readonly width: number;
+    readonly height: number;
+    readonly top?: number;
+  };
 }
 
 function intersectPaintRect(rect: PaintRect, clip: PaintRect | undefined): PaintRect | undefined {
@@ -942,6 +950,7 @@ export function paint(root: TuiNode, options: PaintOptions): string {
   const layout = root.yoga.getComputedLayout();
   const width = Math.max(1, Math.floor(options.viewport?.width ?? layout.width));
   const height = Math.max(1, Math.floor(options.viewport?.height ?? layout.height));
+  const top = Math.max(0, Math.floor(options.viewport?.top ?? 0));
   const out = new Output(
     width,
     height,
@@ -950,7 +959,10 @@ export function paint(root: TuiNode, options: PaintOptions): string {
     getRootOutputCaches(root),
   );
   const viewportClip = options.viewport ? { x: 0, y: 0, width, height } : undefined;
-  paintNode(root, out, options.terminalStyle, 0, 0, undefined, viewportClip, options.geometry);
+  // Shifting the origin up by `top` puts document row `top` on surface row zero,
+  // so the surface only ever holds the window the caller asked for. The clip stays
+  // in surface coordinates and drops whatever falls outside it.
+  paintNode(root, out, options.terminalStyle, 0, -top, undefined, viewportClip, options.geometry);
   return out.get().output;
 }
 

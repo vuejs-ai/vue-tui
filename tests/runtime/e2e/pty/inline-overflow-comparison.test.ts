@@ -65,6 +65,20 @@ test("overflow-to-shorter Inline update preserves pre-app scrollback before tear
   expect(lines).toContain("PRE_APP_HISTORY");
 });
 
+test("an over-height Inline document shows its trailing window on a real terminal", async () => {
+  const { lines, output } = await runScenario("overflow-window");
+
+  expectNoMainScreenReset(output);
+  expect(lines).toContain("PRE_APP_HISTORY");
+  // Ten rows into six: the window is the trailing six, contiguous, so the newest
+  // row is visible and the four rows above the window are never written.
+  for (const index of [0, 1, 2, 3]) expect(lines).not.toContain(`ROW ${index}`);
+  for (const index of [4, 5, 6, 7, 8]) expect(lines).toContain(`ROW ${index}`);
+  expect(lines).toContain("LAST 2");
+  expect(lines).not.toContain("LAST 0");
+  expect(lines).not.toContain("LAST 1");
+});
+
 test("an application-bounded live region preserves history and replaces its visible frame", async () => {
   const { lines, output } = await runScenario("bounded");
 
@@ -124,7 +138,9 @@ test("Inline never takes ownership of a partially occupied pre-mount row", async
 
   expectNoMainScreenReset(output);
   expect(lines).toContain("PRE_APP_PARTIAL");
-  expect(lines).toContain("TOP 2");
+  // This scenario is one row taller than the terminal, so the window holds its
+  // trailing rows; the last one proves the application rendered.
+  expect(lines).toContain("BOTTOM 2");
 });
 
 test("Static can be the first managed write after a partial row", async () => {

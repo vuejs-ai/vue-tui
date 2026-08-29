@@ -139,6 +139,39 @@ Runtime does not export layout conveniences as separate components. Write line b
 <Box :flexGrow="1" :flexShrink="1" />
 ```
 
+### Sizing a region to the terminal
+
+`flexGrow` divides the free space inside a parent, so a parent sized by its own content has none to divide. An application's outermost `Box` is content-sized unless it is given a height, and an Inline root is content-sized by design — it lays out at the document's natural height. Under either, `flexGrow` has no effect: a region with content of its own is as tall as that content, and a region that takes its height from its parent — an empty `Box`, or a `ScrollBox` — is zero rows tall and paints nothing. This is `flex-grow` inside a content-sized container, and it has the same fix: give the container a height.
+
+```vue
+<script setup lang="ts">
+import { computed } from "vue";
+import { Box, Text, useLayoutSize } from "@vue-tui/runtime";
+import { ScrollBox } from "@vue-tui/components";
+
+const { height } = useLayoutSize();
+// `height` is `Infinity` when output has no vertical bound, and `Box`'s `height`
+// accepts integers only, so pick a page height for that case.
+const rows = computed(() => (Number.isFinite(height.value) ? height.value : 24));
+</script>
+
+<template>
+  <Box flexDirection="column" :height="rows">
+    <Text>header</Text>
+    <Box :flexGrow="1" :minHeight="0" flexDirection="column">
+      <ScrollBox>
+        <Text v-for="line in lines" :key="line">{{ line }}</Text>
+      </ScrollBox>
+    </Box>
+    <Text>footer</Text>
+  </Box>
+</template>
+```
+
+Every ancestor between the sized container and the growing region needs a height or a `flexGrow` of its own; one content-sized `Box` in the chain stops the space from reaching it.
+
+A container shorter than its content overflows it and is clipped, in the same rows as CSS: `flexShrink` still defaults to `1`, but Runtime supplies `0` to the children of a vertical stack for the duration of a layout pass, because Yoga has no `min-height: auto` to stop a squeezed child from vanishing. A `flexShrink` written on a Box is used as written. Set `overflow="hidden"` on a container whose overflow should not paint outside it.
+
 ## Composables
 
 | Composable                        | Description                                                                                                |
@@ -308,7 +341,7 @@ With the default `patchConsole: true`, setup-time, mounted, update, and cleanup 
 
 Use `createApp(App).mount({ mode: "fullscreen" })` to render in the terminal's alternate screen. On a live TTY, an explicit Fullscreen request requires positive terminal columns and rows; otherwise `mount()` throws synchronously. On non-TTY stdout, Inline and Fullscreen select the same non-interactive document host. `Box` and `Text` remain passive in both modes. Because the alternate screen is a fixed application-owned viewport, Fullscreen rejects `Static`; use application state and a viewport component for retained Fullscreen content.
 
-Omitting `mode` requests Inline. On a visual TTY, Inline keeps short output short and limits its replaceable live region to the terminal's rows and columns. A naturally over-height tree is first laid out within the available rows; non-shrinking remainder is then clipped from the bottom. Use one keyed `<Static>` instance from `@vue-tui/runtime/inline` per completed history block, or a bounded `ScrollBox`/application offset when the visible content should follow a tail or selected item. Inline never clears the main screen or scrollback as an overflow fallback. On non-TTY stdout, Inline emits no terminal-management bytes or intermediate dynamic frames: accepted Static history and coordinated console output append immediately, while clean teardown writes the current dynamic document once, adds a line ending only when non-empty output lacks one, and writes no bytes for an empty document.
+Omitting `mode` requests Inline. On a visual TTY, Inline keeps short output short and limits its replaceable live region to the terminal's rows and columns. A tree taller than the terminal keeps its natural height and the live region shows its trailing terminal-sized window, so the newest rows stay visible; the rows above that window are not written. Content is never compressed to fit. Use one keyed `<Static>` instance from `@vue-tui/runtime/inline` per completed history block, or a bounded `ScrollBox`/application offset when the visible content should follow a tail or selected item. Inline never clears the main screen or scrollback as an overflow fallback. On non-TTY stdout, Inline emits no terminal-management bytes or intermediate dynamic frames: accepted Static history and coordinated console output append immediately, while clean teardown writes the current dynamic document once, adds a line ending only when non-empty output lacks one, and writes no bytes for an empty document.
 
 Before its first visible managed output, Inline advances to a fresh terminal row so content that already occupied the current row cannot be erased by a later update. `<Static>` and patched `console.log()` / `console.error()` calls coordinate with the live region instead of corrupting it. Direct writes to `process.stdout` or a custom stream deliberately bypass Runtime's frame coordination. After a terminal resize, the old frame remains an immutable snapshot and vue-tui starts a new bounded region rather than erasing rows whose physical positions may have changed.
 
