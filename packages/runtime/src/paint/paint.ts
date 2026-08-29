@@ -22,15 +22,10 @@ import type {
   BoxProps,
   TuiBox,
 } from "../host/nodes.ts";
-import {
-  createRoot as createIsoRoot,
-  createBox as createIsoBox,
-  isContainer,
-} from "../host/nodes.ts";
-import { calculateLayoutWithContentGuards } from "../host/layout-guards.ts";
+import { isContainer } from "../host/nodes.ts";
 import { wrapText, safeSliceEnd, sliceAnsiPreservingIntensity } from "../host/text-measure.ts";
-import { attachYoga, detachYoga, getTextTerminalCellWidth } from "../host/yoga.ts";
-import { isContentLayoutGuarded } from "../host/layout-guards.ts";
+import { getTextTerminalCellWidth } from "../host/yoga.ts";
+import { isContentLayoutGuarded, type StaticLayoutRegion } from "../host/layout-transaction.ts";
 import type { InternalGeometryPaintFrame } from "../geometry/geometry-service.ts";
 import { assertPaintSurfaceSize } from "../numeric-limits.ts";
 
@@ -1144,216 +1139,13 @@ export function paintContainer(container: TuiContainer, terminalStyle: TerminalS
   throw new Error("paintContainer currently only supports root");
 }
 
-export function paintIsolated(
-  nodes: TuiNode[],
-  width: number,
+export function paintStaticLayout(
+  region: StaticLayoutRegion,
   terminalStyle: TerminalStyle,
-  staticNode?: import("../host/nodes.ts").TuiStatic,
 ): string {
-  // No staticNode: legacy/simple path — a single iso root sized to the available
-  // columns, with the nodes parented directly under it.
-  if (!staticNode) {
-    return paintUnderRoot(nodes, width, terminalStyle, (iso) => iso.yoga.setWidth(width));
+  const out = new Output(region.width, region.height, terminalStyle);
+  for (const child of region.children) {
+    paintNode(child, out, terminalStyle, region.offsetX, region.offsetY);
   }
-
-  // Static history uses an absolute, auto-width box under a terminal-width root:
-  //
-  //   root (yogaNode.setWidth(terminalWidth))  ← containing block for TEXT wrap
-  //     └─ staticNode (position:absolute, auto width, flexDirection:column…)
-  //          └─ <static items…>
-  //
-  // The output grid is sized from the computed static box, not the outer root.
-  // Two consequences must hold:
-  //   • TEXT measures/wraps against the parent root's content width (= terminal
-  //     width), so a plain wide <Text> wraps to the terminal and a percent-width
-  //     child resolves its percent against the terminal.
-  //   • BOXES (explicit width, or a non-shrinking multi-child row) size to their
-  //     CONTENT and OVERFLOW past the terminal — the grid is the static node's
-  //     content width, which can EXCEED the terminal width.
-  //
-  // An outer isolated root is fixed to `width`; an inner isolated box copies the
-  // Static node's resolved layout properties, including any explicit width, and
-  // stays `position:absolute` +
-  // auto-width so it content-sizes and overflows. The output grid is sized from
-  // the INNER box (not the root), so it equals the content width.
-  const iso = createIsoRoot({} as never);
-  attachYoga(iso);
-  iso.yoga.setWidth(width);
-
-  const staticBox = createIsoBox();
-  attachYoga(staticBox);
-  // copyStyle pulls every resolved layout prop off the static node's yoga
-  // (flexDirection — incl. the <Static> column default — padding, margin, gap,
-  // justifyContent, alignItems, and an explicit width/height when set), without
-  // reparenting the live static node's own yoga children. The main-tree layout
-  // stays untouched.
-  staticBox.yoga.copyStyle(staticNode.yoga);
-  // attachYoga() sets the static node's OWN yoga to display:none so it occupies
-  // no space in the dynamic frame's main-tree layout (yoga.ts:64-68). copyStyle
-  // drags that display:none onto the iso box — which would collapse it to 0x0
-  // and paint nothing. Force it back to display:flex (it IS the painted box).
-  staticBox.yoga.setDisplay(Yoga.DISPLAY_FLEX);
-  // Keep position:absolute: as an absolute, auto-width child of the
-  // terminal-width root, the box's
-  // children wrap their TEXT against the root's width while the box itself
-  // content-sizes and may OVERFLOW the terminal. With no inset, an absolute box
-  // resolves to top:0/left:0, so its children paint at the grid origin.
-  staticBox.yoga.setPositionType(Yoga.POSITION_TYPE_ABSOLUTE);
-
-  iso.yoga.insertChild(staticBox.yoga, 0);
-  iso.children.push(staticBox);
-
-  // Parent the static content children UNDER the inner box (not the root), so
-  // they lay out within the absolute, auto-width static node. We temporarily
-  // move only the yoga parentage (never the DOM .parent) and restore it in the
-  // finally block.
-  const yogaAdded: Array<{
-    yoga: import("yoga-layout").Node;
-    origParent: import("yoga-layout").Node | null;
-    origIndex: number;
-  }> = [];
-
-  // IMPORTANT: We deliberately do NOT mutate each node's DOM .parent field.
-  // The children remain logically owned by their original Static parent — only
-  // yoga parentage is temporarily transferred to the inner box for layout.
-  // Mutating .parent would leave the original tree with broken back-links and
-  // cause renderer.remove() to skip yoga cleanup (seeing parent === null).
-  let yIdx = 0;
-  for (let i = 0; i < nodes.length; i++) {
-    const node = nodes[i]!;
-    // Add to the inner box's children for paint() traversal; do NOT change
-    // node.parent.
-    staticBox.children.push(node);
-
-    // Skip nodes that carry no yoga node (text-leaf, comment, fragment anchors).
-    const yoga = attachedYogaNode(node);
-    if (!yoga) continue;
-
-    // If the node already has a yoga parent, temporarily remove it so we can
-    // re-insert it under the inner box for layout calculation.
-    const yParent = yoga.getParent();
-    const origIndex = yParent ? findYogaIndex(yParent, yoga) : 0;
-    if (yParent) {
-      yParent.removeChild(yoga);
-    }
-    staticBox.yoga.insertChild(yoga, yIdx);
-    yogaAdded.push({ yoga, origParent: yParent, origIndex });
-    yIdx++;
-  }
-
-  let restoreLayoutGuards = () => {};
-  try {
-    restoreLayoutGuards = calculateLayoutWithContentGuards(
-      iso,
-      width,
-      undefined,
-      Yoga.DIRECTION_LTR,
-    );
-    // Size the output grid from the inner static box, not the root, so the grid
-    // equals the content width and can exceed the terminal.
-    const boxLayout = staticBox.yoga.getComputedLayout();
-    const outW = Math.max(1, Math.floor(boxLayout.width));
-    const outH = Math.max(1, Math.floor(boxLayout.height));
-    const out = new Output(outW, outH, terminalStyle);
-    // Paint the inner box's children at the grid origin. The absolute box itself
-    // resolves to left:0/top:0; offsetting by -(left/top) keeps children at the
-    // origin even if yoga ever computes a non-zero inset.
-    const x0 = -Math.floor(boxLayout.left);
-    const y0 = -Math.floor(boxLayout.top);
-    for (const child of staticBox.children) {
-      paintNode(child, out, terminalStyle, x0, y0);
-    }
-    return out.get().output;
-  } finally {
-    restoreLayoutGuards();
-    // Restore yoga parents in reverse order so earlier indices remain stable.
-    for (const { yoga, origParent, origIndex } of yogaAdded.slice().reverse()) {
-      staticBox.yoga.removeChild(yoga);
-      if (origParent) {
-        origParent.insertChild(yoga, origIndex);
-      }
-    }
-    staticBox.children.length = 0;
-
-    // Tear down the temporary two-level iso tree.
-    iso.yoga.removeChild(staticBox.yoga);
-    detachYoga(staticBox);
-    iso.children.length = 0;
-    detachYoga(iso);
-  }
-}
-
-// Paint `nodes` under a single fresh iso root configured by `configureRoot`.
-// Children's yoga parentage is temporarily moved under the root for layout and
-// restored afterward; DOM .parent pointers are never touched. Used by the
-// staticNode-less fallback of paintIsolated.
-function paintUnderRoot(
-  nodes: TuiNode[],
-  width: number,
-  terminalStyle: TerminalStyle,
-  configureRoot: (iso: import("../host/nodes.ts").TuiRoot) => void,
-): string {
-  const iso = createIsoRoot({} as never);
-  attachYoga(iso);
-  configureRoot(iso);
-
-  const yogaAdded: Array<{
-    yoga: import("yoga-layout").Node;
-    origParent: import("yoga-layout").Node | null;
-    origIndex: number;
-  }> = [];
-
-  let yIdx = 0;
-  for (let i = 0; i < nodes.length; i++) {
-    const node = nodes[i]!;
-    iso.children.push(node);
-
-    const yoga = attachedYogaNode(node);
-    if (!yoga) continue;
-
-    const yParent = yoga.getParent();
-    const origIndex = yParent ? findYogaIndex(yParent, yoga) : 0;
-    if (yParent) {
-      yParent.removeChild(yoga);
-    }
-    iso.yoga.insertChild(yoga, yIdx);
-    yogaAdded.push({ yoga, origParent: yParent, origIndex });
-    yIdx++;
-  }
-
-  let restoreLayoutGuards = () => {};
-  try {
-    restoreLayoutGuards = calculateLayoutWithContentGuards(
-      iso,
-      width,
-      undefined,
-      Yoga.DIRECTION_LTR,
-    );
-    return paint(iso, { terminalStyle });
-  } finally {
-    restoreLayoutGuards();
-    for (const { yoga, origParent, origIndex } of yogaAdded.slice().reverse()) {
-      iso.yoga.removeChild(yoga);
-      if (origParent) {
-        origParent.insertChild(yoga, origIndex);
-      }
-    }
-    iso.children.length = 0;
-    detachYoga(iso);
-  }
-}
-
-function attachedYogaNode(node: TuiNode): import("yoga-layout").Node | null {
-  if (!("yoga" in node) || typeof node.yoga === "symbol") return null;
-  return node.yoga;
-}
-
-function findYogaIndex(
-  parent: import("yoga-layout").Node,
-  child: import("yoga-layout").Node,
-): number {
-  for (let i = 0; i < parent.getChildCount(); i++) {
-    if (parent.getChild(i) === child) return i;
-  }
-  return 0;
+  return out.get().output;
 }

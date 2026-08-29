@@ -29,6 +29,13 @@ TTY Inline remains live when a complete terminal size is unavailable; Runtime us
 
 Non-TTY behavior is independent of input. `useInput()` may still observe bytes from the selected stdin, while the document host acquires no output-screen or managed terminal-protocol state. There is no public `interactive`, `liveUpdates`, `alternateScreen`, `fullscreen`, or `debug` compatibility option.
 
+## Layout transaction boundary
+
+- **Ruling:** Treat each renderer commit as exactly one layout transaction. The renderer must provide the complete tree and constraints up front, and the layout system must return final geometry for every output region. The renderer must not inspect provisional geometry, change layout inputs, and run layout again. [VOUCHED @hyfdev 2026-08-29]
+- **Limits:** Private measurement or independent-root work may use multiple engine calls inside the transaction, but intermediate geometry must not escape into renderer control flow. [VOUCHED @hyfdev 2026-08-29]
+- **Why:** Yunfei rejected a scheme in which the renderer first requests provisional layout, reads that result, changes the layout inputs, and requests layout again. The layout system should receive the complete tree and constraints up front and return only final geometry.
+- **Source:** Yunfei, 2026-08-29, explicit acceptance of the ruling and limits above and instruction to stamp the decision; this entry is the durable record.
+
 ## Inline screen ownership
 
 Inline renders on the main screen and must not erase terminal history or shell output that existed before the application. Runtime therefore:

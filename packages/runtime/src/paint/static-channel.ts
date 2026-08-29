@@ -1,5 +1,6 @@
-import { NESTED_STATIC_ERROR, type TuiNode, type TuiStatic } from "../host/nodes.ts";
-import { paintIsolated } from "./paint.ts";
+import type { LayoutTransactionResult } from "../host/layout-transaction.ts";
+import type { TuiNode, TuiStatic } from "../host/nodes.ts";
+import { paintStaticLayout } from "./paint.ts";
 import type { TerminalStyle } from "./terminal-style.ts";
 
 export function findStatics(root: TuiNode, out: TuiStatic[] = []): TuiStatic[] {
@@ -9,20 +10,6 @@ export function findStatics(root: TuiNode, out: TuiStatic[] = []): TuiStatic[] {
     for (const child of containerChildren) findStatics(child, out);
   }
   return out;
-}
-
-function isInertStaticAnchor(child: TuiNode): boolean {
-  return child.type === "comment" || (child.type === "text-leaf" && child.value === "");
-}
-
-function validateStaticPlacement(statics: readonly TuiStatic[]): void {
-  for (const stat of statics) {
-    let ancestor = stat.parent;
-    while (ancestor) {
-      if (ancestor.type === "tui-static") throw new Error(NESTED_STATIC_ERROR);
-      ancestor = ancestor.parent;
-    }
-  }
 }
 
 interface PreparedStaticBatch {
@@ -49,31 +36,17 @@ export interface PreparedStaticOutput {
   abandon(): void;
 }
 
-/** Paint one open <Static> host without changing its write-once state. */
-function prepareStaticNode(
-  stat: TuiStatic,
-  columns: number,
-  terminalStyle: TerminalStyle,
-): PreparedStaticBatch {
-  const paintableChildren = stat.children.filter((child) => !isInertStaticAnchor(child));
-  let frame = "";
-  if (paintableChildren.length > 0) {
-    frame = paintIsolated(paintableChildren, columns, terminalStyle, stat);
-  }
-  return { stat, frame };
-}
-
 /** Prepare every currently open Static region as one ordered output transaction. */
 export function prepareStaticOutput(
-  root: TuiNode,
-  columns: number,
+  layout: LayoutTransactionResult,
   terminalStyle: TerminalStyle,
-  statics = findStatics(root),
 ): PreparedStaticOutput {
-  validateStaticPlacement(statics);
-  const batches = statics
-    .filter((stat) => stat.commitState === "open")
-    .map((stat) => prepareStaticNode(stat, columns, terminalStyle));
+  const batches = layout.staticLayouts.map(
+    ({ stat, region }): PreparedStaticBatch => ({
+      stat,
+      frame: region ? paintStaticLayout(region, terminalStyle) : "",
+    }),
+  );
   // An output-free instance is still a producer: it remains open until a later
   // eligible render produces bytes, or ordinary Vue unmount removes it. Only
   // blocks represented in this transaction may be accepted or abandoned.

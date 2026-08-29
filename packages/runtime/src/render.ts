@@ -1,4 +1,3 @@
-import Yoga from "yoga-layout";
 import {
   type Component,
   type ComponentOptions,
@@ -21,7 +20,7 @@ import {
   type StdinController,
 } from "./io/stdin-controller.ts";
 import { createRoot, type TuiNode, type TuiRoot, type TuiStatic } from "./host/nodes.ts";
-import { calculateLayoutWithContentGuards } from "./host/layout-guards.ts";
+import { runLayoutTransaction, type LayoutHeightConstraint } from "./host/layout-transaction.ts";
 import { attachYoga, detachYoga } from "./host/yoga.ts";
 import { buildNodeOps } from "./host/node-ops.ts";
 import {
@@ -2212,11 +2211,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
         tuiRoot = createRoot(appContext);
         attachYoga(tuiRoot);
-        // Record the root BEFORE setWidth so teardown's `if (mountedRoot)
-        // detachYoga(mountedRoot)` frees the just-allocated yoga node even if
-        // setWidth (or anything below) throws.
+        // Record the root immediately after attachment so teardown frees it if
+        // later setup fails.
         mountedRoot = tuiRoot;
-        tuiRoot.yoga.setWidth(renderSession.session.dimensions.layout.columns);
         const focusController = createInternalFocusController({
           root: tuiRoot,
         });
@@ -2729,46 +2726,39 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // instances stay open for later content or ordinary Vue unmount. A
         // prepared block is accepted only after its stdout write returns normally.
         const w = renderSession.session.dimensions.layout.columns;
-        preparedStatic = prepareStaticOutput(tuiRoot, w, renderSession.terminalStyle, staticNodes);
-        const staticOutput = preparedStatic.output;
-        const hasStaticOutput = staticOutput !== "" && staticOutput !== "\n";
-        if (!dynamicUpdatesLive) {
-          // Non-interactive: compute the dynamic frame now, write static output
-          // after onRender, and defer dynamic frame output until unmount.
-          // The document host and other final-stream surfaces with a finite
-          // layout height use that bound as a maximum without padding shorter
-          // documents.
-          tuiRoot.yoga.setWidth(w);
-          const documentMaximumRows = boundedDocumentSurface
+        const exactViewportRows = fixedFullscreenSurface
+          ? (renderSession.session.dimensions.layout.rows ?? undefined)
+          : undefined;
+        const maximumRows =
+          exactViewportRows === undefined && (boundedInlineSurface || boundedDocumentSurface)
             ? (renderSession.session.dimensions.layout.rows ?? undefined)
             : undefined;
-          let restoreLayoutGuards = calculateLayoutWithContentGuards(
-            tuiRoot,
-            w,
-            undefined,
-            Yoga.DIRECTION_LTR,
-          );
-          try {
-            if (
-              documentMaximumRows !== undefined &&
-              tuiRoot.yoga.getComputedLayout().height > documentMaximumRows
-            ) {
-              restoreLayoutGuards();
-              restoreLayoutGuards = calculateLayoutWithContentGuards(
-                tuiRoot,
-                w,
-                documentMaximumRows,
-                Yoga.DIRECTION_LTR,
-              );
-            }
-            const computedRootHeight = Math.max(
-              0,
-              Math.floor(tuiRoot.yoga.getComputedLayout().height),
-            );
-            const paintViewportRows =
-              documentMaximumRows === undefined
-                ? undefined
-                : Math.min(documentMaximumRows, computedRootHeight);
+        const dynamicHeight: LayoutHeightConstraint =
+          exactViewportRows !== undefined
+            ? { mode: "exact", rows: exactViewportRows }
+            : maximumRows !== undefined
+              ? { mode: "at-most", rows: maximumRows }
+              : { mode: "unbounded" };
+        const layout = runLayoutTransaction({
+          dynamicRoot: tuiRoot,
+          staticRoots: staticNodes,
+          columns: w,
+          dynamicHeight,
+        });
+        try {
+          preparedStatic = prepareStaticOutput(layout, renderSession.terminalStyle);
+          const staticOutput = preparedStatic.output;
+          const hasStaticOutput = staticOutput !== "" && staticOutput !== "\n";
+          const paintViewportRows =
+            dynamicHeight.mode === "exact"
+              ? dynamicHeight.rows
+              : dynamicHeight.mode === "at-most"
+                ? Math.min(dynamicHeight.rows, layout.dynamicHeight)
+                : undefined;
+
+          if (!dynamicUpdatesLive) {
+            // Non-interactive: compute the dynamic frame now, write static
+            // output after onRender, and defer dynamic output until unmount.
             geometryFrame = mountedGeometry?.beginFrame();
             const frame = renderFrame(w, paintViewportRows, geometryFrame);
             renderObserver?.onCommit?.({
@@ -2785,55 +2775,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
                 hooks.markStaticHanded(frame),
               );
             }
-          } finally {
-            restoreLayoutGuards();
+            return;
           }
-          return;
-        }
 
-        const exactViewportRows = fixedFullscreenSurface
-          ? (renderSession.session.dimensions.layout.rows ?? undefined)
-          : undefined;
-        tuiRoot.yoga.setWidth(w);
-        let restoreLayoutGuards = calculateLayoutWithContentGuards(
-          tuiRoot,
-          w,
-          exactViewportRows,
-          Yoga.DIRECTION_LTR,
-        );
-        try {
-          const maximumRows =
-            boundedInlineSurface || boundedDocumentSurface
-              ? (renderSession.session.dimensions.layout.rows ?? undefined)
-              : undefined;
-          if (maximumRows !== undefined && tuiRoot.yoga.getComputedLayout().height > maximumRows) {
-            // A permanent Yoga max-height changes how nested percentage heights
-            // resolve even when the natural tree is short (for example, 50% of a
-            // six-row Box incorrectly becomes 50% of the terminal). Compute the
-            // natural tree first, and only rerun with an exact available height
-            // when it actually exceeds the available maximum. This gives overflowing
-            // flex layouts a real rows-sized allocation without padding or
-            // perturbing short layouts.
-            restoreLayoutGuards();
-            restoreLayoutGuards = calculateLayoutWithContentGuards(
-              tuiRoot,
-              w,
-              maximumRows,
-              Yoga.DIRECTION_LTR,
-            );
-          }
-          const computedRootHeight = Math.max(
-            0,
-            Math.floor(tuiRoot.yoga.getComputedLayout().height),
-          );
-          const boundedViewportRows =
-            boundedInlineSurface || boundedDocumentSurface
-              ? Math.min(
-                  renderSession.session.dimensions.layout.rows ?? computedRootHeight,
-                  computedRootHeight,
-                )
-              : undefined;
-          const paintViewportRows = exactViewportRows ?? boundedViewportRows;
           geometryFrame = mountedGeometry?.beginFrame();
           const frame = renderFrame(w, paintViewportRows, geometryFrame);
           renderObserver?.onCommit?.({
@@ -2866,7 +2810,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             hooks.markFrameWritten(frame);
           }
         } finally {
-          restoreLayoutGuards();
+          layout.dispose();
         }
       }
 
