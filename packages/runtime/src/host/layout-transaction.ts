@@ -1,5 +1,5 @@
 import Yoga from "yoga-layout";
-import type { Direction, Node as YogaNode } from "yoga-layout";
+import type { Node as YogaNode } from "yoga-layout";
 import {
   NESTED_STATIC_ERROR,
   createBox,
@@ -44,7 +44,6 @@ export interface StaticLayoutResult {
 
 /** Final geometry for every region produced by one renderer commit. */
 export interface LayoutTransactionResult {
-  readonly dynamicRoot: TuiRoot;
   readonly dynamicHeight: number;
   readonly staticLayouts: readonly StaticLayoutResult[];
   dispose(): void;
@@ -134,7 +133,6 @@ function calculateLayoutWithContentGuards(
   root: TuiRoot,
   width?: number,
   height?: number,
-  direction: Direction = Yoga.DIRECTION_LTR,
 ): () => void {
   const guarded = new Map<YogaNode, number>();
   const restore = () => {
@@ -146,7 +144,7 @@ function calculateLayoutWithContentGuards(
 
   try {
     for (;;) {
-      root.yoga.calculateLayout(width, height, direction);
+      root.yoga.calculateLayout(width, height, Yoga.DIRECTION_LTR);
       if (!applyZeroContentGuards(root, guarded)) break;
     }
   } catch (error) {
@@ -225,57 +223,38 @@ function createStaticLayoutSkeleton(
     readonly originalParent: YogaNode | null;
     readonly originalIndex: number;
   }> = [];
-  let disposed = false;
   const dispose = () => {
-    if (disposed) return;
-    disposed = true;
     for (const { yoga, originalParent, originalIndex } of moved.reverse()) {
       box.yoga.removeChild(yoga);
       originalParent?.insertChild(yoga, originalIndex);
     }
     box.children.length = 0;
-    if (attachedYogaNode(box)) {
-      if (box.yoga.getParent() === root.yoga) root.yoga.removeChild(box.yoga);
-      detachYoga(box);
-    }
+    root.yoga.removeChild(box.yoga);
+    detachYoga(box);
     root.children.length = 0;
-    if (attachedYogaNode(root)) detachYoga(root);
+    detachYoga(root);
   };
 
-  try {
-    attachYoga(root);
-    root.yoga.setWidth(columns);
-    attachYoga(box);
-    box.yoga.copyStyle(stat.yoga);
-    box.yoga.setDisplay(Yoga.DISPLAY_FLEX);
-    box.yoga.setPositionType(Yoga.POSITION_TYPE_ABSOLUTE);
-    root.yoga.insertChild(box.yoga, 0);
-    root.children.push(box);
+  attachYoga(root);
+  root.yoga.setWidth(columns);
+  attachYoga(box);
+  box.yoga.copyStyle(stat.yoga);
+  box.yoga.setDisplay(Yoga.DISPLAY_FLEX);
+  box.yoga.setPositionType(Yoga.POSITION_TYPE_ABSOLUTE);
+  root.yoga.insertChild(box.yoga, 0);
+  root.children.push(box);
 
-    let yogaIndex = 0;
-    for (const child of children) {
-      box.children.push(child);
-      const yoga = attachedYogaNode(child);
-      if (!yoga) continue;
-      const originalParent = yoga.getParent();
-      const originalIndex = originalParent ? findYogaIndex(originalParent, yoga) : 0;
-      originalParent?.removeChild(yoga);
-      try {
-        box.yoga.insertChild(yoga, yogaIndex);
-      } catch (error) {
-        originalParent?.insertChild(yoga, originalIndex);
-        throw error;
-      }
-      moved.push({ yoga, originalParent, originalIndex });
-      yogaIndex++;
-    }
-  } catch (error) {
-    try {
-      dispose();
-    } catch {
-      // Preserve the mutation failure after best-effort restoration.
-    }
-    throw error;
+  let yogaIndex = 0;
+  for (const child of children) {
+    box.children.push(child);
+    const yoga = attachedYogaNode(child);
+    if (!yoga) continue;
+    const originalParent = yoga.getParent();
+    const originalIndex = originalParent ? findYogaIndex(originalParent, yoga) : 0;
+    originalParent?.removeChild(yoga);
+    box.yoga.insertChild(yoga, yogaIndex);
+    moved.push({ yoga, originalParent, originalIndex });
+    yogaIndex++;
   }
 
   return { root, box, dispose };
@@ -304,7 +283,6 @@ function disposeAll(cleanups: Array<() => void>): void {
 export function runLayoutTransaction(request: LayoutRequest): LayoutTransactionResult {
   validateStaticPlacement(request.staticRoots);
   const cleanups: Array<() => void> = [];
-  let disposed = false;
 
   try {
     const staticLayouts = request.staticRoots
@@ -339,12 +317,9 @@ export function runLayoutTransaction(request: LayoutRequest): LayoutTransactionR
     );
 
     return {
-      dynamicRoot: request.dynamicRoot,
       dynamicHeight,
       staticLayouts,
       dispose() {
-        if (disposed) return;
-        disposed = true;
         disposeAll(cleanups);
       },
     };

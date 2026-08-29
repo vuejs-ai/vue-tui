@@ -2521,12 +2521,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // Produce the visual dynamic frame for a given terminal width. Static
       // output is handled separately by commit().
       function renderFrame(
-        dynamicRoot: TuiRoot,
         width: number,
         viewportRows?: number,
         geometry?: InternalGeometryPaintFrame,
       ): string {
-        const output = paint(dynamicRoot, {
+        const output = paint(tuiRoot, {
           terminalStyle: renderSession.terminalStyle,
           viewport: viewportRows === undefined ? undefined : { width, height: viewportRows },
           geometry,
@@ -2761,7 +2760,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             // Non-interactive: compute the dynamic frame now, write static
             // output after onRender, and defer dynamic output until unmount.
             geometryFrame = mountedGeometry?.beginFrame();
-            const frame = renderFrame(layout.dynamicRoot, w, paintViewportRows, geometryFrame);
+            const frame = renderFrame(w, paintViewportRows, geometryFrame);
             renderObserver?.onCommit?.({
               dynamic: frame,
               staticOutput: hasStaticOutput ? staticOutput : "",
@@ -2780,7 +2779,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           }
 
           geometryFrame = mountedGeometry?.beginFrame();
-          const frame = renderFrame(layout.dynamicRoot, w, paintViewportRows, geometryFrame);
+          const frame = renderFrame(w, paintViewportRows, geometryFrame);
           renderObserver?.onCommit?.({
             dynamic: frame,
             staticOutput: hasStaticOutput ? staticOutput : "",

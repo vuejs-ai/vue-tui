@@ -185,7 +185,7 @@ function renderStringDocument(
       // short documents. Yoga already applied a finite height bound when content
       // exceeded it; shorter output stays unpadded. Clip only by line count so
       // ordinary horizontal overflow behavior matches the previous unbounded paint.
-      output = paint(layout.dynamicRoot, { terminalStyle: renderSession.terminalStyle });
+      output = paint(root, { terminalStyle: renderSession.terminalStyle });
       if (options.height !== null && output !== "") {
         const lines = output.split("\n");
         if (lines.length > options.height) {
