@@ -1,7 +1,7 @@
-import Yoga from "yoga-layout";
 import { expect, test } from "vite-plus/test";
 import type { AppContext } from "../../../src/vue/context.ts";
 import { createRoot } from "../../../src/host/nodes.ts";
+import { runLayoutTransaction } from "../../../src/layout/layout-transaction.ts";
 import { attachYoga, detachYoga } from "../../../src/layout/yoga.ts";
 import {
   MAX_PAINT_SURFACE_CELLS,
@@ -29,15 +29,19 @@ test("rejects a surface dimension outside the terminal-sized layout range", () =
 test("paint rejects an oversized surface with a Runtime error before grid allocation", () => {
   const root = createRoot({} as AppContext);
   attachYoga(root);
-  root.yoga.setWidth(1_024);
-  root.yoga.setHeight(1_025);
-  root.yoga.calculateLayout(undefined, undefined, Yoga.DIRECTION_LTR);
+  const layout = runLayoutTransaction({
+    dynamicRoot: root,
+    staticRoots: [],
+    columns: 1_024,
+    dynamicHeight: { mode: "exact", rows: 1_025 },
+  });
 
   try {
-    expect(() => paint(root, { terminalStyle })).toThrow(
+    expect(() => paint(root, { layout: layout.computed, terminalStyle })).toThrow(
       new RangeError("Paint surface 1024x1025 exceeds the 1048576-cell resource limit."),
     );
   } finally {
+    layout.dispose();
     releasePaintCaches(root);
     detachYoga(root);
   }

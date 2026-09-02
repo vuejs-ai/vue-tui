@@ -1,17 +1,9 @@
 import stringWidth from "string-width";
 import cliBoxes from "cli-boxes";
-import {
-  ansiCodesToString,
-  diffAnsiCodes,
-  type StyledChar,
-  styledCharsFromTokens,
-  tokenize,
-} from "@alcalzone/ansi-tokenize";
-import { hasAnsiControlCharacters, tokenizeAnsi } from "../text/ansi-tokenizer.ts";
+import type { StyledChar } from "@alcalzone/ansi-tokenize";
 import { applyChalk, applyColor } from "./text-style.ts";
 import type { TerminalStyle } from "./terminal-style.ts";
 import { sanitizeAnsi, sanitizeAnsiMultiline } from "../text/sanitize-ansi.ts";
-import Yoga from "yoga-layout";
 import type {
   TuiNode,
   TuiRoot,
@@ -20,12 +12,20 @@ import type {
   TuiText,
   TuiVirtualText,
   BoxProps,
-  TuiBox,
 } from "../host/nodes.ts";
 import { isContainer } from "../host/nodes.ts";
-import { wrapText, safeSliceEnd, sliceAnsiPreservingIntensity } from "../text/text-measure.ts";
-import { getTextTerminalCellWidth } from "../layout/yoga.ts";
-import { isContentLayoutGuarded, type StaticLayoutRegion } from "../layout/layout-transaction.ts";
+import {
+  safeSliceEnd,
+  sliceAnsiPreservingIntensity,
+  styledGraphemesFromAnsi,
+  styledGraphemesToString,
+  styleMeasuredTextLines,
+} from "../text/text-measure.ts";
+import type {
+  ComputedLayout,
+  ComputedNodeLayout,
+  StaticLayoutRegion,
+} from "../layout/layout-transaction.ts";
 import type { InternalGeometryPaintFrame } from "../session/geometry-service.ts";
 import { assertPaintSurfaceSize } from "./surface-limits.ts";
 
@@ -63,91 +63,6 @@ interface UnclipOp {
 }
 
 type Op = WriteOp | ClipOp | UnclipOp;
-
-const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-
-function styledGraphemesFromAnsi(line: string): StyledChar[] {
-  if (!hasAnsiControlCharacters(line)) return styledCharsFromTokens(tokenize(line));
-
-  const tokens = tokenizeAnsi(line).flatMap((token) => {
-    if (token.type === "text" || token.type === "csi" || token.type === "osc") {
-      return tokenize(token.value);
-    }
-    return [];
-  });
-  const characters = styledCharsFromTokens(tokens);
-  if (characters.length < 2) return characters;
-
-  const plain = characters.map((character) => character.value).join("");
-  const graphemes = [...graphemeSegmenter.segment(plain)];
-  if (
-    graphemes.length === characters.length &&
-    graphemes.every((part, index) => part.segment === characters[index]!.value)
-  ) {
-    return characters;
-  }
-
-  const result: StyledChar[] = [];
-  let characterIndex = 0;
-  let characterOffset = 0;
-  for (const part of graphemes) {
-    while (
-      characterIndex < characters.length - 1 &&
-      characterOffset + characters[characterIndex]!.value.length <= part.index
-    ) {
-      characterOffset += characters[characterIndex]!.value.length;
-      characterIndex++;
-    }
-    const leading = characters[characterIndex]!;
-    // A terminal cell cannot carry independent styles for code points inside
-    // one grapheme. Keep the leading code point's style and preserve the whole
-    // grapheme instead of dropping a combining or joining code point at an ANSI boundary.
-    result.push({
-      ...leading,
-      value: part.segment,
-      fullWidth: stringWidth(part.segment) > 1,
-    });
-  }
-  return result;
-}
-
-const boldOpen = "\u001B[1m";
-const dimOpen = "\u001B[2m";
-
-function isIntensityStyle(style: StyledChar["styles"][number]): boolean {
-  return style.code === boldOpen || style.code === dimOpen;
-}
-
-/**
- * Serialize styled cells while preserving bold and dim independently.
- *
- * Both intensities close with SGR 22. The dependency's ordinary minimal diff
- * emits that shared close when one intensity is removed, but does not reopen
- * the other intensity when it remains present in the next cell. Reapply the
- * target intensity set after such a transition; every other style transition
- * retains the dependency's existing byte sequence.
- */
-function styledCharsToString(chars: StyledChar[]): string {
-  let result = "";
-  let previousStyles: StyledChar["styles"] = [];
-
-  for (const character of chars) {
-    let transition = diffAnsiCodes(previousStyles, character.styles);
-    const targetCodes = new Set(character.styles.map((style) => style.code));
-    const removesIntensity = previousStyles.some(
-      (style) => isIntensityStyle(style) && !targetCodes.has(style.code),
-    );
-    if (removesIntensity) {
-      transition = [...transition, ...character.styles.filter((style) => isIntensityStyle(style))];
-    }
-    result += ansiCodesToString(transition);
-    result += character.value;
-    previousStyles = character.styles;
-  }
-
-  result += ansiCodesToString(diffAnsiCodes(previousStyles, []));
-  return result;
-}
 
 interface OutputCacheLimits {
   readonly styledEntries: number;
@@ -487,7 +402,7 @@ class Output {
 
     return {
       output: output
-        .map((line) => styledCharsToString(line.filter((item) => item !== undefined)).trimEnd())
+        .map((line) => styledGraphemesToString(line.filter((item) => item !== undefined)).trimEnd())
         .join("\n"),
       height: output.length,
     };
@@ -759,18 +674,14 @@ function drawBorder(
 }
 
 function getBoxContentMetrics(
-  node: TuiBox,
+  layout: ComputedNodeLayout,
   w: number,
   h: number,
 ): { width: number; height: number } {
-  const left =
-    node.yoga.getComputedBorder(Yoga.EDGE_LEFT) + node.yoga.getComputedPadding(Yoga.EDGE_LEFT);
-  const right =
-    node.yoga.getComputedBorder(Yoga.EDGE_RIGHT) + node.yoga.getComputedPadding(Yoga.EDGE_RIGHT);
-  const top =
-    node.yoga.getComputedBorder(Yoga.EDGE_TOP) + node.yoga.getComputedPadding(Yoga.EDGE_TOP);
-  const bottom =
-    node.yoga.getComputedBorder(Yoga.EDGE_BOTTOM) + node.yoga.getComputedPadding(Yoga.EDGE_BOTTOM);
+  const left = layout.border.left + layout.padding.left;
+  const right = layout.border.right + layout.padding.right;
+  const top = layout.border.top + layout.padding.top;
+  const bottom = layout.border.bottom + layout.padding.bottom;
   const frameWidth = left + right;
   const frameHeight = top + bottom;
 
@@ -809,6 +720,7 @@ interface PreparedTextPaintCache extends PreparedTextPaint {
   readonly textAlign: TextProps["textAlign"];
   readonly wrapWidth: number;
   readonly wrapMode: TextProps["wrap"];
+  readonly wrappedLines: readonly string[];
   readonly terminalStyleKey: string;
 }
 
@@ -839,6 +751,7 @@ function prepareTextPaint(
   terminalStyle: TerminalStyle,
   inheritedBg: string | undefined,
   wrapWidth: number,
+  wrappedLines: readonly string[],
 ): PreparedTextPaint {
   const textAlign = node.props.textAlign;
   const wrapMode = node.props.wrap;
@@ -849,14 +762,15 @@ function prepareTextPaint(
     cached.textAlign === textAlign &&
     cached.wrapWidth === wrapWidth &&
     cached.wrapMode === wrapMode &&
+    cached.wrappedLines === wrappedLines &&
     cached.terminalStyleKey === terminalStyle.cacheKey
   ) {
     return cached;
   }
 
   const text = inlineTextValue(renderTextWithInlineStyles(node, terminalStyle, inheritedBg));
-  const wrapped = wrapText(text, wrapWidth, wrapMode ?? "wrap").map((line) =>
-    alignTextLine(line, wrapWidth, textAlign ?? "left", terminalStyle, inheritedBg),
+  const wrapped = styleMeasuredTextLines(text, wrappedLines, wrapMode ?? "wrap", wrapWidth).map(
+    (line) => alignTextLine(line, wrapWidth, textAlign ?? "left", terminalStyle, inheritedBg),
   );
   const prepared = { text, wrapped };
   const entry = {
@@ -865,6 +779,7 @@ function prepareTextPaint(
     textAlign,
     wrapWidth,
     wrapMode,
+    wrappedLines,
     terminalStyleKey: terminalStyle.cacheKey,
     ...prepared,
   };
@@ -880,6 +795,8 @@ interface PaintRect {
 }
 
 export interface PaintOptions {
+  /** Immutable geometry from the layout transaction that precedes this paint. */
+  readonly layout: ComputedLayout;
   /** Text styling capability resolved for this render session. */
   readonly terminalStyle: TerminalStyle;
   /** Private frame-local geometry collector. Publication happens after paint succeeds. */
@@ -905,6 +822,7 @@ function intersectPaintRect(rect: PaintRect, clip: PaintRect | undefined): Paint
 
 function recordZeroContentGeometry(
   node: TuiNode,
+  layout: ComputedLayout,
   geometry: InternalGeometryPaintFrame | undefined,
 ): void {
   if (!geometry?.hasObservedSubtree(node)) return;
@@ -912,27 +830,24 @@ function recordZeroContentGeometry(
     geometry.recordSubtree(node, "unavailable");
     return;
   }
-  const yoga = (node as { yoga?: { getDisplay?: () => number } }).yoga;
-  if (yoga?.getDisplay?.() === Yoga.DISPLAY_NONE && !isContentLayoutGuarded(node)) {
+  const computed = layout.get(node);
+  if (computed && !computed.isLaidOut && !computed.isContentLayoutGuarded) {
     geometry.recordSubtree(node, "hidden");
     return;
   }
-  if (node.type === "tui-box") {
-    const layout =
-      "yoga" in node && node.yoga && "getComputedLayout" in node.yoga
-        ? node.yoga.getComputedLayout()
-        : undefined;
-    geometry.record(node, 0, 0, Math.floor(layout?.left ?? 0), Math.floor(layout?.top ?? 0));
+  if (node.type === "tui-box" && computed) {
+    geometry.record(node, 0, 0, Math.floor(computed.rect.left), Math.floor(computed.rect.top));
   }
   if (!isContainer(node)) return;
-  for (const child of node.children) recordZeroContentGeometry(child, geometry);
+  for (const child of node.children) recordZeroContentGeometry(child, layout, geometry);
 }
 
 export function paint(root: TuiNode, options: PaintOptions): string {
   if (root.type !== "root") throw new Error("paint expects TuiRoot");
-  const layout = root.yoga.getComputedLayout();
-  const width = Math.max(1, Math.floor(options.viewport?.width ?? layout.width));
-  const height = Math.max(1, Math.floor(options.viewport?.height ?? layout.height));
+  const rootLayout = options.layout.get(root);
+  if (!rootLayout) throw new Error("paint requires the root ComputedLayout");
+  const width = Math.max(1, Math.floor(options.viewport?.width ?? rootLayout.rect.width));
+  const height = Math.max(1, Math.floor(options.viewport?.height ?? rootLayout.rect.height));
   const out = new Output(
     width,
     height,
@@ -941,12 +856,23 @@ export function paint(root: TuiNode, options: PaintOptions): string {
     getRootOutputCaches(root),
   );
   const viewportClip = options.viewport ? { x: 0, y: 0, width, height } : undefined;
-  paintNode(root, out, options.terminalStyle, 0, 0, undefined, viewportClip, options.geometry);
+  paintNode(
+    root,
+    options.layout,
+    out,
+    options.terminalStyle,
+    0,
+    0,
+    undefined,
+    viewportClip,
+    options.geometry,
+  );
   return out.get().output;
 }
 
 function paintNode(
   node: TuiNode,
+  computedLayout: ComputedLayout,
   output: Output,
   terminalStyle: TerminalStyle,
   x0: number,
@@ -961,10 +887,11 @@ function paintNode(
 
   // display:none collapses the node to zero size but still reports a layout;
   // skip the subtree so hidden content never leaks onto visible siblings.
-  const yogaNode = (node as { yoga?: { getDisplay?: () => number } }).yoga;
-  if (yogaNode?.getDisplay?.() === Yoga.DISPLAY_NONE) {
+  const computed = computedLayout.get(node);
+  if (computed && !computed.isLaidOut) {
     if (node.type === "tui-static") geometry?.recordSubtree(node, "unavailable");
-    else if (isContentLayoutGuarded(node)) recordZeroContentGeometry(node, geometry);
+    else if (computed.isContentLayoutGuarded)
+      recordZeroContentGeometry(node, computedLayout, geometry);
     else geometry?.recordSubtree(node, "hidden");
     return;
   }
@@ -972,18 +899,18 @@ function paintNode(
   switch (node.type) {
     case "root": {
       for (const child of node.children) {
-        paintNode(child, output, terminalStyle, x0, y0, undefined, clip, geometry);
+        paintNode(child, computedLayout, output, terminalStyle, x0, y0, undefined, clip, geometry);
       }
       return;
     }
     case "tui-box": {
-      const layout = node.yoga.getComputedLayout();
-      const x = x0 + layout.left;
-      const y = y0 + layout.top;
-      const w = Math.max(0, Math.floor(layout.width));
-      const h = Math.max(0, Math.floor(layout.height));
+      if (!computed) return;
+      const x = x0 + computed.rect.left;
+      const y = y0 + computed.rect.top;
+      const w = Math.max(0, Math.floor(computed.rect.width));
+      const h = Math.max(0, Math.floor(computed.rect.height));
       // Parent-relative outer layout offsets — not terminal or root coordinates.
-      geometry?.record(node, w, h, Math.floor(layout.left), Math.floor(layout.top));
+      geometry?.record(node, w, h, Math.floor(computed.rect.left), Math.floor(computed.rect.top));
       // Split the Box's own background from the value threaded to children. An
       // empty string paints no fill and does not replace an inherited background,
       // so descendants continue to inherit from the nearest non-empty Box value.
@@ -1014,11 +941,8 @@ function paintNode(
       // a region hidden by an outer Box.
       const clipH = overflowX === "hidden";
       const clipV = overflowY === "hidden";
+      const { left: bl, right: br, top: bt, bottom: bb } = computed.border;
       if (clipH || clipV) {
-        const bl = node.yoga.getComputedBorder(Yoga.EDGE_LEFT);
-        const br = node.yoga.getComputedBorder(Yoga.EDGE_RIGHT);
-        const bt = node.yoga.getComputedBorder(Yoga.EDGE_TOP);
-        const bb = node.yoga.getComputedBorder(Yoga.EDGE_BOTTOM);
         output.clip({
           x1: clipH ? x + bl : undefined,
           x2: clipH ? x + w - br : undefined,
@@ -1027,10 +951,6 @@ function paintNode(
         });
         clipped = true;
       }
-      const bl = node.yoga.getComputedBorder(Yoga.EDGE_LEFT);
-      const br = node.yoga.getComputedBorder(Yoga.EDGE_RIGHT);
-      const bt = node.yoga.getComputedBorder(Yoga.EDGE_TOP);
-      const bb = node.yoga.getComputedBorder(Yoga.EDGE_BOTTOM);
       const childClip =
         clipH || clipV
           ? (intersectPaintRect(
@@ -1044,18 +964,27 @@ function paintNode(
             ) ?? { x: 0, y: 0, width: 0, height: 0 })
           : clip;
 
-      const contentMetrics = getBoxContentMetrics(node, w, h);
+      const contentMetrics = getBoxContentMetrics(computed, w, h);
       // A Box with no inner content area has no legal paint region for FLOW
       // children. Absolutely-positioned children, though, are placed against
       // their containing block — the padding box (inside the borders) — not the
       // content rect; paint just those and keep flow children suppressed.
       if (contentMetrics.width === 0 || contentMetrics.height === 0) {
         for (const child of node.children) {
-          const childYoga = (child as { yoga?: { getPositionType?: () => number } }).yoga;
-          if (childYoga?.getPositionType?.() === Yoga.POSITION_TYPE_ABSOLUTE) {
-            paintNode(child, output, terminalStyle, x, y, childBg, childClip, geometry);
+          if (computedLayout.get(child)?.isAbsolute) {
+            paintNode(
+              child,
+              computedLayout,
+              output,
+              terminalStyle,
+              x,
+              y,
+              childBg,
+              childClip,
+              geometry,
+            );
           } else {
-            recordZeroContentGeometry(child, geometry);
+            recordZeroContentGeometry(child, computedLayout, geometry);
           }
         }
         if (clipped) output.unclip();
@@ -1063,25 +992,25 @@ function paintNode(
       }
 
       for (const child of node.children) {
-        paintNode(child, output, terminalStyle, x, y, childBg, childClip, geometry);
+        paintNode(child, computedLayout, output, terminalStyle, x, y, childBg, childClip, geometry);
       }
 
       if (clipped) output.unclip();
       return;
     }
     case "tui-text": {
-      const layout = node.yoga.getComputedLayout();
+      if (!computed) return;
       // Text keeps its pre-pixel-grid fractional geometry so measurement and
       // paint can quantize the same width without a feedback layout. Terminal
       // writes still need integral cell coordinates; floor matches the
       // conservative start edge used for its complete-cell budget.
-      const left = Math.floor(layout.left);
-      const top = Math.floor(layout.top);
+      const left = Math.floor(computed.rect.left);
+      const top = Math.floor(computed.rect.top);
       const y = y0 + top;
       // This span is only an early-clip bound. Text geometry can retain a
       // positive fractional height, so round outward here; Output remains the
       // authority for clipping the actual rows written below.
-      const h = Math.max(0, Math.ceil(layout.height));
+      const h = Math.max(0, Math.ceil(computed.rect.height));
       // A Text entirely above or below an authoritative clip cannot affect the
       // output grid. Skip composition and write-op allocation as well. Limit
       // this to Text: a clipped Box may still contain an absolutely positioned or
@@ -1093,14 +1022,19 @@ function paintNode(
       // squash. The Text's own backgroundColor — including an explicit "" opt-out —
       // is resolved against this inherited bg inside applyOwnStyle, where it
       // wraps the node's complete child sequence alongside its boolean styles.
-      // Wrap by quantizing Text's retained pre-pixel-grid width with the same
-      // pure whole-cell rule used by measurement, clamped by the final parent
-      // content box. The width can legitimately be 0 (flexBasis=0, width=0,
-      // width="0%"). At width 0,
-      // wrapText returns the leading-newline wrap "\nA" → ["", "A"], pushing
-      // the glyph onto its own second row exactly as measurement reported.
-      const wrapWidth = getTextTerminalCellWidth(node);
-      const { text, wrapped } = prepareTextPaint(node, terminalStyle, inheritedBg, wrapWidth);
+      // Layout already chose the whole-cell budget and every physical line.
+      // Paint only applies terminal styles and alignment to that immutable plan;
+      // re-wrapping here would let a second budget diverge from Yoga's measure.
+      const textLayout = computed.text;
+      if (!textLayout) return;
+      const { wrapWidth, wrappedLines } = textLayout;
+      const { text, wrapped } = prepareTextPaint(
+        node,
+        terminalStyle,
+        inheritedBg,
+        wrapWidth,
+        wrappedLines,
+      );
       // Empty text has no cells to write.
       if (text === "") return;
       // Pad each line to the cell width with the INHERITED Box background only —
@@ -1133,19 +1067,24 @@ function paintNode(
   }
 }
 
-export function paintContainer(container: TuiContainer, terminalStyle: TerminalStyle): string {
+export function paintContainer(
+  container: TuiContainer,
+  layout: ComputedLayout,
+  terminalStyle: TerminalStyle,
+): string {
   // Used by Static channel and tests.
-  if (container.type === "root") return paint(container, { terminalStyle });
+  if (container.type === "root") return paint(container, { layout, terminalStyle });
   throw new Error("paintContainer currently only supports root");
 }
 
 export function paintStaticLayout(
   region: StaticLayoutRegion,
+  layout: ComputedLayout,
   terminalStyle: TerminalStyle,
 ): string {
   const out = new Output(region.width, region.height, terminalStyle);
   for (const child of region.children) {
-    paintNode(child, out, terminalStyle, region.offsetX, region.offsetY);
+    paintNode(child, layout, out, terminalStyle, region.offsetX, region.offsetY);
   }
   return out.get().output;
 }

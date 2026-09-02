@@ -135,13 +135,13 @@ Plain data holding one picture's worth of cells, plus its size. Four properties 
 
 ### `ComputedLayout` — the complete product of one layout pass
 
-Every node's rectangle and its resolved border and padding insets, whether the node is laid out at all, **and the wrapped lines measurement already produced**. The first three are what `paint/paint.ts` reads off the Yoga node today — `getComputedLayout`, `getComputedBorder`, `getComputedPadding`, `getDisplay`.
+Every node's rectangle and its resolved border and padding insets, whether the node is laid out at all, **and the wrapped lines measurement already produced**. `paint/paint.ts` reads the first three from `ComputedLayout`; nothing outside `layout/` holds a Yoga node.
 
 The [layout transaction boundary](./rendering-modes.md#layout-transaction-boundary) is vouched direction and already requires that "the layout system must return final geometry for every output region", with intermediate geometry forbidden from escaping into renderer control flow. Wrapped lines are part of that geometry: `layout/yoga.ts`'s measure callback already produces them and caches per `(revision, available width, width mode, wrap)`, and `60e96fd` (fixing #283) exists to make measurement and painting share one conservative whole-cell budget. A `ComputedLayout` of rectangles alone forces the painter to wrap a second time, so the two budgets diverge again — which is what #283 was. `tests/host/layout-transaction/single-pass-text-measurement.test.ts` asserts `layoutCalls === 1`.
 
 Wrapping and measurement therefore live in `text/`, which both `layout/` and `paint/` may import. They cannot live in the painter: the dependency direction forbids `layout/` from importing `paint/`, so a painter-owned cache could never be the shared one.
 
-Visibility is the one fact read live rather than from the snapshot. `layout/` exposes a query that walks from a node through its ancestors for an authored `display: none` while excluding nodes that a zero-content guard collapsed for one pass. Focus uses that query before the first layout and while a surface is suspended, when no current `ComputedLayout` exists.
+Visibility is the one fact read live rather than from the snapshot. `layout/` exports `isHiddenByApplication`, which walks up from a node for an authored `display: none` and skips nodes a zero-content guard collapsed for the current pass. Focus asks it because a boundary can be hidden before the first layout pass has run and while the surface is suspended, when no pass runs to refresh a snapshot.
 
 ### `InputEvent` — one input fact
 

@@ -8,6 +8,7 @@ import {
   measureTextNatural,
   safeSliceEnd,
   sliceAnsiPreservingIntensity,
+  styleMeasuredTextLines,
   wrapText,
 } from "../../src/text/text-measure.ts";
 import { renderToString } from "../../src/render-to-string.ts";
@@ -233,6 +234,53 @@ test("wrapText at width 0 preserves SGR styling per non-empty row with a zero-wi
   expect(got).toEqual(["", "\x1b[41mA\x1b[49m", "\x1b[41m​\x1b[49m", "", "\x1b[41mB\x1b[49m"]);
   // Stripping the SGR from each row reproduces the plain structure.
   expect(got.map(stripAnsi)).toEqual(plainStructure);
+});
+
+test("styleMeasuredTextLines restores ANSI spans over layout's width-zero line plan", () => {
+  const raw = "A​B";
+  const styled = "\x1b[41mA​B\x1b[49m";
+  const layoutPlan = wrapText(raw, 0, "wrap");
+
+  // The plan comes from unstyled layout text. Paint receives it verbatim and
+  // only restores ANSI around its rows; it does not choose the split itself.
+  expect(styleMeasuredTextLines(styled, layoutPlan, "wrap", 0)).toEqual([
+    "",
+    "\x1b[41mA\x1b[49m",
+    "\x1b[41m​\x1b[49m",
+    "",
+    "\x1b[41mB\x1b[49m",
+  ]);
+});
+
+test("styleMeasuredTextLines accepts Yoga's zero-line plan for empty text", () => {
+  expect(styleMeasuredTextLines("", [], "wrap", 0)).toEqual([]);
+});
+
+test("styleMeasuredTextLines restores styles for a layout-selected truncation", () => {
+  const raw = "abcdef";
+  const styled = "\x1b[31mabcdef\x1b[39m";
+  const layoutPlan = wrapText(raw, 5, "truncate-middle");
+
+  expect(styleMeasuredTextLines(styled, layoutPlan, "truncate-middle", 5)).toEqual(
+    wrapText(styled, 5, "truncate-middle"),
+  );
+});
+
+test("styleMeasuredTextLines preserves wrap-ansi's normalized graphemes", () => {
+  const styled = "\x1b[31me\u0301x\x1b[39m";
+  const layoutPlan = wrapText("e\u0301x", 1, "wrap");
+
+  expect(layoutPlan).toEqual(["é", "x"]);
+  expect(styleMeasuredTextLines(styled, layoutPlan, "wrap", 1).map(stripAnsi)).toEqual(layoutPlan);
+});
+
+test("truncate uses the final cell width and preserves component styling", () => {
+  const App = defineComponent(
+    () => () =>
+      h(Box, { width: 4 }, () => h(Text, { wrap: "truncate-middle", color: "red" }, () => "aaa中")),
+  );
+
+  expect(renderToString(App, { width: 4, color: "truecolor" })).toBe("\x1b[31ma\x1b[39m…");
 });
 
 test("truncate keeps ZWJ emoji whole", () => {

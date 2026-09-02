@@ -4,11 +4,12 @@ import stringWidth from "string-width";
 import wrapAnsi from "wrap-ansi";
 import {
   ansiCodesToString,
+  diffAnsiCodes,
   styledCharsFromTokens,
   tokenize as tokenizeStyledAnsi,
   type StyledChar,
 } from "@alcalzone/ansi-tokenize";
-import { tokenizeAnsi } from "./ansi-tokenizer.ts";
+import { hasAnsiControlCharacters, tokenizeAnsi } from "./ansi-tokenizer.ts";
 import { sanitizeAnsiMultiline } from "./sanitize-ansi.ts";
 import type { TextProps, TuiNode, TuiText, TuiVirtualText } from "../host/nodes.ts";
 
@@ -141,6 +142,78 @@ function stripAnsi(text: string): string {
 }
 
 /**
+ * Normalize ANSI-tokenized code points into terminal paint graphemes once.
+ *
+ * Shared with painting: both must agree on how many graphemes a styled line
+ * holds, or the line the layout planned and the cells drawn from it diverge.
+ */
+export function styledGraphemesFromAnsi(text: string): StyledChar[] {
+  if (!hasAnsiControlCharacters(text)) return styledCharsFromTokens(tokenizeStyledAnsi(text));
+
+  const tokens = tokenizeAnsi(text).flatMap((token) => {
+    if (token.type === "text" || token.type === "csi" || token.type === "osc") {
+      return tokenizeStyledAnsi(token.value);
+    }
+    return [];
+  });
+  const characters = styledCharsFromTokens(tokens);
+  if (characters.length < 2) return characters;
+
+  const plain = characters.map((character) => character.value).join("");
+  const graphemes = [...graphemeSegmenter.segment(plain)];
+  if (
+    graphemes.length === characters.length &&
+    graphemes.every((part, index) => part.segment === characters[index]!.value)
+  ) {
+    return characters;
+  }
+
+  const result: StyledChar[] = [];
+  let characterIndex = 0;
+  let characterOffset = 0;
+  for (const part of graphemes) {
+    while (
+      characterIndex < characters.length - 1 &&
+      characterOffset + characters[characterIndex]!.value.length <= part.index
+    ) {
+      characterOffset += characters[characterIndex]!.value.length;
+      characterIndex++;
+    }
+    const leading = characters[characterIndex]!;
+    // A terminal cell cannot carry independent styles for code points inside
+    // one grapheme. Preserve the leading code point's style for the whole cell.
+    result.push({
+      ...leading,
+      value: part.segment,
+      fullWidth: stringWidth(part.segment) > 1,
+    });
+  }
+  return result;
+}
+
+/** Serialize styled graphemes while retaining independent bold and dim. */
+export function styledGraphemesToString(characters: StyledChar[]): string {
+  let result = "";
+  let previousStyles: StyledChar["styles"] = [];
+
+  for (const character of characters) {
+    let transition = diffAnsiCodes(previousStyles, character.styles);
+    const targetCodes = new Set(character.styles.map((style) => style.code));
+    const removesIntensity = previousStyles.some(
+      (style) => isIntensityStyle(style) && !targetCodes.has(style.code),
+    );
+    if (removesIntensity) {
+      transition = [...transition, ...character.styles.filter((style) => isIntensityStyle(style))];
+    }
+    result += ansiCodesToString(transition);
+    result += character.value;
+    previousStyles = character.styles;
+  }
+
+  return result + ansiCodesToString(diffAnsiCodes(previousStyles, []));
+}
+
+/**
  * Replicate wrap-ansi's width<=0 layout for a (possibly STYLED) string, ANSI-awarely.
  *
  * The output's line structure equals wrap-ansi's width-0 layout for the given
@@ -270,6 +343,112 @@ export function wrapText(text: string, width: number, mode: WrapMode = "wrap"): 
   return lines.map((line) =>
     stringWidth(line) <= budget ? line : cliTruncate(line, budget, { position }),
   );
+}
+
+/**
+ * Apply terminal styling to line structure which layout has already chosen.
+ *
+ * `wrappedLines` comes from `wrapText(flattenLeaves(...))` during the Yoga
+ * measure pass. Paint must not call `wrapText` again: the layout result is the
+ * one authoritative whole-cell budget for this frame. ANSI styling is added
+ * after measuring, so project the styled source over that existing structure
+ * instead of deciding where any line ends here.
+ */
+export function styleMeasuredTextLines(
+  text: string,
+  wrappedLines: readonly string[],
+  mode: WrapMode,
+  wrapWidth: number,
+): string[] {
+  if (wrappedLines.length === 0) {
+    if (stripAnsi(text) !== "") {
+      throw new Error("Measured text plan does not match styled source.");
+    }
+    return [];
+  }
+
+  if (mode === "truncate" || mode === "truncate-middle" || mode === "truncate-start") {
+    return styleMeasuredTruncatedLines(text, wrappedLines, mode, wrapWidth);
+  }
+
+  return styleMeasuredWrappedLines(text, wrappedLines);
+}
+
+function styleMeasuredWrappedLines(text: string, wrappedLines: readonly string[]): string[] {
+  const styledSourceLines = text.split("\n");
+  const styledLines: string[] = [];
+  let wrappedLineIndex = 0;
+
+  for (const styledSourceLine of styledSourceLines) {
+    const sourceGraphemes = styledGraphemesFromAnsi(styledSourceLine);
+    const sourcePlainGraphemes = [...graphemeSegmenter.segment(stripAnsi(styledSourceLine))];
+    if (sourcePlainGraphemes.length === 0) {
+      // A hard newline contributes one empty physical line. Empty rows inserted
+      // by width-zero wrapping are handled in the non-empty source branch below.
+      const measuredLine = wrappedLines[wrappedLineIndex++];
+      if (measuredLine === undefined || stripAnsi(measuredLine) !== "") {
+        throw new Error("Measured text plan does not match styled source.");
+      }
+      styledLines.push("");
+      continue;
+    }
+
+    let consumedGraphemes = 0;
+    while (consumedGraphemes < sourcePlainGraphemes.length) {
+      const measuredLine = wrappedLines[wrappedLineIndex++];
+      if (measuredLine === undefined) {
+        throw new Error("Measured text plan does not match styled source.");
+      }
+      const measuredGraphemes = [...graphemeSegmenter.segment(stripAnsi(measuredLine))];
+      if (measuredGraphemes.length === 0) {
+        styledLines.push("");
+        continue;
+      }
+
+      const endGrapheme = consumedGraphemes + measuredGraphemes.length;
+      if (endGrapheme > sourcePlainGraphemes.length || endGrapheme > sourceGraphemes.length) {
+        throw new Error("Measured text plan does not match styled source.");
+      }
+      const projected = measuredGraphemes.map(({ segment }, index) => ({
+        ...sourceGraphemes[consumedGraphemes + index]!,
+        value: segment,
+        fullWidth: stringWidth(segment) > 1,
+      }));
+      styledLines.push(styledGraphemesToString(projected));
+      consumedGraphemes = endGrapheme;
+    }
+  }
+
+  if (wrappedLineIndex !== wrappedLines.length) {
+    throw new Error("Measured text plan does not match styled source.");
+  }
+  return styledLines;
+}
+
+function styleMeasuredTruncatedLines(
+  text: string,
+  wrappedLines: readonly string[],
+  mode: Extract<WrapMode, "truncate" | "truncate-middle" | "truncate-start">,
+  wrapWidth: number,
+): string[] {
+  const sourceLines = text.split("\n");
+  if (sourceLines.length !== wrappedLines.length) {
+    throw new Error("Measured text plan does not match styled source.");
+  }
+  const position =
+    mode === "truncate-start" ? "start" : mode === "truncate-middle" ? "middle" : "end";
+  return sourceLines.map((styledSourceLine, index) => {
+    const measuredLine = wrappedLines[index]!;
+    const measuredPlain = stripAnsi(measuredLine);
+    if (measuredPlain === "") return "";
+    if (measuredPlain === stripAnsi(styledSourceLine)) return styledSourceLine;
+
+    const styled = cliTruncate(styledSourceLine, Math.max(0, wrapWidth), { position });
+    if (stripAnsi(styled) !== measuredPlain) {
+      throw new Error("Measured text plan does not match styled source.");
+    }
+    return styled;
+  });
 }
 
 /**

@@ -23,7 +23,11 @@ import {
   type StdinController,
 } from "./terminal/stdin-controller.ts";
 import { createRoot, type TuiNode, type TuiRoot, type TuiStatic } from "./host/nodes.ts";
-import { runLayoutTransaction, type LayoutHeightConstraint } from "./layout/layout-transaction.ts";
+import {
+  runLayoutTransaction,
+  type ComputedLayout,
+  type LayoutHeightConstraint,
+} from "./layout/layout-transaction.ts";
 import { attachYoga, detachYoga } from "./layout/yoga.ts";
 import { buildNodeOps } from "./vue/node-ops.ts";
 import {
@@ -1284,7 +1288,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   const renderer = createRenderer<TuiNode, TuiNode>(
     buildNodeOps({
       onCommit: () => scheduledCommit(),
-      hostYogaLifetime: hostYogaLedger.lifetime,
+      hostYogaLifecycle: hostYogaLedger,
     }),
   );
 
@@ -2534,11 +2538,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // Produce the visual dynamic frame for a given terminal width. Static
       // output is handled separately by commit().
       function renderFrame(
+        layout: ComputedLayout,
         width: number,
         viewportRows?: number,
         geometry?: InternalGeometryPaintFrame,
       ): string {
         const output = paint(tuiRoot, {
+          layout,
           terminalStyle: renderSession.terminalStyle,
           viewport: viewportRows === undefined ? undefined : { width, height: viewportRows },
           geometry,
@@ -2759,6 +2765,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           dynamicHeight,
         });
         try {
+          mountedFocusController?.reconcileAfterLayout();
           preparedStatic = prepareStaticOutput(layout, renderSession.terminalStyle);
           const staticOutput = preparedStatic.output;
           const hasStaticOutput = staticOutput !== "" && staticOutput !== "\n";
@@ -2773,7 +2780,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             // Non-interactive: compute the dynamic frame now, write static
             // output after onRender, and defer dynamic output until unmount.
             geometryFrame = mountedGeometry?.beginFrame();
-            const frame = renderFrame(w, paintViewportRows, geometryFrame);
+            const frame = renderFrame(layout.computed, w, paintViewportRows, geometryFrame);
             renderObserver?.onCommit?.({
               dynamic: frame,
               staticOutput: hasStaticOutput ? staticOutput : "",
@@ -2792,7 +2799,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           }
 
           geometryFrame = mountedGeometry?.beginFrame();
-          const frame = renderFrame(w, paintViewportRows, geometryFrame);
+          const frame = renderFrame(layout.computed, w, paintViewportRows, geometryFrame);
           renderObserver?.onCommit?.({
             dynamic: frame,
             staticOutput: hasStaticOutput ? staticOutput : "",
