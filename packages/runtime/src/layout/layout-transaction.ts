@@ -10,9 +10,14 @@ import {
   type TuiStatic,
   type TuiText,
 } from "../host/nodes.ts";
-import { attachYoga, detachYoga } from "./yoga.ts";
+import {
+  attachYoga,
+  detachYoga,
+  getAttachedYogaNode,
+  getComputedTextMeasure,
+  getYogaNode,
+} from "./yoga.ts";
 
-type YogaCarrier = TuiRoot | TuiBox | TuiText | TuiStatic;
 type ContainerWithChildren = TuiRoot | TuiBox | TuiText | TuiStatic;
 
 const activeContentGuards = new WeakSet<YogaNode>();
@@ -42,24 +47,52 @@ export interface StaticLayoutResult {
   readonly region: StaticLayoutRegion | null;
 }
 
+export interface ComputedRect {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface ComputedInsets {
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+  readonly left: number;
+}
+
+export interface ComputedTextLayout {
+  /** Complete raw line structure from the measurement routine. */
+  readonly wrappedLines: readonly string[];
+  /** Whole-cell width shared by measurement and styled paint. */
+  readonly wrapWidth: number;
+}
+
+/** One node's immutable product of the completed Yoga pass. */
+export interface ComputedNodeLayout {
+  readonly rect: ComputedRect;
+  readonly border: ComputedInsets;
+  readonly padding: ComputedInsets;
+  readonly isLaidOut: boolean;
+  readonly isContentLayoutGuarded: boolean;
+  readonly isAbsolute: boolean;
+  readonly text?: ComputedTextLayout;
+}
+
+/**
+ * Geometry snapshot from one layout transaction. Consumers can learn layout
+ * facts only through this map; the Yoga handles stay inside `layout/`.
+ */
+export interface ComputedLayout {
+  get(node: TuiNode): ComputedNodeLayout | undefined;
+}
+
 /** Final geometry for every region produced by one renderer commit. */
 export interface LayoutTransactionResult {
   readonly dynamicHeight: number;
   readonly staticLayouts: readonly StaticLayoutResult[];
+  readonly computed: ComputedLayout;
   dispose(): void;
-}
-
-export function isContentLayoutGuarded(node: TuiNode): boolean {
-  return hasYoga(node) && activeContentGuards.has(node.yoga);
-}
-
-function hasYoga(node: TuiNode): node is YogaCarrier {
-  return (
-    node.type === "root" ||
-    node.type === "tui-box" ||
-    node.type === "tui-text" ||
-    node.type === "tui-static"
-  );
 }
 
 function hasChildren(node: TuiNode): node is ContainerWithChildren {
@@ -72,17 +105,16 @@ function hasChildren(node: TuiNode): node is ContainerWithChildren {
 }
 
 function getBoxInnerSize(node: TuiBox): { width: number; height: number } {
-  const layout = node.yoga.getComputedLayout();
+  const yoga = getYogaNode(node);
+  const layout = yoga.getComputedLayout();
   const width = Math.max(0, Math.floor(layout.width));
   const height = Math.max(0, Math.floor(layout.height));
-  const left =
-    node.yoga.getComputedBorder(Yoga.EDGE_LEFT) + node.yoga.getComputedPadding(Yoga.EDGE_LEFT);
-  const right =
-    node.yoga.getComputedBorder(Yoga.EDGE_RIGHT) + node.yoga.getComputedPadding(Yoga.EDGE_RIGHT);
-  const top =
-    node.yoga.getComputedBorder(Yoga.EDGE_TOP) + node.yoga.getComputedPadding(Yoga.EDGE_TOP);
-  const bottom =
-    node.yoga.getComputedBorder(Yoga.EDGE_BOTTOM) + node.yoga.getComputedPadding(Yoga.EDGE_BOTTOM);
+  const border = readInsets(yoga, "border");
+  const padding = readInsets(yoga, "padding");
+  const left = border.left + padding.left;
+  const right = border.right + padding.right;
+  const top = border.top + padding.top;
+  const bottom = border.bottom + padding.bottom;
 
   return {
     width: Math.max(0, Math.floor(width - left - right)),
@@ -90,20 +122,111 @@ function getBoxInnerSize(node: TuiBox): { width: number; height: number } {
   };
 }
 
-function hideYogaChild(child: TuiNode, guarded: Map<YogaNode, number>): boolean {
-  if (!hasYoga(child) || guarded.has(child.yoga)) return false;
+function readInsets(node: YogaNode, kind: "border" | "padding"): ComputedInsets {
+  const read =
+    kind === "border" ? node.getComputedBorder.bind(node) : node.getComputedPadding.bind(node);
+  return {
+    top: read(Yoga.EDGE_TOP),
+    right: read(Yoga.EDGE_RIGHT),
+    bottom: read(Yoga.EDGE_BOTTOM),
+    left: read(Yoga.EDGE_LEFT),
+  };
+}
 
-  const display = child.yoga.getDisplay();
+/**
+ * Whether the application hid `node` or an ancestor, read live from the tree.
+ * Nodes a zero-content guard collapsed are excluded: that hiding lasts one
+ * pass, so counting it would clear focus mid-transaction and never restore it.
+ */
+export function isHiddenByApplication(node: TuiNode): boolean {
+  for (let current: TuiNode | null = node; current; current = current.parent) {
+    const style = (current as { readonly style?: { readonly display?: string } }).style;
+    if (style?.display === "none") return true;
+    const yoga = getAttachedYogaNode(current);
+    if (yoga && !activeContentGuards.has(yoga) && yoga.getDisplay() === Yoga.DISPLAY_NONE) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function captureComputedLayout(roots: readonly TuiNode[]): ComputedLayout {
+  const layouts = new WeakMap<TuiNode, ComputedNodeLayout>();
+
+  const visit = (node: TuiNode, parentIsLaidOut: boolean, parentGuarded: boolean): void => {
+    const yoga = getAttachedYogaNode(node);
+    const style = (node as { readonly style?: { readonly display?: string } }).style;
+    // A guard collapses a zero-content box by hiding its children for this pass
+    // only, and the whole subtree beneath one is equally transient. `hideYogaChild`
+    // never guards a node that is already hidden, so a Yoga display of `none` with
+    // no guard on it is the application's own `display: none` -- which is where
+    // `v-show` lands for a Box, because it patches the prop rather than the style
+    // accessor.
+    const guardedHere = yoga !== null && activeContentGuards.has(yoga);
+    // Guardedness follows the subtree, because a guard collapses everything under
+    // it for one pass. It stops at a node the application hid in its own right:
+    // that node's state is `display: none` and must keep reporting as such even
+    // while an ancestor happens to be collapsed.
+    const hiddenInOwnRight =
+      style?.display === "none" ||
+      (!guardedHere && yoga !== null && yoga.getDisplay() === Yoga.DISPLAY_NONE);
+    const guarded = guardedHere || (parentGuarded && !hiddenInOwnRight);
+    const isLaidOut =
+      parentIsLaidOut &&
+      style?.display !== "none" &&
+      (yoga === null || yoga.getDisplay() !== Yoga.DISPLAY_NONE);
+    if (yoga) {
+      const raw = yoga.getComputedLayout();
+      const text =
+        node.type === "tui-text" && isLaidOut
+          ? (() => {
+              const measured = getComputedTextMeasure(node);
+              return {
+                wrapWidth: measured.wrapWidth,
+                wrappedLines: measured.wrappedLines,
+              } satisfies ComputedTextLayout;
+            })()
+          : undefined;
+      layouts.set(node, {
+        rect: { left: raw.left, top: raw.top, width: raw.width, height: raw.height },
+        border: readInsets(yoga, "border"),
+        padding: readInsets(yoga, "padding"),
+        isLaidOut,
+        isContentLayoutGuarded: guarded,
+        isAbsolute: yoga.getPositionType() === Yoga.POSITION_TYPE_ABSOLUTE,
+        text,
+      });
+    }
+
+    if (!hasChildren(node)) return;
+    // Static children are measured and painted in their own layout region, not
+    // through the static anchor's deliberately hidden dynamic Yoga node.
+    const childParentIsLaidOut = node.type === "tui-static" ? true : isLaidOut;
+    const childParentGuarded = node.type === "tui-static" ? false : guarded;
+    for (const child of node.children) visit(child, childParentIsLaidOut, childParentGuarded);
+  };
+
+  for (const root of roots) visit(root, true, false);
+  return {
+    get: (node) => layouts.get(node),
+  };
+}
+
+function hideYogaChild(child: TuiNode, guarded: Map<YogaNode, number>): boolean {
+  const yoga = getAttachedYogaNode(child);
+  if (!yoga || guarded.has(yoga)) return false;
+
+  const display = yoga.getDisplay();
   if (display === Yoga.DISPLAY_NONE) return false;
 
-  guarded.set(child.yoga, display);
-  activeContentGuards.add(child.yoga);
-  child.yoga.setDisplay(Yoga.DISPLAY_NONE);
+  guarded.set(yoga, display);
+  activeContentGuards.add(yoga);
+  yoga.setDisplay(Yoga.DISPLAY_NONE);
   return true;
 }
 
 function applyZeroContentGuards(node: TuiNode, guarded: Map<YogaNode, number>): boolean {
-  if (hasYoga(node) && node.yoga.getDisplay() === Yoga.DISPLAY_NONE) return false;
+  if (getAttachedYogaNode(node)?.getDisplay() === Yoga.DISPLAY_NONE) return false;
 
   let changed = false;
   if (node.type === "tui-box") {
@@ -112,7 +235,7 @@ function applyZeroContentGuards(node: TuiNode, guarded: Map<YogaNode, number>): 
       for (const child of node.children) {
         // Absolute children use the padding box as their containing block, so a
         // zero content rectangle does not make their layout unavailable.
-        if (hasYoga(child) && child.yoga.getPositionType() === Yoga.POSITION_TYPE_ABSOLUTE) {
+        if (getAttachedYogaNode(child)?.getPositionType() === Yoga.POSITION_TYPE_ABSOLUTE) {
           continue;
         }
         changed = hideYogaChild(child, guarded) || changed;
@@ -144,7 +267,7 @@ function calculateLayoutWithContentGuards(
 
   try {
     for (;;) {
-      root.yoga.calculateLayout(width, height, Yoga.DIRECTION_LTR);
+      getYogaNode(root).calculateLayout(width, height, Yoga.DIRECTION_LTR);
       if (!applyZeroContentGuards(root, guarded)) break;
     }
   } catch (error) {
@@ -160,7 +283,8 @@ function calculateDynamicLayout(
   columns: number,
   constraint: LayoutHeightConstraint,
 ): () => void {
-  root.yoga.setWidth(columns);
+  const yoga = getYogaNode(root);
+  yoga.setWidth(columns);
   if (constraint.mode === "exact") {
     return calculateLayoutWithContentGuards(root, columns, constraint.rows);
   }
@@ -169,7 +293,7 @@ function calculateDynamicLayout(
   }
 
   let restore = calculateLayoutWithContentGuards(root, columns);
-  if (root.yoga.getComputedLayout().height <= constraint.rows) return restore;
+  if (yoga.getComputedLayout().height <= constraint.rows) return restore;
 
   restore();
   restore = calculateLayoutWithContentGuards(root, columns, constraint.rows);
@@ -196,11 +320,6 @@ interface StaticLayoutSkeleton {
   readonly dispose: () => void;
 }
 
-function attachedYogaNode(node: TuiNode): YogaNode | null {
-  if (!("yoga" in node) || typeof node.yoga === "symbol") return null;
-  return node.yoga;
-}
-
 function findYogaIndex(parent: YogaNode, child: YogaNode): number {
   for (let index = 0; index < parent.getChildCount(); index++) {
     if (parent.getChild(index) === child) return index;
@@ -223,36 +342,39 @@ function createStaticLayoutSkeleton(
     readonly originalParent: YogaNode | null;
     readonly originalIndex: number;
   }> = [];
+
+  attachYoga(root);
+  const rootYoga = getYogaNode(root);
+  rootYoga.setWidth(columns);
+  attachYoga(box);
+  const boxYoga = getYogaNode(box);
+  boxYoga.copyStyle(getYogaNode(stat));
+  boxYoga.setDisplay(Yoga.DISPLAY_FLEX);
+  boxYoga.setPositionType(Yoga.POSITION_TYPE_ABSOLUTE);
+  rootYoga.insertChild(boxYoga, 0);
+  root.children.push(box);
+
   const dispose = () => {
     for (const { yoga, originalParent, originalIndex } of moved.reverse()) {
-      box.yoga.removeChild(yoga);
+      boxYoga.removeChild(yoga);
       originalParent?.insertChild(yoga, originalIndex);
     }
     box.children.length = 0;
-    root.yoga.removeChild(box.yoga);
+    rootYoga.removeChild(boxYoga);
     detachYoga(box);
     root.children.length = 0;
     detachYoga(root);
   };
 
-  attachYoga(root);
-  root.yoga.setWidth(columns);
-  attachYoga(box);
-  box.yoga.copyStyle(stat.yoga);
-  box.yoga.setDisplay(Yoga.DISPLAY_FLEX);
-  box.yoga.setPositionType(Yoga.POSITION_TYPE_ABSOLUTE);
-  root.yoga.insertChild(box.yoga, 0);
-  root.children.push(box);
-
   let yogaIndex = 0;
   for (const child of children) {
     box.children.push(child);
-    const yoga = attachedYogaNode(child);
+    const yoga = getAttachedYogaNode(child);
     if (!yoga) continue;
     const originalParent = yoga.getParent();
     const originalIndex = originalParent ? findYogaIndex(originalParent, yoga) : 0;
     originalParent?.removeChild(yoga);
-    box.yoga.insertChild(yoga, yogaIndex);
+    boxYoga.insertChild(yoga, yogaIndex);
     moved.push({ yoga, originalParent, originalIndex });
     yogaIndex++;
   }
@@ -295,7 +417,7 @@ export function runLayoutTransaction(request: LayoutRequest): LayoutTransactionR
         cleanups.push(skeleton.dispose);
         const restoreGuards = calculateLayoutWithContentGuards(skeleton.root, request.columns);
         cleanups.push(restoreGuards);
-        const layout = skeleton.box.yoga.getComputedLayout();
+        const layout = getYogaNode(skeleton.box).getComputedLayout();
         return {
           stat,
           region: {
@@ -313,12 +435,14 @@ export function runLayoutTransaction(request: LayoutRequest): LayoutTransactionR
     );
     const dynamicHeight = Math.max(
       0,
-      Math.floor(request.dynamicRoot.yoga.getComputedLayout().height),
+      Math.floor(getYogaNode(request.dynamicRoot).getComputedLayout().height),
     );
+    const computed = captureComputedLayout([request.dynamicRoot, ...request.staticRoots]);
 
     return {
       dynamicHeight,
       staticLayouts,
+      computed,
       dispose() {
         disposeAll(cleanups);
       },

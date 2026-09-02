@@ -19,11 +19,15 @@ import type {
 } from "../host/nodes.ts";
 import { flattenLeaves, measureTextNatural, wrapText } from "../text/text-measure.ts";
 
-type YogaCarrier = TuiRoot | TuiBox | TuiText | TuiStatic;
+export type YogaCarrier = TuiRoot | TuiBox | TuiText | TuiStatic;
 
 interface TextMeasureResult {
   readonly width: number;
   readonly height: number;
+  /** The raw, already-measured line structure consumed by ComputedLayout. */
+  readonly wrappedLines: readonly string[];
+  /** Whole-cell width shared by the Yoga measure and the paint snapshot. */
+  readonly wrapWidth: number;
 }
 
 interface TextMeasureRequest {
@@ -39,8 +43,16 @@ interface TextMeasureState {
   };
 }
 
+/** Text geometry captured from the same measurement routine Yoga calls. */
+export interface ComputedTextMeasure {
+  readonly wrappedLines: readonly string[];
+  readonly wrapWidth: number;
+}
+
 let textYogaConfig: YogaConfig | undefined;
 let textYogaConfigUsers = 0;
+const textYogaMeasureStates = new WeakMap<TuiText, TextMeasureState>();
+const yogaNodes = new WeakMap<YogaCarrier, YogaNode>();
 
 function acquireTextYogaConfig(): YogaConfig {
   if (!textYogaConfig) {
@@ -80,7 +92,7 @@ export function freeYogaNode(node: YogaNode): void {
 
 // -------------------------------------------------------------------------
 
-function hasYoga(node: TuiNode): node is YogaCarrier {
+export function isYogaCarrier(node: TuiNode): node is YogaCarrier {
   return (
     node.type === "root" ||
     node.type === "tui-box" ||
@@ -89,22 +101,36 @@ function hasYoga(node: TuiNode): node is YogaCarrier {
   );
 }
 
+/** The private engine handle for an attached host node. */
+export function getYogaNode(node: YogaCarrier): YogaNode {
+  const yoga = yogaNodes.get(node);
+  if (!yoga) throw new Error(`No Yoga node is attached to ${node.type}`);
+  return yoga;
+}
+
+/** Engine access for layout-only traversals that can encounter inline nodes. */
+export function getAttachedYogaNode(node: TuiNode): YogaNode | null {
+  return isYogaCarrier(node) ? (yogaNodes.get(node) ?? null) : null;
+}
+
 export function attachYoga(node: YogaCarrier): void {
+  let yoga: YogaNode;
   if (node.type === "tui-text") {
     const config = acquireTextYogaConfig();
     try {
-      node.yoga = Yoga.Node.create(config);
+      yoga = Yoga.Node.create(config);
     } catch (error) {
       releaseTextYogaConfig();
       throw error;
     }
   } else {
-    node.yoga = createYogaNode();
+    yoga = createYogaNode();
   }
+  yogaNodes.set(node, yoga);
   // Static nodes are painted from an independent layout region, so they
   // must not occupy space in the dynamic frame's yoga layout.
   if (node.type === "tui-static") {
-    (node.yoga as YogaNode).setDisplay(Yoga.DISPLAY_NONE);
+    yoga.setDisplay(Yoga.DISPLAY_NONE);
   }
   // Box defaults are row direction, shrinkable, and no-wrap. These are set at
   // the yoga level so they work regardless of whether props
@@ -112,25 +138,27 @@ export function attachYoga(node: YogaCarrier): void {
   // overrides or border defaults). User-provided props override these via
   // patchProp which runs after attachYoga.
   if (node.type === "tui-box") {
-    (node.yoga as YogaNode).setFlexDirection(Yoga.FLEX_DIRECTION_ROW);
-    (node.yoga as YogaNode).setFlexShrink(1);
-    (node.yoga as YogaNode).setFlexWrap(Yoga.WRAP_NO_WRAP);
-    (node.yoga as YogaNode).setFlexGrow(0);
+    yoga.setFlexDirection(Yoga.FLEX_DIRECTION_ROW);
+    yoga.setFlexShrink(1);
+    yoga.setFlexWrap(Yoga.WRAP_NO_WRAP);
+    yoga.setFlexGrow(0);
   }
   // Text defaults are row direction and shrinkable. Although text nodes rarely
   // have yoga-carrying children, applying the defaults here keeps layout
   // consistent for every host construction path.
   if (node.type === "tui-text") {
-    (node.yoga as YogaNode).setFlexDirection(Yoga.FLEX_DIRECTION_ROW);
-    (node.yoga as YogaNode).setFlexShrink(1);
-    (node.yoga as YogaNode).setFlexGrow(0);
+    yoga.setFlexDirection(Yoga.FLEX_DIRECTION_ROW);
+    yoga.setFlexShrink(1);
+    yoga.setFlexGrow(0);
   }
 }
 
 export function detachYoga(node: YogaCarrier): void {
+  const yoga = getYogaNode(node);
   try {
-    freeYogaNode(node.yoga as YogaNode);
+    freeYogaNode(yoga);
   } finally {
+    yogaNodes.delete(node);
     if (node.type === "tui-text") releaseTextYogaConfig();
   }
 }
@@ -141,20 +169,24 @@ function yogaIndexFor(parent: TuiContainer, child: TuiNode): number {
   let yIdx = 0;
   for (const sibling of parent.children) {
     if (sibling === child) return yIdx;
-    if (hasYoga(sibling)) yIdx++;
+    if (getAttachedYogaNode(sibling)) yIdx++;
   }
   return yIdx;
 }
 
 export function insertYogaChild(parent: TuiContainer, child: TuiNode, _domIndex: number): void {
-  if (!hasYoga(parent) || !hasYoga(child)) return;
+  const parentYoga = getAttachedYogaNode(parent);
+  const childYoga = getAttachedYogaNode(child);
+  if (!parentYoga || !childYoga) return;
   const yIdx = yogaIndexFor(parent, child);
-  (parent.yoga as YogaNode).insertChild(child.yoga as YogaNode, yIdx);
+  parentYoga.insertChild(childYoga, yIdx);
 }
 
 export function removeYogaChild(parent: TuiContainer, child: TuiNode): void {
-  if (!hasYoga(parent) || !hasYoga(child)) return;
-  (parent.yoga as YogaNode).removeChild(child.yoga as YogaNode);
+  const parentYoga = getAttachedYogaNode(parent);
+  const childYoga = getAttachedYogaNode(child);
+  if (!parentYoga || !childYoga) return;
+  parentYoga.removeChild(childYoga);
 }
 
 // --- prop application ----------------------------------------------------
@@ -406,7 +438,7 @@ export const BORDER_PROPS = new Set([
  * drawn (the per-edge props default to `true`).
  */
 export function reconcileBorderEdges(node: YogaCarrier, props: Record<string, unknown>): void {
-  const y = node.yoga as YogaNode;
+  const y = getYogaNode(node);
   const borderWidth = props["borderStyle"] ? 1 : 0;
   y.setBorder(Yoga.EDGE_TOP, props["borderTop"] === false ? 0 : borderWidth);
   y.setBorder(Yoga.EDGE_BOTTOM, props["borderBottom"] === false ? 0 : borderWidth);
@@ -481,7 +513,7 @@ function present(props: Record<string, unknown>, key: string): boolean {
  * Margin maps left/right to EDGE_START/END; padding uses EDGE_LEFT/RIGHT.
  */
 export function reconcileMarginEdges(node: YogaCarrier, props: Record<string, unknown>): void {
-  const y = node.yoga as YogaNode;
+  const y = getYogaNode(node);
   const pick = (specific: string, axis: string): number => {
     if (present(props, specific)) return Number(props[specific]);
     if (present(props, axis)) return Number(props[axis]);
@@ -504,7 +536,7 @@ export function reconcileMarginEdges(node: YogaCarrier, props: Record<string, un
  * START/END).
  */
 export function reconcilePaddingEdges(node: YogaCarrier, props: Record<string, unknown>): void {
-  const y = node.yoga as YogaNode;
+  const y = getYogaNode(node);
   const pick = (specific: string, axis: string): number => {
     if (present(props, specific)) return Number(props[specific]);
     if (present(props, axis)) return Number(props[axis]);
@@ -526,7 +558,7 @@ export function reconcilePaddingEdges(node: YogaCarrier, props: Record<string, u
  * withdrawal declarative: removing rowGap reveals gap again.
  */
 export function reconcileGutters(node: YogaCarrier, props: Record<string, unknown>): void {
-  const y = node.yoga as YogaNode;
+  const y = getYogaNode(node);
   const broad = present(props, "gap") ? Number(props["gap"]) : 0;
   const row = present(props, "rowGap") ? Number(props["rowGap"]) : broad;
   const column = present(props, "columnGap") ? Number(props["columnGap"]) : broad;
@@ -630,7 +662,7 @@ export function applyYogaProp(
       return;
     }
   }
-  setter(node.yoga as YogaNode, value);
+  setter(getYogaNode(node), value);
 }
 
 // --- text measure binding ------------------------------------------------
@@ -654,7 +686,8 @@ export function getTextMeasureCellWidth(
 
 export function bindTextMeasure(text: TuiText): void {
   const state: TextMeasureState = {};
-  text.yoga.setMeasureFunc((availableWidth, widthMode) => {
+  textYogaMeasureStates.set(text, state);
+  getYogaNode(text).setMeasureFunc((availableWidth, widthMode) => {
     const wrap = text.props.wrap;
 
     if (
@@ -678,39 +711,48 @@ export function bindTextMeasure(text: TuiText): void {
       return result;
     };
 
-    // Empty text (no children or all-null children) — return zero dimensions
-    // so yoga doesn't crash trying to measure an empty string.
-    if (raw === "") {
-      return remember({ width: 0, height: 0 });
-    }
-
-    const natural = measureTextNatural(raw);
-
-    // A terminal can only paint complete cells. A positive fractional
-    // constraint therefore gets the conservative whole-cell budget it already
-    // contains; a sub-cell allocation still gets one cell. This is a pure
-    // function of the measure request: final absolute offsets and callback
-    // order never feed another layout pass.
-    const terminalCellWidth = getTextMeasureCellWidth(natural.width, availableWidth, widthMode);
-
-    // Text fits into container, no need to wrap.
-    if (natural.width <= terminalCellWidth) {
-      return remember(natural);
-    }
-
-    const wrapped = wrapText(raw, terminalCellWidth, wrap ?? "wrap");
-    const result = measureTextNatural(wrapped.join("\n"));
-    return remember(result);
+    return remember(measureTextForCellWidth(raw, wrap, availableWidth, widthMode));
   });
+}
+
+function measureTextForCellWidth(
+  raw: string,
+  wrap: TextProps["wrap"],
+  availableWidth: number,
+  widthMode: MeasureMode,
+): TextMeasureResult {
+  // Empty text (no children or all-null children) — return zero dimensions
+  // so yoga doesn't crash trying to measure an empty string.
+  if (raw === "") {
+    return { width: 0, height: 0, wrappedLines: [], wrapWidth: 0 };
+  }
+
+  const natural = measureTextNatural(raw);
+
+  // A terminal can only paint complete cells. A positive fractional
+  // constraint therefore gets the conservative whole-cell budget it already
+  // contains; a sub-cell allocation still gets one cell. This is a pure
+  // function of the measure request: final absolute offsets and callback
+  // order never feed another layout pass.
+  const wrapWidth = getTextMeasureCellWidth(natural.width, availableWidth, widthMode);
+
+  // Text fits into container, no need to wrap.
+  if (natural.width <= wrapWidth) {
+    return { ...natural, wrappedLines: raw.split("\n"), wrapWidth };
+  }
+
+  const wrappedLines = wrapText(raw, wrapWidth, wrap ?? "wrap");
+  return { ...measureTextNatural(wrappedLines.join("\n")), wrappedLines, wrapWidth };
 }
 
 /** Whole-cell width shared by measurement and paint. */
 export function getTextTerminalCellWidth(text: TuiText): number {
-  const layout = text.yoga.getComputedLayout();
+  const yoga = getYogaNode(text);
+  const layout = yoga.getComputedLayout();
   let width = toWholeCellWidth(layout.width);
   // Use Yoga parentage, not host-tree parentage: Static temporarily moves its
   // children into an isolated layout tree without changing DOM-style links.
-  const parent = text.yoga.getParent();
+  const parent = yoga.getParent();
   if (!parent) return width;
 
   const parentLayout = parent.getComputedLayout();
@@ -726,7 +768,42 @@ export function getTextTerminalCellWidth(text: TuiText): number {
   return width;
 }
 
+/**
+ * Read the line structure for a Text node's final geometry. The Yoga measure
+ * callback and this capture path share `measureTextForCellWidth`, so a paint
+ * snapshot never invents a second wrapping policy after layout has finished.
+ */
+export function getComputedTextMeasure(text: TuiText): ComputedTextMeasure {
+  const wrapWidth = getTextTerminalCellWidth(text);
+  const state = textYogaMeasureStates.get(text);
+  const cached = state?.cache;
+  // The measure ran against Yoga's budget for this node, which a row parent
+  // sets wider than the width the node finally takes. Greedy wrapping at any
+  // width between the widest measured line and that budget yields the same
+  // lines, so the measured array is reused and paint sees one identity per
+  // revision rather than a fresh copy every commit.
+  if (
+    cached?.revision === text.textRevision &&
+    cached.wrap === text.props.wrap &&
+    (text.props.wrap === undefined || text.props.wrap === "wrap" || text.props.wrap === "hard") &&
+    cached.result.width <= wrapWidth &&
+    wrapWidth <= cached.result.wrapWidth
+  ) {
+    return { wrapWidth, wrappedLines: cached.result.wrappedLines };
+  }
+
+  const raw = flattenLeaves(text);
+  if (raw === "") return { wrapWidth: 0, wrappedLines: [] };
+  const natural = measureTextNatural(raw);
+  const wrappedLines =
+    natural.width <= wrapWidth
+      ? raw.split("\n")
+      : wrapText(raw, wrapWidth, text.props.wrap ?? "wrap");
+  const result = { ...measureTextNatural(wrappedLines.join("\n")), wrappedLines, wrapWidth };
+  return { wrapWidth: result.wrapWidth, wrappedLines: result.wrappedLines };
+}
+
 export function markTextDirty(text: TuiText): void {
   text.textRevision++;
-  text.yoga.markDirty();
+  getYogaNode(text).markDirty();
 }

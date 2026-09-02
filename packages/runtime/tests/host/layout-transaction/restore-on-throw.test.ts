@@ -1,11 +1,8 @@
 import { expect, test } from "vite-plus/test";
 // Keep the stable Yoga enum values local so this regression focuses on
 // Runtime's guard behavior rather than Yoga's generated enum surface.
-import {
-  isContentLayoutGuarded,
-  runLayoutTransaction,
-} from "../../../src/layout/layout-transaction.ts";
-import { attachYoga, detachYoga } from "../../../src/layout/yoga.ts";
+import { runLayoutTransaction } from "../../../src/layout/layout-transaction.ts";
+import { attachYoga, detachYoga, getYogaNode } from "../../../src/layout/yoga.ts";
 import { createBox, createRoot, createText } from "../../../src/host/nodes.ts";
 import type { AppContext } from "../../../src/vue/context.ts";
 
@@ -27,17 +24,17 @@ test("a throw on a later layout iteration restores nodes hidden by an earlier it
   zeroBox.parent = root;
   root.children.push(zeroBox);
   // width 0 → zero inner content size → guard hides relative children.
-  zeroBox.yoga.setWidth(0);
-  root.yoga.insertChild(zeroBox.yoga, 0);
+  getYogaNode(zeroBox).setWidth(0);
+  getYogaNode(root).insertChild(getYogaNode(zeroBox), 0);
 
   const hiddenChild = createBox();
   attachYoga(hiddenChild);
   hiddenChild.parent = zeroBox;
   zeroBox.children.push(hiddenChild);
   // A real size so it starts visible (DISPLAY_FLEX) — a genuine hide candidate.
-  hiddenChild.yoga.setWidth(5);
-  hiddenChild.yoga.setHeight(1);
-  zeroBox.yoga.insertChild(hiddenChild.yoga, 0);
+  getYogaNode(hiddenChild).setWidth(5);
+  getYogaNode(hiddenChild).setHeight(1);
+  getYogaNode(zeroBox).insertChild(getYogaNode(hiddenChild), 0);
 
   // --- Iteration-2 throw: a separate VISIBLE leaf whose measure func succeeds
   //     on its first invocation and throws on its second. Iteration 1 measures
@@ -48,11 +45,11 @@ test("a throw on a later layout iteration restores nodes hidden by an earlier it
   attachYoga(measuredText);
   measuredText.parent = root;
   root.children.push(measuredText);
-  root.yoga.insertChild(measuredText.yoga, 1);
+  getYogaNode(root).insertChild(getYogaNode(measuredText), 1);
 
   let measureCalls = 0;
   const boom = new Error("measure exploded on the second layout pass");
-  measuredText.yoga.setMeasureFunc(() => {
+  getYogaNode(measuredText).setMeasureFunc(() => {
     measureCalls++;
     if (measureCalls >= 2) throw boom;
     return { width: 4, height: 1 };
@@ -72,24 +69,25 @@ test("a throw on a later layout iteration restores nodes hidden by an earlier it
   // second internal measure pass within the first calculateLayout.
   let outerLayoutCalls = 0;
   let hiddenWasAlreadyHiddenWhenThrowingPassBegan = false;
-  const realCalculateLayout = root.yoga.calculateLayout.bind(root.yoga);
+  const realCalculateLayout = getYogaNode(root).calculateLayout.bind(getYogaNode(root));
   // Override the bound method on this one yoga node only (test-local seam).
-  (root.yoga as { calculateLayout: (...args: unknown[]) => unknown }).calculateLayout = (
+  (getYogaNode(root) as { calculateLayout: (...args: unknown[]) => unknown }).calculateLayout = (
     ...args: unknown[]
   ) => {
     outerLayoutCalls++;
     if (measureCalls >= 1) {
       // This is the pass that will throw (measure func throws on call #2);
       // record whether iteration 1 already hid the child before this pass runs.
-      hiddenWasAlreadyHiddenWhenThrowingPassBegan = hiddenChild.yoga.getDisplay() === DISPLAY_NONE;
+      hiddenWasAlreadyHiddenWhenThrowingPassBegan =
+        getYogaNode(hiddenChild).getDisplay() === DISPLAY_NONE;
     }
-    measuredText.yoga.markDirty();
+    getYogaNode(measuredText).markDirty();
     return realCalculateLayout(...(args as Parameters<typeof realCalculateLayout>));
   };
 
   try {
     // Sanity: nothing is hidden before layout runs.
-    expect(hiddenChild.yoga.getDisplay()).not.toBe(DISPLAY_NONE);
+    expect(getYogaNode(hiddenChild).getDisplay()).not.toBe(DISPLAY_NONE);
 
     // The measure error propagates unchanged.
     expect(() =>
@@ -110,33 +108,32 @@ test("a throw on a later layout iteration restores nodes hidden by an earlier it
     expect(hiddenWasAlreadyHiddenWhenThrowingPassBegan).toBe(true);
 
     // The node hidden in iteration 1 is restored before the error escapes.
-    expect(hiddenChild.yoga.getDisplay()).not.toBe(DISPLAY_NONE);
-    expect(isContentLayoutGuarded(hiddenChild)).toBe(false);
+    expect(getYogaNode(hiddenChild).getDisplay()).not.toBe(DISPLAY_NONE);
   } finally {
-    root.yoga.removeChild(measuredText.yoga);
+    getYogaNode(root).removeChild(getYogaNode(measuredText));
     detachYoga(measuredText);
-    root.yoga.freeRecursive();
+    getYogaNode(root).freeRecursive();
   }
 });
 
-test("temporary content guards are observable only until the layout restore", () => {
+test("temporary content guards restore Yoga display on dispose", () => {
   const root = createRoot({} as AppContext);
   attachYoga(root);
   const zeroBox = createBox();
   attachYoga(zeroBox);
   zeroBox.parent = root;
-  zeroBox.yoga.setWidth(0);
-  zeroBox.yoga.setHeight(1);
+  getYogaNode(zeroBox).setWidth(0);
+  getYogaNode(zeroBox).setHeight(1);
   root.children.push(zeroBox);
-  root.yoga.insertChild(zeroBox.yoga, 0);
+  getYogaNode(root).insertChild(getYogaNode(zeroBox), 0);
 
   const child = createBox();
   attachYoga(child);
   child.parent = zeroBox;
-  child.yoga.setWidth(2);
-  child.yoga.setHeight(1);
+  getYogaNode(child).setWidth(2);
+  getYogaNode(child).setHeight(1);
   zeroBox.children.push(child);
-  zeroBox.yoga.insertChild(child.yoga, 0);
+  getYogaNode(zeroBox).insertChild(getYogaNode(child), 0);
 
   const layout = runLayoutTransaction({
     dynamicRoot: root,
@@ -144,10 +141,8 @@ test("temporary content guards are observable only until the layout restore", ()
     columns: 10,
     dynamicHeight: { mode: "exact", rows: 2 },
   });
-  expect(child.yoga.getDisplay()).toBe(DISPLAY_NONE);
-  expect(isContentLayoutGuarded(child)).toBe(true);
+  expect(getYogaNode(child).getDisplay()).toBe(DISPLAY_NONE);
 
   layout.dispose();
-  expect(child.yoga.getDisplay()).not.toBe(DISPLAY_NONE);
-  expect(isContentLayoutGuarded(child)).toBe(false);
+  expect(getYogaNode(child).getDisplay()).not.toBe(DISPLAY_NONE);
 });

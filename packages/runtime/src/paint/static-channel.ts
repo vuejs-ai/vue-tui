@@ -44,7 +44,7 @@ export function prepareStaticOutput(
   const batches = layout.staticLayouts.map(
     ({ stat, region }): PreparedStaticBatch => ({
       stat,
-      frame: region ? paintStaticLayout(region, terminalStyle) : "",
+      frame: region ? paintStaticLayout(region, layout.computed, terminalStyle) : "",
     }),
   );
   // An output-free instance is still a producer: it remains open until a later

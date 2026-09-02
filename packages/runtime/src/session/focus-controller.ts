@@ -1,7 +1,7 @@
 import { readonly, shallowRef, type Ref, type ShallowRef } from "vue";
-import Yoga from "yoga-layout";
 import { findRootNode } from "../host/resolve-node.ts";
 import type { TuiNode, TuiRoot } from "../host/nodes.ts";
+import { isHiddenByApplication } from "../layout/layout-transaction.ts";
 import type { RenderedTargetTransactionHost } from "./rendered-target.ts";
 
 export interface InternalFocusTargetHandle {
@@ -18,6 +18,8 @@ export interface InternalFocusController extends RenderedTargetTransactionHost {
   createTarget(options?: InternalFocusTargetOptions): InternalFocusTargetHandle;
   removeTarget(target: InternalFocusTargetHandle): void;
   attachTarget(target: InternalFocusTargetHandle, host: TuiNode): () => void;
+  /** Reconcile rendered availability once a layout transaction has landed. */
+  reconcileAfterLayout(): void;
   dispose(): void;
 }
 
@@ -34,13 +36,6 @@ interface TargetRecord {
 interface CreateInternalFocusControllerOptions {
   readonly root: TuiRoot;
   readonly inert?: boolean;
-}
-
-function isDisplayNone(node: TuiNode): boolean {
-  const style = (node as { style?: { display?: unknown } }).style;
-  if (style?.display === "none") return true;
-  const yoga = (node as { yoga?: { getDisplay?: () => number } }).yoga;
-  return yoga?.getDisplay?.() === Yoga.DISPLAY_NONE;
 }
 
 export function createInternalFocusController(
@@ -74,10 +69,10 @@ export function createInternalFocusController(
 
   const hostIsAvailable = (host: TuiNode | null): host is TuiNode => {
     if (!host || findRootNode(host) !== root) return false;
-    for (let current: TuiNode | null = host; current; current = current.parent) {
-      if (isDisplayNone(current)) return false;
-    }
-    return true;
+    // A live query, not the snapshot: a boundary can be hidden before the first
+    // layout pass runs and while the surface is suspended, when no pass runs to
+    // refresh one.
+    return !isHiddenByApplication(host);
   };
 
   const reconcileRenderedFacts = (): void => {
@@ -215,6 +210,10 @@ export function createInternalFocusController(
           record.observedToken = null;
         });
       };
+    },
+    reconcileAfterLayout() {
+      if (disposed) return;
+      reconcileRenderedFacts();
     },
     transaction(kind, change) {
       runTransaction(kind, change);

@@ -124,7 +124,7 @@ function renderStringDocument(
       // Static on each host mutation: the tui-static host is inserted before
       // its slot children. The complete tree is collected once after render.
       onCommit: () => {},
-      hostYogaLifetime: hostYogaLedger.lifetime,
+      hostYogaLifecycle: hostYogaLedger,
     }),
   );
   const app = renderer.createApp(component);
@@ -182,6 +182,7 @@ function renderStringDocument(
     let capturedStaticOutput = "";
     let preparedStatic: ReturnType<typeof prepareStaticOutput>;
     try {
+      focusController.reconcileAfterLayout();
       // String rendering has no physical handoff. Snapshot every complete open
       // Static subtree after mount while its transaction-owned geometry is
       // available. Acceptance follows transaction disposal below so callbacks
@@ -193,7 +194,7 @@ function renderStringDocument(
       // short documents. Yoga already applied a finite height bound when content
       // exceeded it; shorter output stays unpadded. Clip only by line count so
       // ordinary horizontal overflow behavior matches the previous unbounded paint.
-      output = paint(root, { terminalStyle: renderSession.terminalStyle });
+      output = paint(root, { layout: layout.computed, terminalStyle: renderSession.terminalStyle });
       if (options.height !== null && output !== "") {
         const lines = output.split("\n");
         if (lines.length > options.height) {

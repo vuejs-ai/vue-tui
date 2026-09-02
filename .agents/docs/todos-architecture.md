@@ -39,31 +39,9 @@ The tree still has cross-unit edges the record's tables forbid — `host/ → vu
 
 ## 3. Finish the layout engine boundary
 
-**Today.** `#288` introduced `layout/layout-transaction.ts`, which owns the Yoga calls and the conditional second pass, and is called from exactly two places (`render.ts` and `render-to-string.ts`). Five files still import `yoga-layout`, and each wants something different from it:
+`layout/` is the only Yoga owner: a private `WeakMap` holds every node-to-engine handle, and the lifecycle ledger owns allocation, idempotent release and rollback. A transaction returns `ComputedLayout` with resolved geometry, insets, visibility and measured wrapped lines, and paint reads only that snapshot. `host/` exposes no Yoga handle or sentinel, and `render.ts` plus `render-to-string.ts` remain the two transaction callers.
 
-| File                           | What it takes from the engine                                                |
-| ------------------------------ | ---------------------------------------------------------------------------- |
-| `layout/layout-transaction.ts` | The layout calls themselves                                                  |
-| `layout/yoga.ts`               | Node construction, prop application, the measure callback                    |
-| `host/nodes.ts`                | The `yoga` field on every node type, plus the unattached sentinel            |
-| `paint/paint.ts`               | `getComputedLayout`, `getComputedBorder`, `getComputedPadding`, `getDisplay` |
-| `session/focus-controller.ts`  | `getDisplay()` alone, to skip `display: none` subtrees                       |
-
-`LayoutTransactionResult` returns `dynamicHeight` and `staticLayouts`, so per-node geometry is still read off the Yoga node during painting.
-
-**Steps.**
-
-1. Widen the transaction result into `ComputedLayout`: per-node rectangle, the resolved border and padding insets, whether the node is laid out at all, and the wrapped lines the measure callback already produced. The painter's row above is the requirement list.
-2. Switch `paint/paint.ts` to read from `ComputedLayout` and drop its `yoga-layout` import.
-3. Give `layout/` a live authored-visibility query for focus, then switch `session/focus-controller.ts` to it and drop the controller's engine import. The query must work before the first layout and while a surface is suspended.
-4. Take the engine handle off the node: `host/nodes.ts` loses its `yoga` field and the `UNATTACHED_YOGA` sentinel, and `layout/` keeps the node-to-engine mapping itself.
-5. Move `yoga-allocation-ledger.ts`, the disposed-host set and the `hostYogaLifetime` callbacks into `layout/`, where the engine's memory now lives.
-
-**Done when.** Only `layout/` imports `yoga-layout`, `ComputedLayout` is the sole route by which anything else learns geometry, and focus reads authored visibility through the live `layout/` query rather than a stale snapshot.
-
-**Verify.** `grep -rl yoga-layout packages/runtime/src` lists nothing outside `layout/`. `tests/host/layout-transaction/single-pass-text-measurement.test.ts` still asserts `layoutCalls === 1`.
-
-**Watch for.** Dropping the wrapped lines from step 1 is the way this task reintroduces `#283`; the [architecture record explains why](./architecture.md#computedlayout--the-complete-product-of-one-layout-pass), and `60e96fd` is the fix that a rectangles-only `ComputedLayout` would undo.
+Focus asks `layout/` for authored visibility as a live tree query, so hidden targets are rejected before the first layout and while a surface is suspended. The query excludes nodes collapsed only by a zero-content guard during the current layout pass.
 
 ## 4. Give each surface its own implementation
 

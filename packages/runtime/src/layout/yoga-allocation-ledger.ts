@@ -1,9 +1,53 @@
-import type { TuiNode } from "../host/nodes.ts";
-import type { TtyRendererOptions } from "../vue/node-ops.ts";
+import type { TuiBox, TuiStatic, TuiText } from "../host/nodes.ts";
+import { attachYoga, detachYoga } from "./yoga.ts";
 
-export interface HostYogaAllocationLedger {
-  readonly lifetime: NonNullable<TtyRendererOptions["hostYogaLifetime"]>;
+export type HostYogaNode = TuiBox | TuiText | TuiStatic;
+
+/** Layout-owned lifetime for every Yoga-bearing Vue host. */
+export interface HostYogaLifecycle {
+  attach(node: HostYogaNode, onDetach?: () => void): void;
+  detach(node: HostYogaNode): void;
+}
+
+export interface HostYogaAllocationLedger extends HostYogaLifecycle {
   rollback(): void;
+}
+
+interface HostYogaLifetimeObserver {
+  allocated(node: HostYogaNode, dispose: () => void): void;
+  released(node: HostYogaNode): void;
+}
+
+/**
+ * Keep Yoga allocation, idempotent disposal, and the render-local callback in
+ * `layout/`. The callback may retire a Vue display bridge, but it never needs
+ * to expose that bridge or the engine handle outside this boundary.
+ */
+export function createHostYogaLifecycle(observer?: HostYogaLifetimeObserver): HostYogaLifecycle {
+  const disposedHosts = new WeakSet<HostYogaNode>();
+  const detachCallbacks = new WeakMap<HostYogaNode, () => void>();
+
+  const detach = (node: HostYogaNode): void => {
+    if (disposedHosts.has(node)) return;
+    disposedHosts.add(node);
+    const onDetach = detachCallbacks.get(node);
+    detachCallbacks.delete(node);
+    observer?.released(node);
+    try {
+      onDetach?.();
+    } finally {
+      detachYoga(node);
+    }
+  };
+
+  return {
+    attach(node, onDetach): void {
+      attachYoga(node);
+      if (onDetach) detachCallbacks.set(node, onDetach);
+      observer?.allocated(node, () => detach(node));
+    },
+    detach,
+  };
 }
 
 /**
@@ -15,9 +59,9 @@ export interface HostYogaAllocationLedger {
  * creation order during rollback.
  */
 export function createHostYogaAllocationLedger(): HostYogaAllocationLedger {
-  const allocationOrder: TuiNode[] = [];
-  const pending = new Map<TuiNode, () => void>();
-  const lifetime: HostYogaAllocationLedger["lifetime"] = {
+  const allocationOrder: HostYogaNode[] = [];
+  const pending = new Map<HostYogaNode, () => void>();
+  const lifecycle = createHostYogaLifecycle({
     allocated(node, dispose): void {
       allocationOrder.push(node);
       pending.set(node, dispose);
@@ -25,10 +69,10 @@ export function createHostYogaAllocationLedger(): HostYogaAllocationLedger {
     released(node): void {
       pending.delete(node);
     },
-  };
+  });
 
   return {
-    lifetime,
+    ...lifecycle,
     rollback(): void {
       for (let index = allocationOrder.length - 1; index >= 0; index--) {
         const node = allocationOrder[index]!;

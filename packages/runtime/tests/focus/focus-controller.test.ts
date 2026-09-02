@@ -1,6 +1,5 @@
 import { effectScope } from "vue";
 import { describe, expect, test } from "vite-plus/test";
-import Yoga from "yoga-layout";
 import type { AppContext } from "../../src/vue/context.ts";
 import { createBox, createRoot, type TuiBox, type TuiRoot } from "../../src/host/nodes.ts";
 import { createInternalFocusController } from "../../src/session/focus-controller.ts";
@@ -117,12 +116,26 @@ describe("focus controller", () => {
     });
     target.focus();
 
-    ancestor.yoga = { getDisplay: () => Yoga.DISPLAY_NONE } as TuiBox["yoga"];
-    focus.transaction("reconcile", () => {});
+    ancestor.style.display = "none";
+    focus.reconcileAfterLayout();
     expect(target.isFocused.value).toBe(false);
 
-    ancestor.yoga = { getDisplay: () => Yoga.DISPLAY_FLEX } as TuiBox["yoga"];
-    focus.transaction("reconcile", () => {});
+    ancestor.style.display = "";
+    focus.reconcileAfterLayout();
+    expect(target.isFocused.value).toBe(false);
+    focus.dispose();
+  });
+
+  test("rejects a host the application hid before any layout has run", () => {
+    const { root, focus } = createFixture();
+    const host = connect(root, createBox());
+    host.style.display = "none";
+    const target = focus.createTarget({ requiresRenderedTarget: true });
+    focus.transaction("reconcile", () => {
+      focus.attachTarget(target, host);
+    });
+    target.focus();
+
     expect(target.isFocused.value).toBe(false);
     focus.dispose();
   });
@@ -133,8 +146,8 @@ describe("focus controller", () => {
     const target = focus.createTarget();
     target.focus();
 
-    ancestor.yoga = { getDisplay: () => Yoga.DISPLAY_NONE } as TuiBox["yoga"];
-    focus.transaction("reconcile", () => {});
+    ancestor.style.display = "none";
+    focus.reconcileAfterLayout();
     expect(target.isFocused.value).toBe(true);
     focus.dispose();
   });

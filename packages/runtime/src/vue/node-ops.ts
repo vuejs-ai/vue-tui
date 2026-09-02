@@ -12,14 +12,11 @@ import {
   type TuiContainer,
   type TuiNode,
   type TuiRoot,
-  type TuiStatic,
   type TuiText,
   type TuiVirtualText,
 } from "../host/nodes.ts";
 import { getRenderedTargetController } from "../session/rendered-target.ts";
 import {
-  attachYoga,
-  detachYoga,
   insertYogaChild,
   removeYogaChild,
   applyYogaProp,
@@ -35,18 +32,20 @@ import {
   bindTextMeasure,
   markTextDirty,
 } from "../layout/yoga.ts";
+import {
+  createHostYogaLifecycle,
+  type HostYogaLifecycle,
+  type HostYogaNode,
+} from "../layout/yoga-allocation-ledger.ts";
 
 export interface TtyRendererOptions {
   onCommit: () => void;
   /**
-   * Optional render-local ownership ledger for Yoga hosts. The synchronous
-   * string renderer uses this to release nodes an interrupted initial patch
-   * allocated but never attached to the host root.
+   * Optional render-local engine lifetime. The string and live renderers use
+   * its ledger form to release hosts an interrupted initial patch allocated
+   * before attaching them to the root.
    */
-  hostYogaLifetime?: {
-    allocated(node: TuiNode, dispose: () => void): void;
-    released(node: TuiNode): void;
-  };
+  hostYogaLifecycle?: HostYogaLifecycle;
 }
 
 const STYLE_PROPS = new Set([
@@ -202,7 +201,8 @@ function rejectsTextLeaf(parent: TuiContainer, value: string): boolean {
 }
 
 export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNode, TuiNode> {
-  const { onCommit, hostYogaLifetime } = options;
+  const { onCommit } = options;
+  const hostYogaLifecycle = options.hostYogaLifecycle ?? createHostYogaLifecycle();
 
   interface BoxDisplayController {
     setAuthoredDisplay(value: unknown): void;
@@ -215,28 +215,22 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
 
   const boxDisplayControllers = new WeakMap<TuiBox, BoxDisplayController>();
   const textDisplayControllers = new WeakMap<TuiText | TuiVirtualText, TextDisplayController>();
-  const disposedYogaHosts = new WeakSet<TuiNode>();
 
-  function disposeHostYoga(node: TuiNode): void {
-    if (disposedYogaHosts.has(node)) return;
-    disposedYogaHosts.add(node);
-    hostYogaLifetime?.released(node);
-    if (node.type === "tui-box") {
-      // A retained host ref may outlive Vue's unmount. Make later
-      // style.display writes inert before freeing its Yoga allocation.
-      boxDisplayControllers.get(node)?.dispose();
-    }
-    if (node.type === "tui-text") {
-      textDisplayControllers.get(node)?.dispose();
-    }
-    if (node.type === "tui-box" || node.type === "tui-text" || node.type === "tui-static") {
-      detachYoga(node);
-    }
+  function disposeHostYoga(node: HostYogaNode): void {
+    hostYogaLifecycle.detach(node);
   }
 
-  function attachHostYoga(node: TuiBox | TuiText | TuiStatic): void {
-    attachYoga(node);
-    hostYogaLifetime?.allocated(node, () => disposeHostYoga(node));
+  function attachHostYoga(node: HostYogaNode): void {
+    hostYogaLifecycle.attach(node, () => {
+      if (node.type === "tui-box") {
+        // A retained host ref may outlive Vue's unmount. Make later
+        // style.display writes inert before freeing its Yoga allocation.
+        boxDisplayControllers.get(node)?.dispose();
+      }
+      if (node.type === "tui-text") {
+        textDisplayControllers.get(node)?.dispose();
+      }
+    });
   }
 
   /**

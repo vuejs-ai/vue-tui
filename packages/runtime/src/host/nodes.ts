@@ -1,9 +1,6 @@
 import type { AppContext } from "../vue/context.ts";
-import type { Node as YogaNode } from "yoga-layout";
 
 export const NESTED_STATIC_ERROR = "<Static> cannot be nested inside another <Static>";
-
-export type YogaNodeRef = YogaNode;
 
 export interface BoxProps {
   [k: string]: unknown;
@@ -35,14 +32,12 @@ export interface TuiRoot extends NodeBase {
   type: "root";
   parent: null;
   children: TuiNode[];
-  yoga: YogaNodeRef;
   appContext: AppContext;
 }
 
 export interface TuiBox extends NodeBase {
   type: "tui-box";
   children: TuiNode[];
-  yoga: YogaNodeRef;
   style: TuiHostStyle;
   props: BoxProps;
 }
@@ -50,7 +45,6 @@ export interface TuiBox extends NodeBase {
 export interface TuiText extends NodeBase {
   type: "tui-text";
   children: TuiInlineNode[];
-  yoga: YogaNodeRef;
   style: TuiHostStyle;
   props: TextProps;
   /** Increments whenever cached text composition or measurement can become stale. */
@@ -80,7 +74,6 @@ export interface TuiComment extends NodeBase {
 export interface TuiStatic extends NodeBase {
   type: "tui-static";
   children: TuiNode[];
-  yoga: YogaNodeRef;
   style: TuiHostStyle;
   props: BoxProps;
   /**
@@ -116,16 +109,14 @@ export function isTuiNode(value: unknown): value is TuiNode {
   return typeof value === "object" && value !== null && tuiNodes.has(value);
 }
 
-// Constructors take the bare minimum and leave yoga binding to yoga.ts.
-// The `yoga` field is set to a sentinel and replaced by `attachYoga(node)`.
-const UNATTACHED_YOGA = Symbol("vue-tui:yoga-unattached") as unknown as YogaNodeRef;
+// Constructors take the bare minimum. `layout/` keeps their engine state in a
+// private node-to-engine map, so host identity remains engine-independent.
 
 export function createRoot(appContext: AppContext): TuiRoot {
   return trackTuiNode({
     type: "root",
     parent: null,
     children: [],
-    yoga: UNATTACHED_YOGA,
     appContext,
   });
 }
@@ -135,10 +126,8 @@ export function createBox(): TuiBox {
     type: "tui-box",
     parent: null,
     children: [],
-    yoga: UNATTACHED_YOGA,
-    // buildNodeOps replaces this placeholder with a Yoga-backed accessor after
-    // attaching the Yoga node. Keeping the field on the bare constructor makes
-    // the host shape truthful even in renderer-internal unit tests.
+    // buildNodeOps replaces this placeholder with Vue's display bridge after
+    // attaching the private layout-engine node.
     style: { display: "" },
     props: {},
   } satisfies TuiBox;
@@ -153,7 +142,6 @@ export function createText(): TuiText {
     type: "tui-text",
     parent: null,
     children: [],
-    yoga: UNATTACHED_YOGA,
     style: { display: "" },
     props: {},
     textRevision: 0,
@@ -197,7 +185,6 @@ export function createStatic(): TuiStatic {
     type: "tui-static",
     parent: null,
     children: [],
-    yoga: UNATTACHED_YOGA,
     // Static is an output boundary rather than a layout node. Keep Vue's
     // built-in v-show directive operational while deliberately ignoring its
     // display writes: mounted identity, not visual display, controls eligibility.
