@@ -2,7 +2,7 @@
 
 This record applies only to `@vue-tui/use`: reusable headless Vue behavior built entirely from supported public `@vue-tui/runtime` APIs. Package placement is governed by [package architecture](./package-architecture.md); exact exports and types are enforced by source declarations and public API tests.
 
-The root currently exports `useKeyInput`, `useTextInput`, and `useInputWhileMounted`. The `/components` entry exports the renderless `UseInputWhileMounted` companion.
+The root currently exports `useKeyInput`, `usePasteInput`, `useTextInput`, and `useInputWhileMounted`. The `/components` entry exports the renderless `UseInputWhileMounted` companion.
 
 ## Package boundary
 
@@ -12,9 +12,9 @@ New APIs still must qualify as [product work](./intent.md#product-work) and pass
 
 ## Input selector composables
 
-`useKeyInput()` delivers only the exact `"key"` member of `TuiInputEvent`. `useTextInput()` delivers only the exact `"text"` member, including its optional logical-key information. Both pass through the original frozen event instead of creating a narrower copy. Key-only, text, and paste remain distinct; a text event carrying key information is still not a key-only event.
+`useKeyInput()` delivers only the exact `"key"` member of `TuiInputEvent`. `usePasteInput()` delivers only the exact `"paste"` member, including an empty payload and unchanged newlines or control characters. `useTextInput()` delivers only the exact `"text"` member, including its optional logical-key information. All three pass through the original frozen event instead of creating a narrower copy. Key-only, text, and paste remain distinct; a text event carrying key information is still not a key-only event.
 
-Both composables accept the same direct or live-ref handler and reactive `isActive` forms as `useInput()`. A live handler is read only when a matching event arrives. They retain broadcast delivery and add no priority, propagation, consumption, focus, or routing. The narrowed callback type is inferred from the selected event member, so the package does not export redundant key-event or text-event aliases.
+All three composables accept the same direct or live-ref handler and reactive `isActive` forms as `useInput()`. A live handler is read only when a matching event arrives. They retain broadcast delivery and add no priority, propagation, consumption, focus, or routing. The narrowed callback type is inferred from the selected event member, so the package does not export redundant key-event, paste-event, or text-event aliases.
 
 ## Mounted-lifetime input
 

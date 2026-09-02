@@ -30,6 +30,27 @@ The handler receives the exact `"key"` member of `TuiInputEvent` and the origina
 
 The handler can be a direct function or a live Vue ref, and `isActive` accepts the same reactive sources as `useInput()`. A handler ref is read only after a matching key event arrives. The narrowed event type is inferred from the callback; `@vue-tui/use` does not export a separate key-event type.
 
+## `usePasteInput`
+
+Use `usePasteInput()` when a handler needs one complete bracketed-paste payload without handling ordinary typing or key presses:
+
+```vue
+<script setup lang="ts">
+import { shallowRef } from "vue";
+import { usePasteInput } from "@vue-tui/use";
+
+const value = shallowRef("");
+
+usePasteInput((event) => {
+  value.value += event.text;
+});
+</script>
+```
+
+The handler receives the exact `"paste"` member of `TuiInputEvent` and the original frozen event object. Empty payloads are delivered, and newlines and control characters remain unchanged. Ordinary text and key events do not call the handler.
+
+The handler can be a direct function or a live Vue ref, and `isActive` accepts the same reactive sources as `useInput()`. A handler ref is read only after a matching paste event arrives. The narrowed event type is inferred from the callback; `@vue-tui/use` does not export a separate paste-event type.
+
 ## `useTextInput`
 
 Use `useTextInput()` when a handler only needs insertion-ready text and should not repeat a `type` check:

@@ -192,6 +192,7 @@ Reusable behavior composed only from public Runtime APIs. [Package guide](./pack
 | Composable                                                                                                  | Returns     | Description                                                                                           |
 | ----------------------------------------------------------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------- |
 | [`useKeyInput(handler, opts?)`](./packages/use/src/input/use-key-input.ts)                                  | —           | Key-only events such as arrows, function keys, and modified shortcuts                                 |
+| [`usePasteInput(handler, opts?)`](./packages/use/src/input/use-paste-input.ts)                              | —           | Complete bracketed-paste payloads, including empty payloads and control characters                    |
 | [`useTextInput(handler, opts?)`](./packages/use/src/input/use-text-input.ts)                                | —           | Text events only; enhanced input preserves its optional logical-key information                       |
 | [`useInputWhileMounted(handler, opts?)`](./packages/use/src/input-while-mounted/use-input-while-mounted.ts) | `targetRef` | Global input, optionally filtered by `opts.type`, while one directly referenced vnode remains mounted |
 
@@ -201,7 +202,7 @@ Reusable behavior composed only from public Runtime APIs. [Package guide](./pack
 | ---------------------------------------------------------------------------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------- |
 | [`<UseInputWhileMounted type?>`](./packages/use/src/input-while-mounted/use-input-while-mounted.vue) | `@vue-tui/use/components` | Emits global input, optionally filtered by `type`, while mounted and renders only its default slot |
 
-`useKeyInput()` delivers the exact frozen `key` member of `TuiInputEvent`; it excludes text events even when they include optional logical-key information. `useTextInput()` delivers the exact frozen `text` member and excludes key-only and paste events without discarding an enhanced text event's optional `key`. Both accept the same live handler and reactive activation forms as `useInput()`.
+`useKeyInput()`, `usePasteInput()`, and `useTextInput()` deliver the exact frozen `key`, `paste`, and `text` members of `TuiInputEvent`. Paste preserves empty payloads, newlines, and control characters; text preserves optional logical-key information. All three accept the same live handler and reactive activation forms as `useInput()`.
 
 Both `useInputWhileMounted` forms retain `useInput()`'s broadcast semantics. A literal `type` narrows the handler or emitted event to the selected `text`, `key`, or `paste` member. The bound ref is a lifecycle signal rather than a focus or routing target; `v-show` remains mounted and active.
 

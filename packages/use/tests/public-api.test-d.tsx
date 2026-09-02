@@ -6,12 +6,32 @@ import {
   useInputWhileMounted,
   type InputWhileMountedTargetRef,
   useKeyInput,
+  usePasteInput,
   useTextInput,
 } from "../src/index.ts";
 
 type KeyInputEvent = Extract<TuiInputEvent, { readonly type: "key" }>;
 type TextInputEvent = Extract<TuiInputEvent, { readonly type: "text" }>;
 type PasteInputEvent = Extract<TuiInputEvent, { readonly type: "paste" }>;
+
+expectTypeOf<Parameters<typeof usePasteInput>[0]>().toEqualTypeOf<
+  MaybeRef<(event: PasteInputEvent) => void>
+>();
+expectTypeOf<Parameters<typeof usePasteInput>[1]>().toEqualTypeOf<
+  { readonly isActive?: MaybeRefOrGetter<boolean> } | undefined
+>();
+const pasteInputActive = shallowRef(true);
+const livePasteInputHandler = shallowRef<(event: PasteInputEvent) => void>(() => undefined);
+usePasteInput((event) => {
+  expectTypeOf(event).toEqualTypeOf<PasteInputEvent>();
+  event.text.toUpperCase();
+  // @ts-expect-error A paste event has no key value.
+  event.key.name?.toUpperCase();
+});
+usePasteInput(livePasteInputHandler, { isActive: pasteInputActive });
+usePasteInput(livePasteInputHandler, { isActive: () => pasteInputActive.value });
+// @ts-expect-error A key-event handler cannot subscribe through usePasteInput().
+usePasteInput((_event: KeyInputEvent) => undefined);
 
 expectTypeOf<Parameters<typeof useKeyInput>[0]>().toEqualTypeOf<
   MaybeRef<(event: KeyInputEvent) => void>
