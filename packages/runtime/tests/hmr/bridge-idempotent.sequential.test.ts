@@ -34,7 +34,7 @@ function makeFakeHot(): FakeHot {
 
 test("initHmrBridge registers each listener AT MOST ONCE across repeated createApp() calls", async () => {
   vi.resetModules();
-  const { initHmrBridge } = await import("../../src/hmr.ts");
+  const { initHmrBridge } = await import("../../src/dev/hmr.ts");
   const hot = makeFakeHot();
 
   // Simulate two createApp() calls in one dev process (two apps, or unmount +
@@ -49,7 +49,7 @@ test("initHmrBridge registers each listener AT MOST ONCE across repeated createA
 
 test("initHmrBridge RE-ARMS each new hot (a full reload hands the runtime a fresh hot)", async () => {
   vi.resetModules();
-  const { initHmrBridge } = await import("../../src/hmr.ts");
+  const { initHmrBridge } = await import("../../src/dev/hmr.ts");
   const hotA = makeFakeHot();
   const hotB = makeFakeHot();
 
@@ -66,7 +66,7 @@ test("initHmrBridge RE-ARMS each new hot (a full reload hands the runtime a fres
 
 test("a registered handler still works after the idempotency refactor", async () => {
   vi.resetModules();
-  const { initHmrBridge, devState } = await import("../../src/hmr.ts");
+  const { initHmrBridge, devState } = await import("../../src/dev/hmr.ts");
   const hot = makeFakeHot();
 
   initHmrBridge(hot);

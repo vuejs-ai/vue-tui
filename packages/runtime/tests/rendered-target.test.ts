@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vite-plus/test";
-import type { AppContext } from "../src/context.ts";
+import type { AppContext } from "../src/vue/context.ts";
 import {
   createBox,
   createRoot,
@@ -7,7 +7,7 @@ import {
   type TuiContainer,
   type TuiNode,
 } from "../src/host/nodes.ts";
-import { createRenderedTargetController } from "../src/rendered-target.ts";
+import { createRenderedTargetController } from "../src/session/rendered-target.ts";
 
 function connect(parent: TuiContainer, child: TuiBox): TuiBox {
   child.parent = parent;

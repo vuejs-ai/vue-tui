@@ -1,4 +1,4 @@
-import type { AppContext } from "../context.ts";
+import type { AppContext } from "../vue/context.ts";
 import type { Node as YogaNode } from "yoga-layout";
 
 export const NESTED_STATIC_ERROR = "<Static> cannot be nested inside another <Static>";

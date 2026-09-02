@@ -1,5 +1,5 @@
 import { expect, test } from "vite-plus/test";
-import { MAX_LAYOUT_VALUE } from "../src/numeric-limits.ts";
+import { MAX_LAYOUT_VALUE } from "../src/layout/numeric-limits.ts";
 import {
   createLiveRenderSessionService,
   createStringRenderSessionService,

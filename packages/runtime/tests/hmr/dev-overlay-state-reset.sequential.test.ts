@@ -29,7 +29,7 @@ afterEach(() => {
 
 test("a fresh dev app does not inherit a previous app's Build Error", async () => {
   vi.resetModules();
-  const { initHmrBridge, devState, resetDevState } = await import("../../src/hmr.ts");
+  const { initHmrBridge, devState, resetDevState } = await import("../../src/dev/hmr.ts");
   const hot = makeFakeHot();
   initHmrBridge(hot);
 
@@ -51,7 +51,7 @@ test("a fresh dev app does not inherit a previous app's transient HMR update sta
   vi.useFakeTimers();
   try {
     vi.resetModules();
-    const { initHmrBridge, devState, resetDevState } = await import("../../src/hmr.ts");
+    const { initHmrBridge, devState, resetDevState } = await import("../../src/dev/hmr.ts");
     const hot = makeFakeHot();
     initHmrBridge(hot);
 

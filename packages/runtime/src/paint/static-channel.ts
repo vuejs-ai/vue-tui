@@ -1,4 +1,4 @@
-import type { LayoutTransactionResult } from "../host/layout-transaction.ts";
+import type { LayoutTransactionResult } from "../layout/layout-transaction.ts";
 import type { TuiNode, TuiStatic } from "../host/nodes.ts";
 import { paintStaticLayout } from "./paint.ts";
 import type { TerminalStyle } from "./terminal-style.ts";

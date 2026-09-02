@@ -2,7 +2,7 @@
 
 ## terminal-size
 
-Portions of `src/terminal-size-probe.ts` are adapted from `terminal-size` 4.0.1.
+Portions of `src/terminal/node/terminal-size-probe.ts` are adapted from `terminal-size` 4.0.1.
 
 MIT License
 

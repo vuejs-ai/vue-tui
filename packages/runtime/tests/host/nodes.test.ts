@@ -7,7 +7,7 @@ import {
   createVirtualText,
   isContainer,
 } from "../../src/host/nodes.ts";
-import { buildNodeOps } from "../../src/host/node-ops.ts";
+import { buildNodeOps } from "../../src/vue/node-ops.ts";
 
 test("createBox returns shape with empty children", () => {
   const box = createBox();

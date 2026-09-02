@@ -94,16 +94,18 @@ Shared data and utilities, on no stage of their own:
 
 Above both paths:
 
-| Directory  | Owns                                                                                                        | May import                                                                                |
-| ---------- | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `api/`     | Package entries: `createApp`, `MountOptions`, `renderToString`, the two `internal/*` seams                  | everything, plus `node:stream` as types only                                              |
-| `dev/`     | `DevSession`, the HMR bridge, the development error overlay, the in-process session-ownership registry      | `session/`, `vue/`, `vue`                                                                 |
-| `session/` | `Session`: assembly, commit scheduling, the lifecycle state machine, focus ownership, geometry registration | everything below, plus `vue/` and `vue`                                                   |
-| `vue/`     | `Box` / `Text` / `Static`, composables, the injection keys, the Vue custom-renderer node operations         | `host/`, `layout/`, `frame/`, `input/`, `vue`, `session/` and `node:stream` as types only |
+| Directory  | Owns                                                                                                                                             | May import                                                                                |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| `api/`     | Package entries: `createApp`, `MountOptions`, `renderToString`, the two `internal/*` seams                                                       | everything, plus `node:stream` as types only                                              |
+| `dev/`     | `DevSession`, the HMR bridge, the development error overlay, the in-process session-ownership registry                                           | `session/`, `vue/`, `vue`                                                                 |
+| `session/` | `Session`: assembly, commit scheduling, the lifecycle state machine, focus ownership, geometry registration                                      | everything below, plus `vue/` and `vue`                                                   |
+| `vue/`     | `Box` / `Text` / `Static`, composables, the injection keys, the Vue custom-renderer node operations, and leaf helpers that `session/` also needs | `host/`, `layout/`, `frame/`, `input/`, `vue`, `session/` and `node:stream` as types only |
 
 `paint/` may not import `terminal/` or `surface/`, so painting has no route by which to emit an escape sequence. `surface/` may not import `host/`, so a surface has no route by which to read node props.
 
 `session/` sits above `vue/` because it builds the Vue renderer out of `vue/`'s node operations. The composables need what the session provides, but they reach it through injection keys rather than by importing it, so `vue/` owns the keys and needs `session/` for types alone. Both directions as values would be a cycle.
+
+A leaf both of them need lives in the lower one. Coercing an unknown thrown value into a message is wanted by the composables that catch application handlers and by the session that catches mount and teardown failures, so it sits in `vue/`. This applies to a chain, not to the tree at large: `layout/` and `paint/` are incomparable, and what they share is why `text/` and `frame/` exist as units of their own.
 
 ## Data structures
 
@@ -113,12 +115,12 @@ These are plain data: they hold no resources, perform no I/O, and can be tested 
 
 A grapheme, its display width, and its style. **Style is stored inline**, not in a dedup table: a per-frame table makes indices incomparable across frames, which breaks integer `diff`; a per-session table has an unbounded key space once truecolor and arbitrary OSC 8 links are in play, so a log viewer that hyperlinks every row grows it forever. Ratatui's `Cell` stores `fg`, `bg` and `modifier` inline for the same reason.
 
-| Field       | Content                                                                                                                                                                                                                                       |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fg` / `bg` | Structured colour (default / 16 / 256 / truecolor). Colour degradation becomes a pure function.                                                                                                                                               |
-| `attrs`     | Bitmask over the structured SGR attributes, including 1–9 and 53: bold, dim, italic, underline, blink, rapid blink, inverse, conceal, strikethrough and overline. Room for further attributes at one bit each.                                |
-| `extraSgr`  | Ordered active SGR pairs that have no structured field. This exact fallback preserves authored terminal attributes until a product decision promotes one into `attrs` or deliberately stops supporting it.                                    |
-| `link`      | The OSC 8 hyperlink target, nullable. **Required**: `paint/sanitize-ansi.ts` preserves OSC 8 end to end, the hyperlink cases in `tests/paint/sanitize-ansi.test.ts` pin that, and `host/text-measure.ts` accounts for its zero visible width. |
+| Field       | Content                                                                                                                                                                                                                                      |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fg` / `bg` | Structured colour (default / 16 / 256 / truecolor). Colour degradation becomes a pure function.                                                                                                                                              |
+| `attrs`     | Bitmask over the structured SGR attributes, including 1–9 and 53: bold, dim, italic, underline, blink, rapid blink, inverse, conceal, strikethrough and overline. Room for further attributes at one bit each.                               |
+| `extraSgr`  | Ordered active SGR pairs that have no structured field. This exact fallback preserves authored terminal attributes until a product decision promotes one into `attrs` or deliberately stops supporting it.                                   |
+| `link`      | The OSC 8 hyperlink target, nullable. **Required**: `text/sanitize-ansi.ts` preserves OSC 8 end to end, the hyperlink cases in `tests/paint/sanitize-ansi.test.ts` pin that, and `text/text-measure.ts` accounts for its zero visible width. |
 
 `@alcalzone/ansi-tokenize` 0.3.0 pairs SGR 1–4, 7–9 and 53 with their dedicated off codes and carries 5, 6 and other numeric SGR, such as 21, 51, 73 and 11, with the generic reset. The string pipeline therefore carries those numeric forms to the screen. Colon sub-parameter forms need their own parser path: colour forms are recognised, while a form such as `\x1b[4:3m` currently reaches output as raw bytes and causes its following `\x1b[24m` terminator to be lost. The target treats a complete colon-form SGR as one style token and retains an exact fallback for any authored attribute that has no structured representation.
 
@@ -135,7 +137,7 @@ Plain data holding one picture's worth of cells, plus its size. Four properties 
 
 Every node's rectangle and its resolved border and padding insets, whether the node is laid out at all, **and the wrapped lines measurement already produced**. The first three are what `paint/paint.ts` reads off the Yoga node today — `getComputedLayout`, `getComputedBorder`, `getComputedPadding`, `getDisplay`.
 
-The [layout transaction boundary](./rendering-modes.md#layout-transaction-boundary) is vouched direction and already requires that "the layout system must return final geometry for every output region", with intermediate geometry forbidden from escaping into renderer control flow. Wrapped lines are part of that geometry: `host/yoga.ts`'s measure callback already produces them and caches per `(revision, available width, width mode, wrap)`, and `60e96fd` (fixing #283) exists to make measurement and painting share one conservative whole-cell budget. A `ComputedLayout` of rectangles alone forces the painter to wrap a second time, so the two budgets diverge again — which is what #283 was. `tests/host/layout-transaction/single-pass-text-measurement.test.ts` asserts `layoutCalls === 1`.
+The [layout transaction boundary](./rendering-modes.md#layout-transaction-boundary) is vouched direction and already requires that "the layout system must return final geometry for every output region", with intermediate geometry forbidden from escaping into renderer control flow. Wrapped lines are part of that geometry: `layout/yoga.ts`'s measure callback already produces them and caches per `(revision, available width, width mode, wrap)`, and `60e96fd` (fixing #283) exists to make measurement and painting share one conservative whole-cell budget. A `ComputedLayout` of rectangles alone forces the painter to wrap a second time, so the two budgets diverge again — which is what #283 was. `tests/host/layout-transaction/single-pass-text-measurement.test.ts` asserts `layoutCalls === 1`.
 
 Wrapping and measurement therefore live in `text/`, which both `layout/` and `paint/` may import. They cannot live in the painter: the dependency direction forbids `layout/` from importing `paint/`, so a painter-owned cache could never be the shared one.
 

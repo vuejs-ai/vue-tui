@@ -3,7 +3,7 @@ import {
   createManualSuspensionHost,
   createProcessSuspensionHost,
   type ProcessSuspensionAdapter,
-} from "../src/process-suspension.ts";
+} from "../src/terminal/node/process-suspension.ts";
 
 type SuspensionSignal = "SIGTSTP" | "SIGCONT";
 type SuspensionListener = () => void | Promise<void>;

@@ -1,24 +1,32 @@
 import { createRenderer, createVNode, type Component, type VNode } from "vue";
 import { Readable, Writable } from "node:stream";
 import { createRoot, type TuiNode } from "./host/nodes.ts";
-import { runLayoutTransaction } from "./host/layout-transaction.ts";
-import { attachYoga, detachYoga } from "./host/yoga.ts";
-import { buildNodeOps } from "./host/node-ops.ts";
-import { createHostYogaAllocationLedger } from "./host/yoga-allocation-ledger.ts";
+import { runLayoutTransaction } from "./layout/layout-transaction.ts";
+import { attachYoga, detachYoga } from "./layout/yoga.ts";
+import { buildNodeOps } from "./vue/node-ops.ts";
+import { createHostYogaAllocationLedger } from "./layout/yoga-allocation-ledger.ts";
 import { paint } from "./paint/paint.ts";
 import { findStatics, prepareStaticOutput } from "./paint/static-channel.ts";
-import { AppContextKey, StdinContextKey, type AppContext, type StdinContext } from "./context.ts";
-import { createInputDispatcher } from "./io/input-subscriptions.ts";
-import { createRenderedTargetController, setRenderedTargetController } from "./rendered-target.ts";
-import { createInternalFocusController } from "./focus/focus-controller.ts";
-import { InternalFocusControllerKey } from "./focus/focus-context.ts";
-import { isErrorInput, messageForNonError } from "./error-value.ts";
+import {
+  AppContextKey,
+  StdinContextKey,
+  type AppContext,
+  type StdinContext,
+} from "./vue/context.ts";
+import { createInputDispatcher } from "./input/input-subscriptions.ts";
+import {
+  createRenderedTargetController,
+  setRenderedTargetController,
+} from "./session/rendered-target.ts";
+import { createInternalFocusController } from "./session/focus-controller.ts";
+import { InternalFocusControllerKey } from "./vue/focus-context.ts";
+import { isErrorInput, messageForNonError } from "./vue/error-value.ts";
 import {
   InternalRenderSessionKey,
   createStringRenderSessionService,
   type InternalStringRenderSessionService,
 } from "./render-session.ts";
-import { MAX_LAYOUT_VALUE } from "./numeric-limits.ts";
+import { MAX_LAYOUT_VALUE } from "./layout/numeric-limits.ts";
 import { resolveTerminalStyle } from "./paint/terminal-style.ts";
 import { normalizeColorOption, type ColorProfile } from "./color-profile.ts";
 

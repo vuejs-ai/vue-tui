@@ -2,7 +2,7 @@ import { describe, expect, test, vi } from "vite-plus/test";
 import {
   probeControllingTerminalSize,
   type TerminalSizeProbeDependencies,
-} from "../src/terminal-size-probe.ts";
+} from "../src/terminal/node/terminal-size-probe.ts";
 
 function createDependencies(
   overrides: Partial<TerminalSizeProbeDependencies> = {},

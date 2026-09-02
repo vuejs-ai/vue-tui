@@ -13,45 +13,48 @@ import { writeSync as fsWriteSync } from "node:fs";
 import type { Readable, Writable } from "node:stream";
 import { onExit } from "signal-exit";
 import ansiEscapes from "ansi-escapes";
-import { INTERNAL_KITTY_KEYBOARD, createKittyKeyboardController } from "./io/kitty-keyboard.ts";
+import {
+  INTERNAL_KITTY_KEYBOARD,
+  createKittyKeyboardController,
+} from "./terminal/kitty-keyboard.ts";
 import {
   createStdinController,
   hasRawInputCapability,
   type StdinController,
-} from "./io/stdin-controller.ts";
+} from "./terminal/stdin-controller.ts";
 import { createRoot, type TuiNode, type TuiRoot, type TuiStatic } from "./host/nodes.ts";
-import { runLayoutTransaction, type LayoutHeightConstraint } from "./host/layout-transaction.ts";
-import { attachYoga, detachYoga } from "./host/yoga.ts";
-import { buildNodeOps } from "./host/node-ops.ts";
+import { runLayoutTransaction, type LayoutHeightConstraint } from "./layout/layout-transaction.ts";
+import { attachYoga, detachYoga } from "./layout/yoga.ts";
+import { buildNodeOps } from "./vue/node-ops.ts";
 import {
   createHostYogaAllocationLedger,
   type HostYogaAllocationLedger,
-} from "./host/yoga-allocation-ledger.ts";
-import { createCommitScheduler } from "./scheduler.ts";
+} from "./layout/yoga-allocation-ledger.ts";
+import { createCommitScheduler } from "./session/scheduler.ts";
 import { paint, releasePaintCaches } from "./paint/paint.ts";
-import { sanitizeAnsiMultiline } from "./paint/sanitize-ansi.ts";
+import { sanitizeAnsiMultiline } from "./text/sanitize-ansi.ts";
 import { resolveTerminalStyle } from "./paint/terminal-style.ts";
 import {
   findStatics,
   prepareStaticOutput,
   type PreparedStaticOutput,
 } from "./paint/static-channel.ts";
-import { createFrameWriter } from "./io/frame-writer.ts";
+import { createFrameWriter } from "./surface/frame-writer.ts";
 import {
   createOutputCoordinator,
   type CoordinatedWriteResult,
   type OutputCoordinator,
-} from "./io/output-coordinator.ts";
+} from "./terminal/output-coordinator.ts";
 import {
   createMountedStreamLifecycle,
   type MountedStreamLifecycle,
-} from "./io/stream-lifecycle.ts";
-import { registerConsoleSink, type ConsoleSinkRegistration } from "./io/console-manager.ts";
-import { hideCursorEscape, nextLineEscape } from "./io/cursor-helpers.ts";
-import { INTERNAL_RENDER_OBSERVER } from "./io/render-observer.ts";
-import { bsu, esu, shouldSynchronize } from "./io/write-synchronized.ts";
-import { emitTestEvent, RUNTIME_TEST_EVENT } from "./test-events.ts";
-import { AppContextKey, StdinContextKey, type AppContext } from "./context.ts";
+} from "./terminal/stream-lifecycle.ts";
+import { registerConsoleSink, type ConsoleSinkRegistration } from "./terminal/console-manager.ts";
+import { hideCursorEscape, nextLineEscape } from "./surface/cursor-helpers.ts";
+import { INTERNAL_RENDER_OBSERVER } from "./api/render-observer.ts";
+import { bsu, esu, shouldSynchronize } from "./terminal/write-synchronized.ts";
+import { emitTestEvent, RUNTIME_TEST_EVENT } from "./api/test-events.ts";
+import { AppContextKey, StdinContextKey, type AppContext } from "./vue/context.ts";
 import {
   InternalRenderSessionKey,
   createLiveRenderSessionService,
@@ -69,7 +72,7 @@ import {
   probeControllingTerminalSize,
   type TerminalSizeProbe,
   type TerminalSizeProbeResult,
-} from "./terminal-size-probe.ts";
+} from "./terminal/node/terminal-size-probe.ts";
 import {
   devState,
   DevStateKey,
@@ -78,29 +81,39 @@ import {
   registerDevApp,
   resetDevState,
   unregisterDevApp,
-} from "./hmr.ts";
-import { createDevOverlayWrapper, DevOverlayPresentationKey } from "./overlay.ts";
-import { createRenderedTargetController, setRenderedTargetController } from "./rendered-target.ts";
+} from "./dev/hmr.ts";
+import { createDevOverlayWrapper, DevOverlayPresentationKey } from "./dev/overlay.ts";
+import {
+  createRenderedTargetController,
+  setRenderedTargetController,
+} from "./session/rendered-target.ts";
 import {
   createInternalGeometryService,
   setInternalGeometryService,
   type InternalGeometryPaintFrame,
-} from "./geometry/geometry-service.ts";
+} from "./session/geometry-service.ts";
 import {
   createInternalFocusController,
   type InternalFocusController,
-} from "./focus/focus-controller.ts";
-import { InternalFocusControllerKey } from "./focus/focus-context.ts";
-import { formatErrorForStderr, isErrorInput, messageForNonError } from "./error-value.ts";
-import { INTERNAL_SUSPENSION_HOST, processSuspensionHost } from "./process-suspension.ts";
-import { getInternalMountOptions, type InternalMountOptions } from "./internal-mount-options.ts";
+} from "./session/focus-controller.ts";
+import { InternalFocusControllerKey } from "./vue/focus-context.ts";
+import { formatErrorForStderr } from "./session/error-report.ts";
+import { isErrorInput, messageForNonError } from "./vue/error-value.ts";
+import {
+  INTERNAL_SUSPENSION_HOST,
+  processSuspensionHost,
+} from "./terminal/node/process-suspension.ts";
+import {
+  getInternalMountOptions,
+  type InternalMountOptions,
+} from "./api/internal-mount-options.ts";
 import { normalizeColorOption, type ColorProfile } from "./color-profile.ts";
 
 export {
   createInternalMountOptions,
   type InternalMountOptions,
   type InternalMountOptionsInput,
-} from "./internal-mount-options.ts";
+} from "./api/internal-mount-options.ts";
 
 export interface MountOptions {
   readonly stdout?: Writable;

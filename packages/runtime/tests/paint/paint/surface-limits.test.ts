@@ -1,9 +1,12 @@
 import Yoga from "yoga-layout";
 import { expect, test } from "vite-plus/test";
-import type { AppContext } from "../../../src/context.ts";
+import type { AppContext } from "../../../src/vue/context.ts";
 import { createRoot } from "../../../src/host/nodes.ts";
-import { attachYoga, detachYoga } from "../../../src/host/yoga.ts";
-import { MAX_PAINT_SURFACE_CELLS, assertPaintSurfaceSize } from "../../../src/numeric-limits.ts";
+import { attachYoga, detachYoga } from "../../../src/layout/yoga.ts";
+import {
+  MAX_PAINT_SURFACE_CELLS,
+  assertPaintSurfaceSize,
+} from "../../../src/paint/surface-limits.ts";
 import { paint, releasePaintCaches } from "../../../src/paint/paint.ts";
 import { createTerminalStyle } from "../../../src/paint/terminal-style.ts";
 

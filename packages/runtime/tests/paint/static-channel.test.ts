@@ -1,9 +1,9 @@
 import { expect, test } from "vite-plus/test";
-import type { AppContext } from "../../src/context.ts";
-import { runLayoutTransaction } from "../../src/host/layout-transaction.ts";
+import type { AppContext } from "../../src/vue/context.ts";
+import { runLayoutTransaction } from "../../src/layout/layout-transaction.ts";
 import { createBox, createComment, createRoot, createStatic } from "../../src/host/nodes.ts";
-import { buildNodeOps } from "../../src/host/node-ops.ts";
-import { attachYoga, detachYoga } from "../../src/host/yoga.ts";
+import { buildNodeOps } from "../../src/vue/node-ops.ts";
+import { attachYoga, detachYoga } from "../../src/layout/yoga.ts";
 import {
   findStatics,
   prepareStaticOutput as prepareStaticOutputForStyle,

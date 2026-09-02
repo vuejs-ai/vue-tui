@@ -1,6 +1,6 @@
 import Yoga from "yoga-layout";
 import { expect, test } from "vite-plus/test";
-import { getTextMeasureCellWidth } from "../../../src/host/yoga.ts";
+import { getTextMeasureCellWidth } from "../../../src/layout/yoga.ts";
 
 test.each([
   {

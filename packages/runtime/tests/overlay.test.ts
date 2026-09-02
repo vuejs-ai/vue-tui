@@ -1,10 +1,10 @@
 import { test, expect, afterEach, vi } from "vite-plus/test";
 import { defineComponent, h } from "vue";
 import { PassThrough } from "node:stream";
-import { connectDevtools, devState, resetDevState } from "../src/hmr.ts";
+import { connectDevtools, devState, resetDevState } from "../src/dev/hmr.ts";
 import { createApp } from "../src/render.ts";
 import { createInternalMountOptions } from "../src/render.ts";
-import { Text } from "../src/index.ts";
+import { Text } from "../src/api/index.ts";
 
 // Guards against the Vue "[Vue warn]: Non-function value encountered for default
 // slot" warning that the dev overlay used to trigger by passing ARRAY children to

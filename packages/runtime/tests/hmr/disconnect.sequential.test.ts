@@ -13,7 +13,7 @@ import {
   VueTuiDevSessionConflictError,
   devState,
   initHmrBridge,
-} from "../../src/hmr.ts";
+} from "../../src/dev/hmr.ts";
 
 afterEach(() => disconnectDevtools());
 
@@ -159,9 +159,9 @@ test("concurrent session connect fails without overwriting the first", async () 
   });
   expect(() => isVueTuiDevSessionConflictError(hostile)).not.toThrow();
   expect(isVueTuiDevSessionConflictError(hostile)).toBe(false);
-  const copyUrl = new URL("../../src/hmr.ts", import.meta.url);
+  const copyUrl = new URL("../../src/dev/hmr.ts", import.meta.url);
   copyUrl.searchParams.set("copy", "session-conflict");
-  const copy = (await import(copyUrl.href)) as typeof import("../../src/hmr.ts");
+  const copy = (await import(copyUrl.href)) as typeof import("../../src/dev/hmr.ts");
   const crossCopyConflict = new copy.VueTuiDevSessionConflictError();
   expect(crossCopyConflict).not.toBeInstanceOf(VueTuiDevSessionConflictError);
   expect(isVueTuiDevSessionConflictError(crossCopyConflict)).toBe(true);

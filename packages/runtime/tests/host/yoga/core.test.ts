@@ -1,5 +1,5 @@
 import { expect, test } from "vite-plus/test";
-import { isYogaProp } from "../../../src/host/yoga.ts";
+import { isYogaProp } from "../../../src/layout/yoga.ts";
 
 test("isYogaProp recognises layout props and rejects style props", () => {
   expect(isYogaProp("padding")).toBe(true);

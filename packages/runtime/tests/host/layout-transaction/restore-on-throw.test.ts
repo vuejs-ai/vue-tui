@@ -4,10 +4,10 @@ import { expect, test } from "vite-plus/test";
 import {
   isContentLayoutGuarded,
   runLayoutTransaction,
-} from "../../../src/host/layout-transaction.ts";
-import { attachYoga, detachYoga } from "../../../src/host/yoga.ts";
+} from "../../../src/layout/layout-transaction.ts";
+import { attachYoga, detachYoga } from "../../../src/layout/yoga.ts";
 import { createBox, createRoot, createText } from "../../../src/host/nodes.ts";
-import type { AppContext } from "../../../src/context.ts";
+import type { AppContext } from "../../../src/vue/context.ts";
 
 // yoga-layout YGEnums (generated/YGEnums.ts) — Display: Flex=0 (visible), None=1.
 const DISPLAY_NONE = 1;

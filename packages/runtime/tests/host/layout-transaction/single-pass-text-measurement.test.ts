@@ -1,9 +1,9 @@
 import Yoga from "yoga-layout";
 import { expect, test } from "vite-plus/test";
-import type { AppContext } from "../../../src/context.ts";
-import { runLayoutTransaction } from "../../../src/host/layout-transaction.ts";
+import type { AppContext } from "../../../src/vue/context.ts";
+import { runLayoutTransaction } from "../../../src/layout/layout-transaction.ts";
 import { createBox, createRoot, createText, createTextLeaf } from "../../../src/host/nodes.ts";
-import { attachYoga, bindTextMeasure, detachYoga } from "../../../src/host/yoga.ts";
+import { attachYoga, bindTextMeasure, detachYoga } from "../../../src/layout/yoga.ts";
 
 test("fractional text measurement completes in one layout call", () => {
   const root = createRoot({} as AppContext);

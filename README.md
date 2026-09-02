@@ -130,11 +130,11 @@ renderer-owned facts. [Package guide](./packages/runtime).
 
 ### Components
 
-| Component                                                  | Import from                   | Description                                                                           |
-| ---------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------- |
-| [`<Box>`](./packages/runtime/src/components/box.vue)       | `@vue-tui/runtime`            | Layout container — flex, size, spacing, border, background, clipping, and `v-show`    |
-| [`<Text>`](./packages/runtime/src/components/text.vue)     | `@vue-tui/runtime`            | Text — foreground/background color, six modifiers, wrapping, truncation, and `v-show` |
-| [`<Static>`](./packages/runtime/src/components/static.vue) | **`@vue-tui/runtime/inline`** | Commits a mounted subtree to Inline terminal history                                  |
+| Component                                                      | Import from                   | Description                                                                           |
+| -------------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------- |
+| [`<Box>`](./packages/runtime/src/vue/components/box.vue)       | `@vue-tui/runtime`            | Layout container — flex, size, spacing, border, background, clipping, and `v-show`    |
+| [`<Text>`](./packages/runtime/src/vue/components/text.vue)     | `@vue-tui/runtime`            | Text — foreground/background color, six modifiers, wrapping, truncation, and `v-show` |
+| [`<Static>`](./packages/runtime/src/vue/components/static.vue) | **`@vue-tui/runtime/inline`** | Commits a mounted subtree to Inline terminal history                                  |
 
 `Box` and `Text` have closed prop surfaces: unknown props, misspellings, browser attributes, and listeners such as `@click` are rejected at runtime instead of silently ignored. The full prop tables are in the [Runtime guide](./packages/runtime/README.md#components).
 
@@ -160,14 +160,14 @@ import { Static } from "@vue-tui/runtime/inline";
 
 Each one must be called inside a mounted render tree.
 
-| Composable                                                                    | Returns                                     | Description                                                                    |
-| ----------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------ |
-| [`useInput(handler, opts?)`](./packages/runtime/src/composables/useInput.ts)  | —                                           | Normalized text, paste, and key events; `opts.isActive` gates the subscription |
-| [`useFocus(target?)`](./packages/runtime/src/composables/useFocus.ts)         | `{ isFocused, focus, blur }`                | One explicit focus identity, optionally bound to a rendered component          |
-| [`useApp()`](./packages/runtime/src/composables/useApp.ts)                    | `{ exit }`                                  | Request normal or error exit from inside the tree                              |
-| [`useLayoutSize()`](./packages/runtime/src/composables/use-layout-size.ts)    | `{ width, height }`                         | Readonly reactive root-layout size; `height` may be `Infinity`                 |
-| [`useStdin()`](./packages/runtime/src/composables/useStdin.ts)                | `{ stdin, isRawModeSupported, setRawMode }` | Mounted stdin plus an independently owned raw-mode hold                        |
-| [`useBoxMetrics(ref)`](./packages/runtime/src/composables/use-box-metrics.ts) | `{ width, height, left, top, hasMeasured }` | Parent-relative metrics for one directly referenced `<Box>`                    |
+| Composable                                                                        | Returns                                     | Description                                                                    |
+| --------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------ |
+| [`useInput(handler, opts?)`](./packages/runtime/src/vue/composables/useInput.ts)  | —                                           | Normalized text, paste, and key events; `opts.isActive` gates the subscription |
+| [`useFocus(target?)`](./packages/runtime/src/vue/composables/useFocus.ts)         | `{ isFocused, focus, blur }`                | One explicit focus identity, optionally bound to a rendered component          |
+| [`useApp()`](./packages/runtime/src/vue/composables/useApp.ts)                    | `{ exit }`                                  | Request normal or error exit from inside the tree                              |
+| [`useLayoutSize()`](./packages/runtime/src/vue/composables/use-layout-size.ts)    | `{ width, height }`                         | Readonly reactive root-layout size; `height` may be `Infinity`                 |
+| [`useStdin()`](./packages/runtime/src/vue/composables/useStdin.ts)                | `{ stdin, isRawModeSupported, setRawMode }` | Mounted stdin plus an independently owned raw-mode hold                        |
+| [`useBoxMetrics(ref)`](./packages/runtime/src/vue/composables/use-box-metrics.ts) | `{ width, height, left, top, hasMeasured }` | Parent-relative metrics for one directly referenced `<Box>`                    |
 
 `useInput()` delivers one frozen event per input:
 

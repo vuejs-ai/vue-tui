@@ -4,7 +4,7 @@ import {
   createKittyKeyboardController,
   type StartKittyQueryResponseDetection,
   type WriteKittyOutput,
-} from "../../src/io/kitty-keyboard.ts";
+} from "../../src/terminal/kitty-keyboard.ts";
 
 const noQueryDetection: StartKittyQueryResponseDetection = () => () => {};
 
