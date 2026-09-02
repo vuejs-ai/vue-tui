@@ -27,21 +27,7 @@ Every step inside a task is meant to land on its own and leave the suite green. 
 
 ## 1. Rename the input path
 
-**Today.** Three of the four stages on the input path carry names that describe something else. `io/input-parser.ts` exports `InputEvent = string | { readonly paste: string }` — a piece of text, not an event — while the structured fact it normalizes into is `NormalizedInputFact` in `io/normalized-input.ts`. `InternalInputSubscriptions` registers and snapshots subscribers, but `io/stdin-ingress.ts` invokes them itself and also owns partial UTF-8 bytes.
-
-**Steps.**
-
-1. `InputEvent` → `InputSequence` in `io/input-parser.ts` and its three consumers (`io/normalized-input.ts`, `io/stdin-ingress.ts`, `tests/io/input-parser.test.ts`). This must come first: the target name is occupied, so renaming in the other order collides.
-2. `NormalizedInputFact` → `InputEvent` across its eight files (`composables/useInput.ts`, `io/input-subscriptions.ts`, `io/normalized-input.ts`, `io/public-input.ts`, `io/stdin-controller.ts`, `io/stdin-ingress.ts`, and two tests), and `normalizeInputEvent` → `normalizeInputSequence`, which is what it now takes.
-3. `InternalInputSubscriptions` → `InputDispatcher` and `createInternalInputSubscriptions` → `createInputDispatcher`. The `Internal` prefix marks "not exported from `index.ts`", which every name in this directory already is.
-4. Give `InputDispatcher` the capture-and-deliver operation that invokes a fact's original recipient snapshot. `stdin-ingress.ts` coordinates parsing and asks the dispatcher to deliver; clearing subscriptions during one handler cannot strip peer handlers of the same fact.
-5. Describe `InputParser` as a decoded-character state machine. Partial UTF-8 bytes remain the ingress's responsibility.
-
-**Done when.** `InputEvent` names the structured fact; the raw piece is `InputSequence`; `InputDispatcher` owns subscriber capture and delivery; `InputParser` holds only partial decoded terminal sequences.
-
-**Verify.** `vp run check`. The renames do not change event payloads, and a focused test proves that clearing the dispatcher during one handler still delivers the current fact to its captured peers.
-
-**Watch for.** `TuiInputEvent` is public and unchanged. The vouched entry that governs the input payload names only the public types and keeps parser names private, so renaming an internal type does not touch it.
+`InputSequence` (`io/input-parser.ts`) names the complete raw piece, `InputEvent` (`io/normalized-input.ts`) the structured fact, and `InputDispatcher` (`io/input-subscriptions.ts`) owns subscriber capture and delivery. `InputParser` holds partial decoded terminal sequences; task 5 moves byte decoding from the shared stdin ingress under `input/`.
 
 ## 2. Move the directories
 

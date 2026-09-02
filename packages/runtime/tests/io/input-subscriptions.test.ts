@@ -1,33 +1,33 @@
 import { describe, expect, test } from "vite-plus/test";
-import { normalizeInputEvent } from "../../src/io/normalized-input.ts";
+import { normalizeInputSequence } from "../../src/io/normalized-input.ts";
 import {
-  createInternalInputSubscriptions,
+  createInputDispatcher,
   type InternalInputDemandLease,
 } from "../../src/io/input-subscriptions.ts";
 
-const fact = normalizeInputEvent("a")!;
+const fact = normalizeInputSequence("a")!;
 
 describe("input subscriptions", () => {
   test("broadcasts one captured fact to every subscriber in registration order", () => {
     const calls: string[] = [];
-    const subscriptions = createInternalInputSubscriptions();
+    const subscriptions = createInputDispatcher();
     subscriptions.subscribe(() => calls.push("first"));
     subscriptions.subscribe(() => calls.push("second"));
 
-    for (const subscriber of subscriptions.capture()) subscriber(fact);
+    subscriptions.deliver(fact, subscriptions.capture());
 
     expect(calls).toEqual(["first", "second"]);
   });
 
   test("a captured subscriber remains eligible for that fact after ending", () => {
     const calls: string[] = [];
-    const subscriptions = createInternalInputSubscriptions();
+    const subscriptions = createInputDispatcher();
     const first = subscriptions.subscribe(() => calls.push("first"));
     subscriptions.subscribe(() => calls.push("second"));
     const captured = subscriptions.capture();
 
     first.end();
-    for (const subscriber of captured) subscriber(fact);
+    subscriptions.deliver(fact, captured);
 
     expect(calls).toEqual(["first", "second"]);
     expect(subscriptions.capture()).toHaveLength(1);
@@ -36,7 +36,7 @@ describe("input subscriptions", () => {
   test("acquires before publication and releases exactly once", () => {
     const transitions: string[] = [];
     const demands: InternalInputDemandLease[] = [];
-    const subscriptions = createInternalInputSubscriptions({
+    const subscriptions = createInputDispatcher({
       acquire() {
         transitions.push("acquire");
         const demand = {
@@ -62,7 +62,7 @@ describe("input subscriptions", () => {
     const calls: string[] = [];
     const transitions: string[] = [];
     let demandId = 0;
-    const subscriptions = createInternalInputSubscriptions({
+    const subscriptions = createInputDispatcher({
       acquire() {
         const id = ++demandId;
         return {
@@ -75,7 +75,7 @@ describe("input subscriptions", () => {
 
     const first = subscriptions.subscribe(subscriber);
     const second = subscriptions.subscribe(subscriber);
-    for (const captured of subscriptions.capture()) captured(fact);
+    subscriptions.deliver(fact, subscriptions.capture());
     expect(calls).toEqual(["called", "called"]);
 
     first.end();
@@ -90,7 +90,7 @@ describe("input subscriptions", () => {
   test("rolls back a failed activation and clears every surviving demand", () => {
     const transitions: string[] = [];
     let fail = true;
-    const subscriptions = createInternalInputSubscriptions({
+    const subscriptions = createInputDispatcher({
       acquire() {
         return {
           activate() {
@@ -118,5 +118,36 @@ describe("input subscriptions", () => {
     expect(transitions).toEqual(["release", "activate", "activate", "release", "release"]);
     expect(subscriptions.capture()).toEqual([]);
     expect(() => subscriptions.subscribe(() => {})).toThrow(/disposed/);
+  });
+
+  test("a subscriber that disposes the host mid-delivery does not strip later peers", () => {
+    const calls: string[] = [];
+    const subscriptions = createInputDispatcher();
+    subscriptions.subscribe(() => {
+      calls.push("first");
+      subscriptions.clear();
+    });
+    subscriptions.subscribe(() => calls.push("second"));
+
+    subscriptions.deliver(fact, subscriptions.capture());
+
+    expect(calls).toEqual(["first", "second"]);
+  });
+
+  test("delivers every captured subscriber before throwing the first error", () => {
+    const calls: string[] = [];
+    const subscriptions = createInputDispatcher();
+    subscriptions.subscribe(() => {
+      calls.push("first");
+      throw new Error("first failure");
+    });
+    subscriptions.subscribe(() => {
+      calls.push("second");
+      throw new Error("second failure");
+    });
+    subscriptions.subscribe(() => calls.push("third"));
+
+    expect(() => subscriptions.deliver(fact, subscriptions.capture())).toThrow("first failure");
+    expect(calls).toEqual(["first", "second", "third"]);
   });
 });

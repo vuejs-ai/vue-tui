@@ -8,7 +8,7 @@ import { createHostYogaAllocationLedger } from "./host/yoga-allocation-ledger.ts
 import { paint } from "./paint/paint.ts";
 import { findStatics, prepareStaticOutput } from "./paint/static-channel.ts";
 import { AppContextKey, StdinContextKey, type AppContext, type StdinContext } from "./context.ts";
-import { createInternalInputSubscriptions } from "./io/input-subscriptions.ts";
+import { createInputDispatcher } from "./io/input-subscriptions.ts";
 import { createRenderedTargetController, setRenderedTargetController } from "./rendered-target.ts";
 import { createInternalFocusController } from "./focus/focus-controller.ts";
 import { InternalFocusControllerKey } from "./focus/focus-context.ts";
@@ -374,7 +374,7 @@ function createNoOpStdinContext(stdin: NodeJS.ReadStream): StdinContext {
   return {
     stdin,
     isRawModeSupported: false,
-    inputSubscriptions: createInternalInputSubscriptions(),
+    inputSubscriptions: createInputDispatcher(),
     acquirePublicRawMode: () => () => {},
   };
 }

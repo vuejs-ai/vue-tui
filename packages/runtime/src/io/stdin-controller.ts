@@ -5,10 +5,10 @@ import {
   type SharedStdinIngress,
   type SharedStdinSubscription,
 } from "./stdin-ingress.ts";
-import type { NormalizedInputFact } from "./normalized-input.ts";
+import type { InputEvent } from "./normalized-input.ts";
 import { projectPublicInputEvent } from "./public-input.ts";
 import {
-  createInternalInputSubscriptions,
+  createInputDispatcher,
   type InternalInputDemandLease,
   type InternalInputSubscriber,
 } from "./input-subscriptions.ts";
@@ -117,7 +117,7 @@ export function createStdinController(
 ): StdinController {
   const { appCtx } = opts;
   let controller!: StdinController;
-  const inputSubscriptions = createInternalInputSubscriptions({
+  const inputSubscriptions = createInputDispatcher({
     acquire() {
       return controller.acquireSemanticInput();
     },
@@ -137,7 +137,7 @@ export function createStdinController(
     | ApplicationInputSnapshot
     | BootstrapApplicationInputSnapshot;
   interface PendingApplicationInput {
-    readonly fact: NormalizedInputFact;
+    readonly fact: InputEvent;
     readonly snapshot: CapturedApplicationInputSnapshot;
   }
   let sharedSubscription: SharedStdinSubscription;
@@ -449,10 +449,7 @@ export function createStdinController(
     return pendingBootstrapInputSnapshot;
   }
 
-  function acceptSharedInput(
-    fact: NormalizedInputFact,
-    snapshot: CapturedApplicationInputSnapshot,
-  ): void {
+  function acceptSharedInput(fact: InputEvent, snapshot: CapturedApplicationInputSnapshot): void {
     if (disposed || suspended) return;
     pendingApplicationInput.push({ fact, snapshot });
     flushPendingApplicationInput();
@@ -483,7 +480,7 @@ export function createStdinController(
     }
   }
 
-  function isCtrlC(fact: NormalizedInputFact): boolean {
+  function isCtrlC(fact: InputEvent): boolean {
     const event = projectPublicInputEvent(fact);
     const key = event?.type === "paste" ? undefined : event?.key;
     if (!key || key.character !== "c") return false;
@@ -491,28 +488,14 @@ export function createStdinController(
     return ctrl && !shift && !alt && !meta && !superKey && !hyper;
   }
 
-  function processInputEvent(event: NormalizedInputFact, snapshot: ApplicationInputSnapshot): void {
+  function processInputEvent(event: InputEvent, snapshot: ApplicationInputSnapshot): void {
     if (suspended || disposed || !snapshot.managedInputActive) return;
     if (opts.exitOnCtrlC && isCtrlC(event)) {
       appCtx.exit();
       return;
     }
 
-    // The subscriber list was captured when this parser-defined fact began.
-    // Changes made by one handler affect re-entrant or later facts, not peers
-    // that were already eligible for this one.
-    let firstError: unknown;
-    let failed = false;
-    for (const subscriber of snapshot.subscribers) {
-      try {
-        subscriber(event);
-      } catch (error) {
-        if (failed) continue;
-        failed = true;
-        firstError = error;
-      }
-    }
-    if (failed) throw firstError;
+    inputSubscriptions.deliver(event, snapshot.subscribers);
   }
 
   sharedSubscription = sharedIngress.subscribe(captureApplicationInputSnapshot, acceptSharedInput);

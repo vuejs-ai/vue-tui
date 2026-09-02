@@ -1,10 +1,10 @@
 import { describe, test, expect } from "vite-plus/test";
-import type { InputEvent } from "../../src/io/input-parser.ts";
+import type { InputSequence } from "../../src/io/input-parser.ts";
 import { createInputParser } from "../../src/io/input-parser.ts";
 
-const parseChunks = (chunks: string[]): InputEvent[] => {
+const parseChunks = (chunks: string[]): InputSequence[] => {
   const parser = createInputParser();
-  const events: InputEvent[] = [];
+  const events: InputSequence[] = [];
   for (const chunk of chunks) {
     events.push(...parser.push(chunk));
   }
