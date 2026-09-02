@@ -1,6 +1,6 @@
 import { PassThrough } from "node:stream";
 import { expect, test, vi } from "vite-plus/test";
-import { createMountedStreamLifecycle } from "../../src/io/stream-lifecycle.ts";
+import { createMountedStreamLifecycle } from "../../src/terminal/stream-lifecycle.ts";
 
 test("shared borrowed streams use one physical observer set and release it with the last app", () => {
   const stdin = new PassThrough();

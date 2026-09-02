@@ -1,0 +1,189 @@
+import {
+  inject,
+  isRef,
+  onScopeDispose,
+  toValue,
+  unref,
+  watch,
+  type MaybeRef,
+  type MaybeRefOrGetter,
+} from "vue";
+import { AppContextKey, StdinContextKey } from "../context.ts";
+import { isErrorInput, messageForNonError } from "../error-value.ts";
+import type { InputEvent } from "../../input/normalized-input.ts";
+import { projectPublicInputEvent, type TuiInputEvent } from "../public-input.ts";
+import type { InternalInputSubscription } from "../../input/input-subscriptions.ts";
+
+type InputHandler = (event: TuiInputEvent) => void;
+
+function validateHandler(handler: unknown): asserts handler is InputHandler {
+  if (typeof handler !== "function") {
+    throw new TypeError("useInput() handler must be a function");
+  }
+}
+
+function validateHandlerSource(handler: unknown): asserts handler is MaybeRef<InputHandler> {
+  if (typeof handler === "function") return;
+  if (!isRef(handler)) validateHandler(handler);
+}
+
+function validateOptions(
+  options: unknown,
+): asserts options is { readonly isActive?: MaybeRefOrGetter<boolean> } | undefined {
+  if (options === undefined) return;
+  if (
+    typeof options !== "object" ||
+    options === null ||
+    Object.getPrototypeOf(options) !== Object.prototype
+  ) {
+    throw new TypeError("useInput() options must be a plain object");
+  }
+  const keys = Reflect.ownKeys(options);
+  if (keys.some((key) => key !== "isActive")) {
+    throw new TypeError('useInput() options only supports the "isActive" property');
+  }
+}
+
+function readIsActive(source: MaybeRefOrGetter<boolean>): boolean {
+  const value: unknown = toValue(source);
+  if (typeof value !== "boolean") {
+    throw new TypeError("useInput() isActive must resolve to a boolean");
+  }
+  return value;
+}
+
+/**
+ * Subscribe to normalized text, key, and paste input for the current app.
+ *
+ * - Every active subscription receives every event; return values never consume
+ *   one or affect peers.
+ * - Only `type: "key"` guarantees `event.key`; text carries one only when the
+ *   terminal supplied it.
+ * - `isActive` owns managed-input demand, so an inactive subscription holds no
+ *   input listener or optional terminal resources.
+ * - A handler ref is resolved per event, so handlers swap without resubscribing.
+ *
+ * @example Handle typed text and a named key
+ * ```tsx
+ * useInput((event) => {
+ *   if (event.type === "text") append(event.text);
+ *   else if (event.type === "key" && event.key.name === "enter") submit();
+ * });
+ * ```
+ *
+ * @example Listen only while this component owns focus
+ * ```tsx
+ * const focus = useFocus();
+ * useInput(handler, { isActive: focus.isFocused });
+ * ```
+ */
+export function useInput(
+  handler: MaybeRef<InputHandler>,
+  options?: { readonly isActive?: MaybeRefOrGetter<boolean> },
+): void {
+  validateHandlerSource(handler);
+  validateOptions(options);
+  const resolveHandler = typeof handler === "function" ? () => handler : () => unref(handler);
+  const app = inject(AppContextKey);
+  const stdin = inject(StdinContextKey);
+  if (!app || !stdin) throw new Error("useInput() must be called inside a vue-tui render tree");
+  const application = app;
+
+  let desiredActive = false;
+  let attached = false;
+  let registration: InternalInputSubscription | undefined;
+  let reconciling = false;
+  let reconcileRequested = false;
+
+  function listener(fact: InputEvent) {
+    try {
+      const event = projectPublicInputEvent(fact);
+      if (!event) return;
+      const currentHandler = resolveHandler();
+      validateHandler(currentHandler);
+      currentHandler(event);
+    } catch (error) {
+      const fatalError = isErrorInput(error) ? error : new Error(messageForNonError(error));
+      application.exit(fatalError);
+      throw fatalError;
+    }
+  }
+
+  function reconcileAttachment() {
+    if (reconciling) {
+      reconcileRequested = true;
+      return;
+    }
+    reconciling = true;
+    let firstError: unknown;
+    let hasError = false;
+    try {
+      while (true) {
+        reconcileRequested = false;
+        try {
+          if (desiredActive && !attached) {
+            registration = stdin!.inputSubscriptions.subscribe(listener);
+            attached = true;
+          } else if (!desiredActive && attached) {
+            attached = false;
+            registration?.end();
+            registration = undefined;
+          }
+        } catch (error) {
+          if (hasError) break;
+          firstError = error;
+          hasError = true;
+          if (!reconcileRequested) break;
+        }
+        if (!reconcileRequested && desiredActive === attached) break;
+      }
+    } finally {
+      reconciling = false;
+    }
+    if (hasError) throw firstError;
+  }
+
+  const isActive = options?.isActive === undefined ? true : options.isActive;
+  // Register cleanup before the immediate watcher can activate managed input.
+  // Vue clears the current setup scope while handling a synchronous watcher
+  // failure, so registering afterward would itself warn and write to stderr on
+  // an expected unavailable-input exit.
+  onScopeDispose(() => {
+    desiredActive = false;
+    reconcileAttachment();
+  });
+
+  if (typeof isActive !== "function" && !isRef(isActive)) {
+    desiredActive = readIsActive(isActive);
+    reconcileAttachment();
+    return;
+  }
+
+  watch(
+    () => {
+      try {
+        return { ok: true, value: readIsActive(isActive) } as const;
+      } catch (error) {
+        return { ok: false, error } as const;
+      }
+    },
+    (resolution) => {
+      if (!resolution.ok) {
+        desiredActive = false;
+        try {
+          reconcileAttachment();
+        } finally {
+          app.exit(
+            isErrorInput(resolution.error)
+              ? resolution.error
+              : new Error(messageForNonError(resolution.error)),
+          );
+        }
+        return;
+      }
+      desiredActive = resolution.value;
+      reconcileAttachment();
+    },
+    { immediate: true, flush: "sync" },
+  );
+}

@@ -1,10 +1,10 @@
 import { afterEach, test, expect, vi } from "vite-plus/test";
 import { PassThrough } from "node:stream";
-import { connectDevtools, devState, disconnectDevtools } from "../../src/hmr.ts";
+import { connectDevtools, devState, disconnectDevtools } from "../../src/dev/hmr.ts";
 import { createApp } from "../../src/render.ts";
 import { createInternalMountOptions } from "../../src/render.ts";
-import { INTERNAL_RENDER_OBSERVER } from "../../src/io/render-observer.ts";
-import { Box, Text } from "../../src/index.ts";
+import { INTERNAL_RENDER_OBSERVER } from "../../src/api/render-observer.ts";
+import { Box, Text } from "../../src/api/index.ts";
 import {
   defineComponent,
   h,

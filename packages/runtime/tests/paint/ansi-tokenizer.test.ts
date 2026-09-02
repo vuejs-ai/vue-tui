@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vite-plus/test";
-import { hasAnsiControlCharacters, tokenizeAnsi } from "../../src/paint/ansi-tokenizer.ts";
+import { hasAnsiControlCharacters, tokenizeAnsi } from "../../src/text/ansi-tokenizer.ts";
 
 describe("ansi-tokenizer", () => {
   test("detects ANSI control characters", () => {

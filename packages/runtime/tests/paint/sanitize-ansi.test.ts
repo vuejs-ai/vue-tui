@@ -1,6 +1,6 @@
 import { describe, test, expect } from "vite-plus/test";
 import { Chalk } from "chalk";
-import { sanitizeAnsi, sanitizeAnsiMultiline } from "../../src/paint/sanitize-ansi.ts";
+import { sanitizeAnsi, sanitizeAnsiMultiline } from "../../src/text/sanitize-ansi.ts";
 import { createTerminalStyle, resolveTerminalStyle } from "../../src/paint/terminal-style.ts";
 
 // Minimal ANSI-stripping helper for test assertions (avoids strip-ansi dep).

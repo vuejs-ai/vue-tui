@@ -1,7 +1,7 @@
 import { inject, readonly, shallowReactive, type DeepReadonly, type InjectionKey } from "vue";
 import type { TerminalStyle } from "./paint/terminal-style.ts";
-import { MAX_LAYOUT_VALUE } from "./numeric-limits.ts";
-import type { TerminalSizeProbeResult } from "./terminal-size-probe.ts";
+import { MAX_LAYOUT_VALUE } from "./layout/numeric-limits.ts";
+import type { TerminalSizeProbeResult } from "./terminal/node/terminal-size-probe.ts";
 
 /** The terminal screen model requested when an application mounts. */
 export type RenderMode = "inline" | "fullscreen";

@@ -1,6 +1,10 @@
 import ansiEscapes from "ansi-escapes";
 import { describe, expect, test } from "vite-plus/test";
-import { hideCursorEscape, nextLineEscape, showCursorEscape } from "../../src/io/cursor-helpers.ts";
+import {
+  hideCursorEscape,
+  nextLineEscape,
+  showCursorEscape,
+} from "../../src/surface/cursor-helpers.ts";
 
 describe("cursor helpers", () => {
   test("uses the exact DECTCEM byte sequences", () => {

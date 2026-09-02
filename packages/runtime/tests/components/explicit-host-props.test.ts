@@ -1,5 +1,5 @@
 import { expect, test } from "vite-plus/test";
-import { explicitHostProps } from "../../src/components/explicit-host-props.ts";
+import { explicitHostProps } from "../../src/vue/components/explicit-host-props.ts";
 
 const declarations = Object.freeze({
   borderTop: Boolean,

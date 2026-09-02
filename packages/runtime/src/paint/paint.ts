@@ -7,10 +7,10 @@ import {
   styledCharsFromTokens,
   tokenize,
 } from "@alcalzone/ansi-tokenize";
-import { hasAnsiControlCharacters, tokenizeAnsi } from "./ansi-tokenizer.ts";
+import { hasAnsiControlCharacters, tokenizeAnsi } from "../text/ansi-tokenizer.ts";
 import { applyChalk, applyColor } from "./text-style.ts";
 import type { TerminalStyle } from "./terminal-style.ts";
-import { sanitizeAnsi, sanitizeAnsiMultiline } from "./sanitize-ansi.ts";
+import { sanitizeAnsi, sanitizeAnsiMultiline } from "../text/sanitize-ansi.ts";
 import Yoga from "yoga-layout";
 import type {
   TuiNode,
@@ -23,11 +23,11 @@ import type {
   TuiBox,
 } from "../host/nodes.ts";
 import { isContainer } from "../host/nodes.ts";
-import { wrapText, safeSliceEnd, sliceAnsiPreservingIntensity } from "../host/text-measure.ts";
-import { getTextTerminalCellWidth } from "../host/yoga.ts";
-import { isContentLayoutGuarded, type StaticLayoutRegion } from "../host/layout-transaction.ts";
-import type { InternalGeometryPaintFrame } from "../geometry/geometry-service.ts";
-import { assertPaintSurfaceSize } from "../numeric-limits.ts";
+import { wrapText, safeSliceEnd, sliceAnsiPreservingIntensity } from "../text/text-measure.ts";
+import { getTextTerminalCellWidth } from "../layout/yoga.ts";
+import { isContentLayoutGuarded, type StaticLayoutRegion } from "../layout/layout-transaction.ts";
+import type { InternalGeometryPaintFrame } from "../session/geometry-service.ts";
+import { assertPaintSurfaceSize } from "./surface-limits.ts";
 
 interface ClipRect {
   x1: number | undefined;

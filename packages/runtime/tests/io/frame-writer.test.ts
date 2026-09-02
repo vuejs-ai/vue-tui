@@ -1,9 +1,9 @@
 import { EventEmitter } from "node:events";
 import ansiEscapes from "ansi-escapes";
 import { describe, expect, test } from "vite-plus/test";
-import { hideCursorEscape, showCursorEscape } from "../../src/io/cursor-helpers.ts";
-import { createFrameWriter } from "../../src/io/frame-writer.ts";
-import logUpdate from "../../src/io/log-update.ts";
+import { hideCursorEscape, showCursorEscape } from "../../src/surface/cursor-helpers.ts";
+import { createFrameWriter } from "../../src/surface/frame-writer.ts";
+import logUpdate from "../../src/surface/log-update.ts";
 
 interface FakeStdout extends NodeJS.WriteStream {
   readonly chunks: string[];

@@ -1,9 +1,9 @@
 import { describe, expect, test } from "vite-plus/test";
-import { normalizeInputSequence } from "../../src/io/normalized-input.ts";
+import { normalizeInputSequence } from "../../src/input/normalized-input.ts";
 import {
   createInputDispatcher,
   type InternalInputDemandLease,
-} from "../../src/io/input-subscriptions.ts";
+} from "../../src/input/input-subscriptions.ts";
 
 const fact = normalizeInputSequence("a")!;
 

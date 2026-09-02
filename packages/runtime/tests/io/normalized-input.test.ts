@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vite-plus/test";
 import { PassThrough } from "node:stream";
-import { normalizeInputSequence, type InputEvent } from "../../src/io/normalized-input.ts";
-import { getSharedStdinIngress } from "../../src/io/stdin-ingress.ts";
+import { normalizeInputSequence, type InputEvent } from "../../src/input/normalized-input.ts";
+import { getSharedStdinIngress } from "../../src/terminal/stdin-ingress.ts";
 
 function fact(event: string | { readonly paste: string }): InputEvent {
   const result = normalizeInputSequence(event);

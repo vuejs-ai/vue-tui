@@ -3,7 +3,7 @@ import { describe, expect, test, vi } from "vite-plus/test";
 import {
   createOutputCoordinator,
   type CoordinatedWriteResult,
-} from "../../src/io/output-coordinator.ts";
+} from "../../src/terminal/output-coordinator.ts";
 
 function createWritable(results: readonly (boolean | Error)[]) {
   const events = new EventEmitter();

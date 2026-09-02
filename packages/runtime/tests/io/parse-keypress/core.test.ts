@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vite-plus/test";
-import { parseKeypress } from "../../../src/io/parse-keypress.ts";
+import { parseKeypress } from "../../../src/input/parse-keypress.ts";
 
 describe("parse-keypress", () => {
   test("parses regular character", () => {

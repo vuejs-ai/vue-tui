@@ -9,10 +9,10 @@ import {
   safeSliceEnd,
   sliceAnsiPreservingIntensity,
   wrapText,
-} from "../../src/host/text-measure.ts";
+} from "../../src/text/text-measure.ts";
 import { renderToString } from "../../src/render-to-string.ts";
-import Box from "../../src/components/box.vue";
-import Text from "../../src/components/text.vue";
+import Box from "../../src/vue/components/box.vue";
+import Text from "../../src/vue/components/text.vue";
 
 // Minimal ANSI-stripping helper for test assertions (avoids strip-ansi dep).
 function stripAnsi(s: string): string {

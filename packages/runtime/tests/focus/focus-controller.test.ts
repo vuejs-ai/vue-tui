@@ -1,9 +1,9 @@
 import { effectScope } from "vue";
 import { describe, expect, test } from "vite-plus/test";
 import Yoga from "yoga-layout";
-import type { AppContext } from "../../src/context.ts";
+import type { AppContext } from "../../src/vue/context.ts";
 import { createBox, createRoot, type TuiBox, type TuiRoot } from "../../src/host/nodes.ts";
-import { createInternalFocusController } from "../../src/focus/focus-controller.ts";
+import { createInternalFocusController } from "../../src/session/focus-controller.ts";
 
 function connect(parent: TuiRoot | TuiBox, child: TuiBox): TuiBox {
   child.parent = parent;

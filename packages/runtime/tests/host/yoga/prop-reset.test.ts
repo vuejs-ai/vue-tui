@@ -7,7 +7,7 @@ import {
   detachYoga,
   reconcileMarginEdges,
   reconcilePaddingEdges,
-} from "../../../src/host/yoga.ts";
+} from "../../../src/layout/yoga.ts";
 import { createBox } from "../../../src/host/nodes.ts";
 
 // yoga-layout YGEnums (generated/YGEnums.ts) — stable values.

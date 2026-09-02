@@ -2,14 +2,14 @@ import { expect, test } from "vite-plus/test";
 import {
   emitTestEvent as emitFromInternalEntry,
   setTestEventSink,
-} from "../../src/internal/testing.ts";
-import { emitTestEvent } from "../../src/test-events.ts";
+} from "../../src/api/internal/testing.ts";
+import { emitTestEvent } from "../../src/api/test-events.ts";
 
 test("shares one ordered emitter across duplicate runtime modules and fixture callers", async () => {
   const lines: string[] = [];
   const duplicate = (await import(
-    new URL("../../src/test-events.ts?duplicate-runtime-module", import.meta.url).href
-  )) as typeof import("../../src/test-events.ts");
+    new URL("../../src/api/test-events.ts?duplicate-runtime-module", import.meta.url).href
+  )) as typeof import("../../src/api/test-events.ts");
   expect(duplicate.emitTestEvent).not.toBe(emitTestEvent);
 
   expect(() => emitTestEvent("unconfigured")).not.toThrow();

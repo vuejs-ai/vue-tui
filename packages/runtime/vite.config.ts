@@ -26,18 +26,18 @@ export default defineConfig({
     }),
   ],
   pack: {
-    entry: [
-      "src/index.ts",
-      "src/inline.ts",
+    entry: {
+      index: "src/api/index.ts",
+      inline: "src/api/inline.ts",
       // Narrow privileged entries for official @vue-tui/vite and @vue-tui/testing.
       // Not supported public APIs; no broad internal barrel is published.
-      "src/internal/devtools.ts",
-      "src/internal/testing.ts",
+      "internal/devtools": "src/api/internal/devtools.ts",
+      "internal/testing": "src/api/internal/testing.ts",
       // Built for repository integration tests so private symbol and injection
       // identities match the public bundle. It is not a package export and is
       // excluded from the published tarball.
-      "src/internal.ts",
-    ],
+      internal: "src/api/internal.ts",
+    },
     // Runtime and declaration output must use the consumer's one Vue instance.
     // Inlining Vue's internal types creates duplicate global declarations when
     // the consumer installs another supported Vue patch release.

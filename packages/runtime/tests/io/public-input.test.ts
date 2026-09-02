@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vite-plus/test";
-import { normalizeInputSequence, type InputEvent } from "../../src/io/normalized-input.ts";
-import { projectPublicInputEvent } from "../../src/io/public-input.ts";
+import { normalizeInputSequence, type InputEvent } from "../../src/input/normalized-input.ts";
+import { projectPublicInputEvent } from "../../src/vue/public-input.ts";
 
 function fact(event: string | { readonly paste: string }): InputEvent {
   const result = normalizeInputSequence(event);

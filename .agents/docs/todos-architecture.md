@@ -4,7 +4,7 @@ The work that moves `@vue-tui/runtime` from its current internal structure to th
 
 **This file deletes itself.** It exists only to hold the gap between the record and the code. When every task below has landed, delete this file and remove its route from [the records map](./README.md); nothing here needs to be preserved, because the architecture record already states the target and git keeps the history. Do not add ordinary follow-up work here — that belongs in [TODOs](./todos.md).
 
-Every count below was measured at `b21674e`; re-measure before relying on one.
+Counts below were measured at `b21674e`; the `render.ts` line numbers reflect the tree after task 2. Re-measure before relying on any of them.
 
 ## Order
 
@@ -21,45 +21,33 @@ Every step inside a task is meant to land on its own and leave the suite green. 
 
 ## What none of this changes
 
-- **The public surface.** `packages/runtime/src/index.ts` exports `createApp`, `renderToString`, `Box`, `Text`, the six composables and their types. No task below adds, removes or renames anything there.
+- **The public surface.** `packages/runtime/src/api/index.ts` exports `createApp`, `renderToString`, `Box`, `Text`, the six composables and their types. No task below adds, removes or renames anything there.
 - **Accepted behaviour.** [Runtime API decisions](./runtime-api-decisions.md) and [Rendering modes](./rendering-modes.md) govern what the code does; these tasks change how it is arranged. Where a task must emit different bytes to reach the same screen, it says so.
 - **The observation channels.** `@vue-tui/testing`'s structured content frames and xterm screen snapshots are [Rendering modes](./rendering-modes.md#deterministic-and-string-hosts)' subject, not this record's.
 
 ## 1. Rename the input path
 
-`InputSequence` (`io/input-parser.ts`) names the complete raw piece, `InputEvent` (`io/normalized-input.ts`) the structured fact, and `InputDispatcher` (`io/input-subscriptions.ts`) owns subscriber capture and delivery. `InputParser` holds partial decoded terminal sequences; task 5 moves byte decoding from the shared stdin ingress under `input/`.
+`InputSequence` (`input/input-parser.ts`) names the complete raw piece, `InputEvent` (`input/normalized-input.ts`) the structured fact, and `InputDispatcher` (`input/input-subscriptions.ts`) owns subscriber capture and delivery. `InputParser` holds partial decoded terminal sequences; task 5 moves byte decoding from the shared stdin ingress under `input/`.
 
 ## 2. Move the directories
 
-**Today.** `runtime/src` has 78 files: 58 under `components/`, `composables/`, `focus/`, `geometry/`, `host/`, `internal/`, `io/` and `paint/`, and 20 at the top level. `io/` is 16 files and 5,423 lines holding three unrelated concerns, which share nothing but the word "terminal".
+`runtime/src` is `api/ dev/ vue/ session/ input/ surface/ terminal/ paint/ layout/ text/ host/`, with `render.ts`, `render-to-string.ts`, `render-session.ts`, `color-profile.ts` and `env.d.ts` still at the top level: the render files dissolve in tasks 3 through 7, and the colour and style files follow task 6, which creates `frame/`.
 
-**Steps.** One commit per destination, `git mv` plus import paths only.
+`MAX_LAYOUT_VALUE` lives in `layout/`, and the paint surface limit lives in `paint/`. `messageForNonError` and `isErrorInput` live in `vue/`, the lower unit shared by their composable and session consumers; fatal error reporting lives in `session/`.
 
-1. `text/` takes wrapping, measurement and the ANSI parse of user strings: `paint/ansi-tokenizer.ts`, `paint/sanitize-ansi.ts`, `host/text-measure.ts`.
-2. `layout/` takes the engine: `host/yoga.ts`, `host/layout-transaction.ts`, `host/yoga-allocation-ledger.ts`. `host/` keeps `nodes.ts` and `resolve-node.ts`; `host/node-ops.ts` is the Vue custom-renderer and goes to `vue/`.
-3. `io/` dissolves in three directions — `input/` (`input-parser.ts`, `normalized-input.ts`, `input-subscriptions.ts`, `parse-keypress.ts`), `surface/` (`log-update.ts`, `frame-writer.ts`, `cursor-helpers.ts`), `terminal/` (`stdin-controller.ts`, `stdin-ingress.ts`, `stream-lifecycle.ts`, `kitty-keyboard.ts`, `output-coordinator.ts`, `write-synchronized.ts`, `console-manager.ts`). `public-input.ts` is the public projection and goes to `vue/`; `render-observer.ts` is an internal seam and goes to `api/`.
-4. `vue/` takes `components/`, `composables/`, `focus/focus-context.ts`, `focus/component-target.ts` (whose only consumer is `useFocus`) and `geometry/internal-use-box-size.ts`; `session/` takes `focus/focus-controller.ts` and `geometry/geometry-service.ts`.
-5. The top level splits: `api/` (`index.ts`, `internal.ts`, `inline.ts`, `testing.ts`, `internal-mount-options.ts`, `test-events.ts`, `internal/*`), `session/` (`scheduler.ts`, `rendered-target.ts`), `vue/` (`context.ts`, which holds the injection keys), `dev/` (`hmr.ts`, `overlay.ts`), `terminal/node/` (`process-suspension.ts`, `terminal-size-probe.ts`).
-
-Five files have no unambiguous row in the tables. Three are colour and style, and they follow task 6 rather than this one: `paint/terminal-style.ts` generates the SGR bytes and belongs with the encoder in `surface/`; `paint/text-style.ts` and `color-profile.ts` turn props and options into style and belong with `Style` in `frame/`. `numeric-limits.ts` splits by owner: `MAX_LAYOUT_VALUE` belongs to layout, while `MAX_PAINT_SURFACE_CELLS` and `assertPaintSurfaceSize` belong to paint. `error-value.ts` splits only its session-specific report formatter; the shared coercion helpers live in `vue/`, the lower layer used by both composables and session code. `paint/static-channel.ts` prepares `Static` history output from the layout result and stays in `paint/`.
-
-**Done when.** The tree matches [the tables in the architecture record](./architecture.md#units-and-what-they-may-import), except that `frame/` does not exist yet — it is created by task 6, which is what first gives it something to own.
-
-**Verify.** `vp run check`, and `git diff -M` shows renames rather than rewrites.
-
-**Watch for.** `render.ts`, `render-to-string.ts` and `render-session.ts` are not moved by this task. `render.ts` writes to a stream, imports `node:*` and holds the surface branches all at once, so any directory it landed in would immediately violate that directory's rule; tasks 4 through 7 dissolve it instead, and the same tasks carry `render-session.ts` into `session/` and `render-to-string.ts` into `api/` once each stops reaching streams and the engine directly. `3535e62` extracted `createStdinController` out of `render.ts` and cut 1,149 lines, but the extracted controller takes seven callbacks pointing back into the mount closure — the code left the file while the responsibility stayed.
+The tree still has cross-unit edges the record's tables forbid — `host/ → vue/`, `layout/ → vue/`, `paint/ → session/`, `terminal/ → input/`, `terminal/ → vue/`, `dev/ → api/`, `text/ → host/`, `text/ → paint/`, `vue/ → terminal/`, and value edges in both directions between `vue/` and `session/`. `terminal/ → vue/` and `dev/ → api/` carry values, and the second inverts the layering. Tasks 3 through 7 remove all of them; the tables hold at the end of task 7, not at the end of this one.
 
 ## 3. Finish the layout engine boundary
 
-**Today.** `#288` introduced `host/layout-transaction.ts`, which owns the Yoga calls and the conditional second pass, and is called from exactly two places (`render.ts` and `render-to-string.ts`). Five files still import `yoga-layout`, and each wants something different from it:
+**Today.** `#288` introduced `layout/layout-transaction.ts`, which owns the Yoga calls and the conditional second pass, and is called from exactly two places (`render.ts` and `render-to-string.ts`). Five files still import `yoga-layout`, and each wants something different from it:
 
-| File                         | What it takes from the engine                                                |
-| ---------------------------- | ---------------------------------------------------------------------------- |
-| `host/layout-transaction.ts` | The layout calls themselves                                                  |
-| `host/yoga.ts`               | Node construction, prop application, the measure callback                    |
-| `host/nodes.ts`              | The `yoga` field on every node type, plus the unattached sentinel            |
-| `paint/paint.ts`             | `getComputedLayout`, `getComputedBorder`, `getComputedPadding`, `getDisplay` |
-| `focus/focus-controller.ts`  | `getDisplay()` alone, to skip `display: none` subtrees                       |
+| File                           | What it takes from the engine                                                |
+| ------------------------------ | ---------------------------------------------------------------------------- |
+| `layout/layout-transaction.ts` | The layout calls themselves                                                  |
+| `layout/yoga.ts`               | Node construction, prop application, the measure callback                    |
+| `host/nodes.ts`                | The `yoga` field on every node type, plus the unattached sentinel            |
+| `paint/paint.ts`               | `getComputedLayout`, `getComputedBorder`, `getComputedPadding`, `getDisplay` |
+| `session/focus-controller.ts`  | `getDisplay()` alone, to skip `display: none` subtrees                       |
 
 `LayoutTransactionResult` returns `dynamicHeight` and `staticLayouts`, so per-node geometry is still read off the Yoga node during painting.
 
@@ -67,7 +55,7 @@ Five files have no unambiguous row in the tables. Three are colour and style, an
 
 1. Widen the transaction result into `ComputedLayout`: per-node rectangle, the resolved border and padding insets, whether the node is laid out at all, and the wrapped lines the measure callback already produced. The painter's row above is the requirement list.
 2. Switch `paint/paint.ts` to read from `ComputedLayout` and drop its `yoga-layout` import.
-3. Give `layout/` a live authored-visibility query for focus, then switch `focus/focus-controller.ts` to it and drop the controller's engine import. The query must work before the first layout and while a surface is suspended.
+3. Give `layout/` a live authored-visibility query for focus, then switch `session/focus-controller.ts` to it and drop the controller's engine import. The query must work before the first layout and while a surface is suspended.
 4. Take the engine handle off the node: `host/nodes.ts` loses its `yoga` field and the `UNATTACHED_YOGA` sentinel, and `layout/` keeps the node-to-engine mapping itself.
 5. Move `yoga-allocation-ledger.ts`, the disposed-host set and the `hostYogaLifetime` callbacks into `layout/`, where the engine's memory now lives.
 
@@ -79,7 +67,7 @@ Five files have no unambiguous row in the tables. Three are colour and style, an
 
 ## 4. Give each surface its own implementation
 
-**Today.** `render-session.ts` already resolves a three-variant union, `ResolvedLiveSurface` (`inline-terminal` / `fullscreen-terminal` / `final-stream`). `render.ts:1432`–`1439` immediately flattens it into six booleans — `dynamicUpdatesLive`, `fixedFullscreenSurface`, `boundedInlineSurface`, `inlineTerminalSurface`, `documentHostSurface`, `boundedDocumentSurface` — read at 38 sites. Two pairs are the same expression written twice: `boundedInlineSurface` and `inlineTerminalSurface` are both `kind === "inline-terminal"`, `documentHostSurface` and `boundedDocumentSurface` are both `kind === "final-stream"`.
+**Today.** `render-session.ts` already resolves a three-variant union, `ResolvedLiveSurface` (`inline-terminal` / `fullscreen-terminal` / `final-stream`). `render.ts:1445`–`1452` immediately flattens it into six booleans — `dynamicUpdatesLive`, `fixedFullscreenSurface`, `boundedInlineSurface`, `inlineTerminalSurface`, `documentHostSurface`, `boundedDocumentSurface` — read at 38 sites. Two pairs are the same expression written twice: `boundedInlineSurface` and `inlineTerminalSurface` are both `kind === "inline-terminal"`, `documentHostSurface` and `boundedDocumentSurface` are both `kind === "final-stream"`.
 
 **Steps.**
 
@@ -98,7 +86,7 @@ Five files have no unambiguous row in the tables. Three are colour and style, an
 
 ## 5. Extract the terminal backend
 
-**Today.** Terminal state is spread across eight files. Five write to an output stream (`render.ts`, `io/log-update.ts`, `io/kitty-keyboard.ts`, `io/output-coordinator.ts`, `io/stdin-controller.ts`) and five name `setRawMode`: `render.ts` and `io/stdin-controller.ts` call it on the stream, `composables/useStdin.ts` routes through the context, `context.ts` declares the type and `render-to-string.ts` supplies an inert stub. `exitAlternativeScreen` has three write sites in `render.ts` alone (`771`, `1173`, `1696`), each with its own best-effort write and ownership bookkeeping, against a single enter site at `2288`. `StdinController` receives seven callbacks from the mount closure — `acquireKittyKeyboardDemand`, `isKittyKeyboardReady`, `beforeManagedInputAcquire`, `isManagedInputSurfaceReady`, `writeTerminalOutput`, `requestTerminalReconcile`, `reportManagedInputFailure` — because enabling bracketed paste and the Kitty protocol requires writing bytes and there is no terminal object to ask. Eleven files import `node:*`, and eight use `process` for a value — three more only name it in comments — including `render-to-string.ts` (inert streams from `node:stream`, colour resolved against `process.stdout` and `process.env`), `testing.ts` (stream defaults) and `host/node-ops.ts` (`NODE_ENV`), each of which the steps below must route through the backend or the Done line must list as an exception.
+**Today.** Terminal state is spread across eight files. Five write to an output stream (`render.ts`, `surface/log-update.ts`, `terminal/kitty-keyboard.ts`, `terminal/output-coordinator.ts`, `terminal/stdin-controller.ts`) and five name `setRawMode`: `render.ts` and `terminal/stdin-controller.ts` call it on the stream, `vue/composables/useStdin.ts` routes through the context, `vue/context.ts` declares the type and `render-to-string.ts` supplies an inert stub. `exitAlternativeScreen` has three write sites in `render.ts` alone (`784`, `1186`, `1709`), each with its own best-effort write and ownership bookkeeping, against a single enter site at `2301`. `StdinController` receives seven callbacks from the mount closure — `acquireKittyKeyboardDemand`, `isKittyKeyboardReady`, `beforeManagedInputAcquire`, `isManagedInputSurfaceReady`, `writeTerminalOutput`, `requestTerminalReconcile`, `reportManagedInputFailure` — because enabling bracketed paste and the Kitty protocol requires writing bytes and there is no terminal object to ask. Eleven files import `node:*`, and eight use `process` for a value — three more only name it in comments — including `render-to-string.ts` (inert streams from `node:stream`, colour resolved against `process.stdout` and `process.env`), `api/testing.ts` (stream defaults) and `vue/node-ops.ts` (`NODE_ENV`), each of which the steps below must route through the backend or the Done line must list as an exception.
 
 **Steps.**
 
@@ -135,7 +123,7 @@ Five files have no unambiguous row in the tables. Three are colour and style, an
 
 ## 7. Turn the mount closure into a session object
 
-**Today.** `createApp` spans `render.ts:326`–`3204`; the mount closure inside it spans `1339`–`3136`. The enclosing closure holds 35 `let mounted*` variables, declared between `341` and `1278`, whose only purpose is to let `teardown()` reach resources the mount created. `render.ts` declares 62 function-scope boolean flags in all: 19 of them, between `339` and `727`, track exit, teardown and mount settlement alone, alongside the `lifecycleTransactionDepth` counter at `719`; a further seven, between `1633` and `1767`, track suspend and resume. `mountedDevApp` reaches back into teardown to implement development replacement.
+**Today.** `createApp` spans `render.ts:339`–`3217`; the mount closure inside it spans `1352`–`3149`. The enclosing closure holds 35 `let mounted*` variables, declared between `354` and `1291`, whose only purpose is to let `teardown()` reach resources the mount created. `render.ts` declares 62 function-scope boolean flags in all: 19 of them, between `352` and `740`, track exit, teardown and mount settlement alone, alongside the `lifecycleTransactionDepth` counter at `732`; a further seven, between `1646` and `1780`, track suspend and resume. `mountedDevApp` reaches back into teardown to implement development replacement.
 
 **Steps.**
 

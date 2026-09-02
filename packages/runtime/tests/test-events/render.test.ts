@@ -1,13 +1,13 @@
 import { PassThrough } from "node:stream";
 import { defineComponent, h } from "vue";
 import { expect, test } from "vite-plus/test";
-import { Text, useInput } from "../../src/index.ts";
+import { Text, useInput } from "../../src/api/index.ts";
 import {
   createManualSuspensionHost,
   INTERNAL_SUSPENSION_HOST,
-} from "../../src/process-suspension.ts";
+} from "../../src/terminal/node/process-suspension.ts";
 import { createApp, createInternalMountOptions } from "../../src/render.ts";
-import { setTestEventSink } from "../../src/test-events.ts";
+import { setTestEventSink } from "../../src/api/test-events.ts";
 
 test("reports terminal ownership and accepted paints from the renderer", async () => {
   const events: Array<{ ev: string }> = [];

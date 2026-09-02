@@ -2,7 +2,7 @@ import { PassThrough } from "node:stream";
 import { defineComponent } from "vue";
 import { expect, test } from "vite-plus/test";
 import { createApp } from "../src/render.ts";
-import { createTestHostBridge } from "../src/testing.ts";
+import { createTestHostBridge } from "../src/api/testing.ts";
 
 function makeInput(): NodeJS.ReadStream {
   const stream = new PassThrough() as unknown as NodeJS.ReadStream;

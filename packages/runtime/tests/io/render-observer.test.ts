@@ -1,13 +1,13 @@
 import { PassThrough, Readable } from "node:stream";
 import { defineComponent, h } from "vue";
 import { expect, test } from "vite-plus/test";
-import { Text } from "../../src/index.ts";
+import { Text } from "../../src/api/index.ts";
 import { createApp, createInternalMountOptions } from "../../src/render.ts";
 import {
   INTERNAL_RENDER_OBSERVER,
   type InternalContentFrame,
   type InternalRenderObserver,
-} from "../../src/io/render-observer.ts";
+} from "../../src/api/render-observer.ts";
 
 async function run(observer?: InternalRenderObserver): Promise<string> {
   const chunks: string[] = [];

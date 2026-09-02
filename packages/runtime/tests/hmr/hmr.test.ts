@@ -6,8 +6,8 @@ import {
   devState,
   invalidateDevHmrUpdate,
   reportDevRenderError,
-} from "../../src/hmr.ts";
-import { setTestEventSink } from "../../src/test-events.ts";
+} from "../../src/dev/hmr.ts";
+import { setTestEventSink } from "../../src/api/test-events.ts";
 
 afterEach(() => disconnectDevtools());
 

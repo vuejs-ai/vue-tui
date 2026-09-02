@@ -38,7 +38,7 @@ function updatePayload(
 
 test("a stale update timer does not reset a newer update's status early", async () => {
   vi.resetModules();
-  const { initHmrBridge, devState } = await import("../../src/hmr.ts");
+  const { initHmrBridge, devState } = await import("../../src/dev/hmr.ts");
   const hot = makeFakeHot();
 
   vi.useFakeTimers();
@@ -77,7 +77,7 @@ test("a stale update timer does not reset a newer update's status early", async 
 
 test("vite:error clears a pending update→ok reset so the error status persists", async () => {
   vi.resetModules();
-  const { initHmrBridge, devState } = await import("../../src/hmr.ts");
+  const { initHmrBridge, devState } = await import("../../src/dev/hmr.ts");
   const hot = makeFakeHot();
 
   vi.useFakeTimers();
@@ -111,7 +111,7 @@ test("vite:error clears a pending update→ok reset so the error status persists
 
 test("an ignored older success does not cancel the latest update reset", async () => {
   vi.resetModules();
-  const { initHmrBridge, devState } = await import("../../src/hmr.ts");
+  const { initHmrBridge, devState } = await import("../../src/dev/hmr.ts");
   const hot = makeFakeHot();
 
   vi.useFakeTimers();
