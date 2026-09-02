@@ -1,4 +1,4 @@
-import type { InputEvent } from "./input-parser.ts";
+import type { InputSequence } from "./input-parser.ts";
 import { nonAlphanumericKeys, parseKeypress, type Keypress } from "./parse-keypress.ts";
 
 /** Command modifiers needed to project an accepted public key identity. */
@@ -37,7 +37,7 @@ export interface InternalKeyDetail {
  * Uninterpretable sequences and framework-owned replies produce no fact.
  * Release facts may still be broadcast; public projection drops them.
  */
-export type NormalizedInputFact =
+export type InputEvent =
   | {
       readonly kind: "key";
       /** Wire sequence retained for legacy Alt prefix and digit-key character recovery. */
@@ -77,7 +77,7 @@ const isPlainText = (sequence: string): boolean => {
 
 const sgrMouseReport = /^\x1b\[<\d+;\d+;\d+[mM]$/;
 
-const normalizeSequence = (sequence: string): NormalizedInputFact | undefined => {
+const normalizeSequence = (sequence: string): InputEvent | undefined => {
   // Runtime does not own mouse reporting. Ignore unsolicited complete SGR
   // reports so terminal residue cannot surface as application key or text.
   if (sgrMouseReport.test(sequence)) return undefined;
@@ -127,11 +127,11 @@ const normalizeSequence = (sequence: string): NormalizedInputFact | undefined =>
   return Object.freeze({ kind: "key", sequence, key });
 };
 
-/** Normalize one already-framed input event. Kitty query replies produce no application fact. */
-export function normalizeInputEvent(event: InputEvent): NormalizedInputFact | undefined {
-  if (typeof event === "string") return normalizeSequence(event);
+/** Normalize one already-framed input sequence. Kitty query replies produce no application fact. */
+export function normalizeInputSequence(sequence: InputSequence): InputEvent | undefined {
+  if (typeof sequence === "string") return normalizeSequence(sequence);
   return Object.freeze({
     kind: "paste",
-    text: event.paste,
+    text: sequence.paste,
   });
 }

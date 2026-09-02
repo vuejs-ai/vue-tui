@@ -10,7 +10,7 @@ import {
 } from "vue";
 import { AppContextKey, StdinContextKey } from "../context.ts";
 import { isErrorInput, messageForNonError } from "../error-value.ts";
-import type { NormalizedInputFact } from "../io/normalized-input.ts";
+import type { InputEvent } from "../io/normalized-input.ts";
 import { projectPublicInputEvent, type TuiInputEvent } from "../io/public-input.ts";
 import type { InternalInputSubscription } from "../io/input-subscriptions.ts";
 
@@ -95,7 +95,7 @@ export function useInput(
   let reconciling = false;
   let reconcileRequested = false;
 
-  function listener(fact: NormalizedInputFact) {
+  function listener(fact: InputEvent) {
     try {
       const event = projectPublicInputEvent(fact);
       if (!event) return;

@@ -1,4 +1,4 @@
-import type { NormalizedInputFact } from "./normalized-input.ts";
+import type { InputEvent } from "./normalized-input.ts";
 
 /**
  * Stable semantic key names emitted by Runtime.
@@ -173,9 +173,7 @@ const normalizeLogicalCharacter = (value: string | undefined): string | undefine
   return value;
 };
 
-const hasLegacyEscapePrefixAlt = (
-  fact: Extract<NormalizedInputFact, { readonly kind: "key" }>,
-): boolean => {
+const hasLegacyEscapePrefixAlt = (fact: Extract<InputEvent, { readonly kind: "key" }>): boolean => {
   if (fact.key.protocol !== "legacy" || !fact.key.modifiers.meta) return false;
   if (fact.sequence.startsWith("\x1b\x1b")) return true;
   // A legacy ESC-prefixed printable/control key has no parsed CSI/SS3 code.
@@ -183,9 +181,7 @@ const hasLegacyEscapePrefixAlt = (
   return fact.key.code === undefined;
 };
 
-const projectModifiers = (
-  fact: Extract<NormalizedInputFact, { readonly kind: "key" }>,
-): TuiKeyModifiers => {
+const projectModifiers = (fact: Extract<InputEvent, { readonly kind: "key" }>): TuiKeyModifiers => {
   const { modifiers } = fact.key;
   const legacyEscapeAlt = hasLegacyEscapePrefixAlt(fact);
   return {
@@ -199,7 +195,7 @@ const projectModifiers = (
 };
 
 const logicalCharacter = (
-  fact: Extract<NormalizedInputFact, { readonly kind: "key" }>,
+  fact: Extract<InputEvent, { readonly kind: "key" }>,
 ): string | undefined => {
   const { key } = fact;
   if (!key.printable) return undefined;
@@ -216,9 +212,7 @@ const logicalCharacter = (
   return normalizeLogicalCharacter(key.name);
 };
 
-const projectKey = (
-  fact: Extract<NormalizedInputFact, { readonly kind: "key" }>,
-): TuiKey | undefined => {
+const projectKey = (fact: Extract<InputEvent, { readonly kind: "key" }>): TuiKey | undefined => {
   const modifiers = projectModifiers(fact);
   const character = logicalCharacter(fact);
   if (character !== undefined) {
@@ -229,10 +223,10 @@ const projectKey = (
   return name === undefined ? undefined : Object.freeze({ name, ...modifiers });
 };
 
-const publicInputCache = new WeakMap<NormalizedInputFact, TuiInputEvent | null>();
+const publicInputCache = new WeakMap<InputEvent, TuiInputEvent | null>();
 
 /** Project one private normalized fact to the public text, key, or paste union. */
-export function projectPublicInputEvent(fact: NormalizedInputFact): TuiInputEvent | null {
+export function projectPublicInputEvent(fact: InputEvent): TuiInputEvent | null {
   if (publicInputCache.has(fact)) return publicInputCache.get(fact)!;
 
   let event: TuiInputEvent | null;

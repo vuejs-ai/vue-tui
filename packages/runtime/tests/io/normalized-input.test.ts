@@ -1,15 +1,15 @@
 import { describe, expect, test } from "vite-plus/test";
 import { PassThrough } from "node:stream";
-import { normalizeInputEvent, type NormalizedInputFact } from "../../src/io/normalized-input.ts";
+import { normalizeInputSequence, type InputEvent } from "../../src/io/normalized-input.ts";
 import { getSharedStdinIngress } from "../../src/io/stdin-ingress.ts";
 
-function fact(event: string | { readonly paste: string }): NormalizedInputFact {
-  const result = normalizeInputEvent(event);
+function fact(event: string | { readonly paste: string }): InputEvent {
+  const result = normalizeInputSequence(event);
   expect(result).toBeDefined();
   return result!;
 }
 
-describe("normalizeInputEvent", () => {
+describe("normalizeInputSequence", () => {
   test("keeps a plain UTF-8 run as text without inventing physical key facts", () => {
     expect(fact("hello")).toEqual({
       kind: "text",
@@ -74,12 +74,12 @@ describe("normalizeInputEvent", () => {
       "\x1b[1;9007199254740993A",
       `\x1b[1;${"9".repeat(400)}A`,
     ]) {
-      expect(normalizeInputEvent(sequence)).toBeUndefined();
+      expect(normalizeInputSequence(sequence)).toBeUndefined();
     }
   });
 
   test("drops an unknown complete terminal sequence instead of broadcasting it", () => {
-    expect(normalizeInputEvent("\x1b[?25h")).toBeUndefined();
+    expect(normalizeInputSequence("\x1b[?25h")).toBeUndefined();
   });
 
   test("preserves Kitty primary identity, modifiers, phase, and reported text", () => {
@@ -177,7 +177,7 @@ describe("normalizeInputEvent", () => {
     `\x1b[${"9".repeat(400)};1:1~`,
     "\x1b[9007199254740993;1:1~",
   ])("drops invalid protocol input without a broadcast fact: %j", (sequence) => {
-    expect(normalizeInputEvent(sequence)).toBeUndefined();
+    expect(normalizeInputSequence(sequence)).toBeUndefined();
   });
 
   test("normalizes large valid Kitty associated text without exceeding the call stack", () => {
@@ -191,7 +191,7 @@ describe("normalizeInputEvent", () => {
   });
 
   test("drops a framework-owned Kitty query response", () => {
-    expect(normalizeInputEvent("\x1b[?31u")).toBeUndefined();
+    expect(normalizeInputSequence("\x1b[?31u")).toBeUndefined();
   });
 
   test("keeps paste boundaries and never reclassifies its payload", () => {
@@ -203,19 +203,19 @@ describe("normalizeInputEvent", () => {
   });
 
   test("drops unsolicited complete SGR mouse reports", () => {
-    expect(normalizeInputEvent("\x1b[<66;4;5M")).toBeUndefined();
-    expect(normalizeInputEvent("\x1b[<0;4;5m")).toBeUndefined();
-    expect(normalizeInputEvent("\x1b[<3;4;5M")).toBeUndefined();
-    expect(normalizeInputEvent("\x1b[<4294967296;4;5M")).toBeUndefined();
-    expect(normalizeInputEvent(`\x1b[<${"9".repeat(400)};1;1M`)).toBeUndefined();
-    expect(normalizeInputEvent("\x1b[<0;9007199254740993;1M")).toBeUndefined();
+    expect(normalizeInputSequence("\x1b[<66;4;5M")).toBeUndefined();
+    expect(normalizeInputSequence("\x1b[<0;4;5m")).toBeUndefined();
+    expect(normalizeInputSequence("\x1b[<3;4;5M")).toBeUndefined();
+    expect(normalizeInputSequence("\x1b[<4294967296;4;5M")).toBeUndefined();
+    expect(normalizeInputSequence(`\x1b[<${"9".repeat(400)};1;1M`)).toBeUndefined();
+    expect(normalizeInputSequence("\x1b[<0;9007199254740993;1M")).toBeUndefined();
   });
 });
 
 describe("shared stdin normalization", () => {
-  const collect = (chunks: Array<string | Uint8Array>): NormalizedInputFact[] => {
+  const collect = (chunks: Array<string | Uint8Array>): InputEvent[] => {
     const stdin = new PassThrough() as unknown as NodeJS.ReadStream;
-    const facts: NormalizedInputFact[] = [];
+    const facts: InputEvent[] = [];
     const subscription = getSharedStdinIngress(stdin).subscribe(
       () => undefined,
       (inputFact) => facts.push(inputFact),
@@ -230,8 +230,8 @@ describe("shared stdin normalization", () => {
   test("multicasts the same once-normalized fact object to every application", () => {
     const stdin = new PassThrough() as unknown as NodeJS.ReadStream;
     const ingress = getSharedStdinIngress(stdin);
-    const first: NormalizedInputFact[] = [];
-    const second: NormalizedInputFact[] = [];
+    const first: InputEvent[] = [];
+    const second: InputEvent[] = [];
     const firstSubscription = ingress.subscribe(
       () => undefined,
       (inputFact) => first.push(inputFact),

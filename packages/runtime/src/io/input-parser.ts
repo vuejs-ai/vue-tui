@@ -2,10 +2,10 @@ const escape = "";
 const pasteStart = "[200~";
 const pasteEnd = "[201~";
 
-export type InputEvent = string | { readonly paste: string };
+export type InputSequence = string | { readonly paste: string };
 
 type ParsedInput = {
-  readonly events: InputEvent[];
+  readonly events: InputSequence[];
   readonly pending: string;
 };
 
@@ -187,7 +187,7 @@ const usesFiniteEscapeTimeout = (input: string): boolean => {
  * without C0 bytes, while bracketed paste has already been framed separately,
  * so retaining a control inside a text run would lose a known key fact.
  */
-const splitControlBytes = (text: string, events: InputEvent[]): void => {
+const splitControlBytes = (text: string, events: InputSequence[]): void => {
   let textSegmentStart = 0;
 
   for (let index = 0; index < text.length; index++) {
@@ -208,7 +208,7 @@ const splitControlBytes = (text: string, events: InputEvent[]): void => {
 };
 
 const parseKeypresses = (input: string): ParsedInput => {
-  const events: InputEvent[] = [];
+  const events: InputSequence[] = [];
   let index = 0;
   const pendingFrom = (pendingStartIndex: number): ParsedInput => ({
     events,
@@ -257,7 +257,7 @@ const parseKeypresses = (input: string): ParsedInput => {
 };
 
 export type InputParser = {
-  push: (chunk: string) => InputEvent[];
+  push: (chunk: string) => InputSequence[];
   peekPending: () => string;
   hasPendingEscape: () => boolean;
   flushPendingEscape: () => string | undefined;

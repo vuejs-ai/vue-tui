@@ -1,5 +1,5 @@
-import { createInputParser, type InputEvent } from "./input-parser.ts";
-import { normalizeInputEvent, type NormalizedInputFact } from "./normalized-input.ts";
+import { createInputParser, type InputSequence } from "./input-parser.ts";
+import { normalizeInputSequence, type InputEvent } from "./normalized-input.ts";
 
 const ESC = "\x1b";
 const FLUSH_DELAY = 20;
@@ -15,7 +15,7 @@ export interface SharedStdinSubscription {
 export interface SharedStdinIngress {
   subscribe<Context>(
     capture: () => Context,
-    listener: (event: NormalizedInputFact, context: Context) => void,
+    listener: (event: InputEvent, context: Context) => void,
   ): SharedStdinSubscription;
   startKittyQueryResponseDetection(
     onResult: (supported: boolean) => void,
@@ -32,7 +32,7 @@ export interface SharedStdinIngress {
 
 interface Subscriber {
   readonly capture: () => unknown;
-  readonly listener: (event: NormalizedInputFact, context: unknown) => void;
+  readonly listener: (event: InputEvent, context: unknown) => void;
   requestedActive: boolean;
   disposed: boolean;
   generation: number;
@@ -462,8 +462,8 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
     firstProcessingError ??= error;
   }
 
-  function deliver(
-    event: NormalizedInputFact,
+  function deliverToRecipients(
+    event: InputEvent,
     recipients: RecipientSnapshot | undefined,
     excluded?: Subscriber,
   ): void {
@@ -486,12 +486,12 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
   }
 
   function normalizeAndDeliver(
-    event: InputEvent,
+    sequence: InputSequence,
     recipients: RecipientSnapshot | undefined,
     excluded?: Subscriber,
   ): void {
-    const fact = normalizeInputEvent(event);
-    if (fact) deliver(fact, recipients, excluded);
+    const fact = normalizeInputSequence(sequence);
+    if (fact) deliverToRecipients(fact, recipients, excluded);
   }
 
   function appendDecodedSegment(
@@ -555,14 +555,14 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
     return undefined;
   }
 
-  function processInputEvent(
-    event: InputEvent,
+  function processInputSequence(
+    sequence: InputSequence,
     recipients: RecipientSnapshot | undefined,
     completedDetections: KittyQueryDetection[],
     completedDetectionSet: Set<KittyQueryDetection>,
   ): void {
-    if (typeof event === "string") {
-      const responseMatch = /^(.*)(\x1b\[\?\d+u)$/s.exec(event);
+    if (typeof sequence === "string") {
+      const responseMatch = /^(.*)(\x1b\[\?\d+u)$/s.exec(sequence);
       if (responseMatch) {
         const prefix = responseMatch[1]!;
         if (prefix !== "") normalizeAndDeliver(prefix, recipients);
@@ -578,7 +578,7 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
         }
       }
     }
-    normalizeAndDeliver(event, recipients);
+    normalizeAndDeliver(sequence, recipients);
   }
 
   function feedDecodedSegment(
@@ -617,7 +617,7 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
           : deliveryState.processedEvent
             ? snapshotActiveRecipients()
             : segment.recipients;
-      processInputEvent(events[index]!, recipients, completedDetections, completedDetectionSet);
+      processInputSequence(events[index]!, recipients, completedDetections, completedDetectionSet);
       deliveryState.processedEvent = true;
     }
 
@@ -833,7 +833,7 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
   const ingress: SharedStdinIngress = {
     subscribe<Context>(
       capture: () => Context,
-      listener: (event: NormalizedInputFact, context: Context) => void,
+      listener: (event: InputEvent, context: Context) => void,
     ) {
       const subscriber: Subscriber = {
         capture,

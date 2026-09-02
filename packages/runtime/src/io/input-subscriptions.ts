@@ -1,6 +1,6 @@
-import type { NormalizedInputFact } from "./normalized-input.ts";
+import type { InputEvent } from "./normalized-input.ts";
 
-export type InternalInputSubscriber = (fact: NormalizedInputFact) => void;
+export type InternalInputSubscriber = (fact: InputEvent) => void;
 
 export interface InternalInputDemandLease {
   /** Publish a demand whose physical terminal resources were already acquired. */
@@ -13,10 +13,16 @@ export interface InternalInputSubscription {
   end(): void;
 }
 
-export interface InternalInputSubscriptions {
+export interface InputDispatcher {
   subscribe(subscriber: InternalInputSubscriber): InternalInputSubscription;
   /** Capture the subscribers eligible when one parser-defined input fact begins. */
   capture(): readonly InternalInputSubscriber[];
+  /**
+   * Deliver one fact to the subscribers `capture()` returned when that fact began,
+   * not to whoever is subscribed now. Every captured subscriber runs even if one
+   * throws or clears the dispatcher; the first error is rethrown after delivery.
+   */
+  deliver(fact: InputEvent, subscribers: readonly InternalInputSubscriber[]): void;
   clear(): void;
 }
 
@@ -31,9 +37,7 @@ export interface InternalInputDemandHost {
  * assign focus, propagation, default-action, or external-forwarding policy to
  * these subscriptions.
  */
-export function createInternalInputSubscriptions(
-  demandHost?: InternalInputDemandHost,
-): InternalInputSubscriptions {
+export function createInputDispatcher(demandHost?: InternalInputDemandHost): InputDispatcher {
   interface SubscriptionRecord {
     readonly subscriber: InternalInputSubscriber;
     readonly demand: InternalInputDemandLease | undefined;
@@ -83,6 +87,20 @@ export function createInternalInputSubscriptions(
     },
     capture() {
       return Object.freeze([...records].map(({ subscriber }) => subscriber));
+    },
+    deliver(fact, subscribers) {
+      let firstError: unknown;
+      let failed = false;
+      for (const subscriber of subscribers) {
+        try {
+          subscriber(fact);
+        } catch (error) {
+          if (failed) continue;
+          failed = true;
+          firstError = error;
+        }
+      }
+      if (failed) throw firstError;
     },
     clear() {
       if (cleared) return;

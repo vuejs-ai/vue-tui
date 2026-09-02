@@ -1,5 +1,5 @@
 import type { InjectionKey } from "vue";
-import type { InternalInputSubscriptions } from "./io/input-subscriptions.ts";
+import type { InputDispatcher } from "./io/input-subscriptions.ts";
 import type { CoordinatedWriteResult } from "./io/output-coordinator.ts";
 
 export interface AppContext {
@@ -16,7 +16,7 @@ export interface AppContext {
 export interface StdinContext {
   stdin: NodeJS.ReadStream;
   isRawModeSupported: boolean;
-  inputSubscriptions: InternalInputSubscriptions;
+  inputSubscriptions: InputDispatcher;
   /** Acquire one independently releasable public raw-mode hold. */
   acquirePublicRawMode: () => () => void;
 }

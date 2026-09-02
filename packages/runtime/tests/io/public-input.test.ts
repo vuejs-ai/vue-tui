@@ -1,9 +1,9 @@
 import { describe, expect, test } from "vite-plus/test";
-import { normalizeInputEvent, type NormalizedInputFact } from "../../src/io/normalized-input.ts";
+import { normalizeInputSequence, type InputEvent } from "../../src/io/normalized-input.ts";
 import { projectPublicInputEvent } from "../../src/io/public-input.ts";
 
-function fact(event: string | { readonly paste: string }): NormalizedInputFact {
-  const result = normalizeInputEvent(event);
+function fact(event: string | { readonly paste: string }): InputEvent {
+  const result = normalizeInputSequence(event);
   if (!result) throw new Error(`Expected an input fact for ${JSON.stringify(event)}`);
   return result;
 }
@@ -125,7 +125,7 @@ describe("public input projection", () => {
   });
 
   test("uninterpretable sequences never become broadcast facts", () => {
-    expect(normalizeInputEvent("\x1b[?25h")).toBeUndefined();
+    expect(normalizeInputSequence("\x1b[?25h")).toBeUndefined();
   });
 
   test("delivers press and repeat with the same public shape", () => {
