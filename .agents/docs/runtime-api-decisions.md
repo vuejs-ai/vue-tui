@@ -382,3 +382,18 @@ Entries without a stamp are drafts of judgments Yunfei expressed. A stamp alone 
 - **Limits:** Text evaluates its root shape on every render: a current default slot produces exactly one host, while no default slot produces a Comment so a childless Text cannot introduce flex gap. A normal Fragment root, including one with a single child, or a text root retains Vue's development-only non-element-root warning and ineffective directive behavior; only Vue's specially marked development-root Fragment is eligible for Vue's own single-root normalization. A Comment root is silently ineffective. This adds no public `display` prop, component registration, directive interception, descendant search, or Fragment collection. Static remains the explicit exception because mounted terminal history is not retractable visual layout.
 - **Why:** Yunfei wants vue-tui to follow Vue's component-root philosophy rather than force `v-show` through arbitrary component shapes or patch each component separately. The renderer owns the few distinct host mechanisms: Box and top-level Text map visibility to Yoga, while nested Text needs a private composition flag plus normal cache invalidation. Components composed over those hosts should inherit the result automatically.
 - **Source:** Yunfei, 2026-07-26, follow-up to issue [#246](https://github.com/vuejs-ai/vue-tui/issues/246); no durable session URL is available, so this entry is the durable record.
+
+### Pointer support includes a low-level escape hatch
+
+- **Ruling:** If pointer input qualifies as product work and is built, Runtime must expose a low-level mouse primitive alongside targeted component delivery so an application can use the terminal capability directly.
+- **Limits:** This does not schedule pointer work or select the primitive's name, signature, event type, or Inline behavior. It does not change `useInput`; pointer delivery remains a separate opt-in facility. Mouse reporting is Fullscreen-only under the [architecture decisions](./architecture-decisions.md#mouse-support-is-a-fullscreen-capability).
+- **Why:** Yunfei asked for the explicit low-level hook as an escape hatch and for capability completeness while selecting on-demand mouse-reporting tiers.
+- **Source:** Yunfei, 2026-08-30, architecture discussion; no durable session URL is available, so this entry is the durable record.
+
+## Open
+
+### Pointer input has no exact public shape
+
+- **Question:** What exact targeted and low-level primitives deliver pointer events, and how does each report that Inline has no mouse support.
+- **Stopgap:** Nothing is built. Scope, targeted delivery, reporting tiers and the requirement for a low-level escape hatch are recorded in the architecture and API ledgers. The accepted `useInput` contract stays broadcast; pointer delivery is a separate opt-in facility.
+- **What would settle it:** A demonstrated need under the [product-work rule](./intent.md#product-work), then reviewed declarations and behavior recorded here as a Decided entry.
