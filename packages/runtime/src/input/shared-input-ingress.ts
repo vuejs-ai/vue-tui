@@ -30,7 +30,7 @@ export interface SharedInputIngress {
    */
   writeForTest(
     data: Uint8Array | string,
-    emitInput: (data: string | Uint8Array) => void,
+    dispatch: (data: Uint8Array | string) => void,
   ): Promise<void>;
 }
 
@@ -855,10 +855,10 @@ function createSharedInputIngress(terminal: TerminalBackend): SharedInputIngress
       return (options) =>
         options?.discard ? abortDetection(detection) : cancelDetection(detection);
     },
-    writeForTest(data, emitInput) {
+    writeForTest(data, dispatch) {
       const hadRuntimeListener = inputListenerAttached;
       try {
-        emitInput(typeof data === "string" ? data : Uint8Array.from(data));
+        dispatch(typeof data === "string" ? data : Uint8Array.from(data));
       } catch (error) {
         return Promise.reject(error);
       }

@@ -123,12 +123,9 @@ test.sequential("bsu/esu wraps a trailing throttled content change", async () =>
   }
 });
 
-// Port of Ink render.tsx:1945-1980 ("no bsu/esu when output is unchanged"): a
-// trailing throttled rerender whose cells are identical to the prior frame must
-// emit NEITHER bsu NOR esu, because the Surface has no changed range to write.
-// We force a re-render
-// that produces identical text via a counter ref read in the render fn but not
-// reflected in the output, mirroring Ink's rerender(sameElement).
+// A throttled rerender whose frame has no changed rows emits no
+// synchronized-output barriers. The counter triggers the rerender without
+// changing visible text.
 test.sequential("no bsu/esu on an unchanged trailing rerender", async () => {
   vi.useFakeTimers(FAKE_TIMER_OPTS);
   try {

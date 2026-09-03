@@ -1,5 +1,4 @@
 import { shallowRef, type ShallowRef } from "vue";
-import type { AppContext } from "../vue/context.ts";
 import type { TuiBox, TuiNode } from "../host/nodes.ts";
 import type { PaintGeometryFrame } from "../paint/geometry.ts";
 import type { RenderedTargetTransactionHost } from "./rendered-target.ts";
@@ -51,20 +50,6 @@ interface MutableBinding {
   readonly observers: Set<(state: InternalBoxSizeState, target: TuiBox | null) => void>;
   target: TuiBox | null;
   active: boolean;
-}
-
-const servicesByApp = new WeakMap<AppContext, InternalGeometryService>();
-
-export function setInternalGeometryService(
-  app: AppContext,
-  service: InternalGeometryService | null,
-): void {
-  if (service) servicesByApp.set(app, service);
-  else servicesByApp.delete(app);
-}
-
-export function getInternalGeometryService(app: AppContext): InternalGeometryService | undefined {
-  return servicesByApp.get(app);
 }
 
 function belongsToSubtree(node: TuiNode, ancestor: TuiNode): boolean {

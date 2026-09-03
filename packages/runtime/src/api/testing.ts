@@ -1,8 +1,9 @@
 import { nextTick, type ComponentPublicInstance } from "vue";
-import { mountWithInternalOptions, type TuiApp } from "../render.ts";
+import { mountWithInternalOptions } from "../session/session.ts";
 import type { MountOptions } from "./mount-options.ts";
+import type { TuiApp } from "./create-app.ts";
 import { INTERNAL_KITTY_KEYBOARD } from "../terminal/kitty-keyboard.ts";
-import { INTERNAL_RENDER_OBSERVER, type InternalRenderObserver } from "./render-observer.ts";
+import { INTERNAL_RENDER_OBSERVER, type InternalRenderObserver } from "../session/session.ts";
 import { createNodeTestHostMountFacts, type NodeTestHostMountFacts } from "./node-testing.ts";
 import {
   createManualSuspensionHost,
@@ -134,7 +135,7 @@ export function createTestHostBridge(options: TestHostBridgeOptions = {}): TestH
       try {
         const instance = mountWithInternalOptions(targetApp, resolvedOptions);
         app = targetApp;
-        writeInput = (data) => nodeFacts.writeInput(data);
+        writeInput = nodeFacts.writeInput;
         phase = "active";
         void targetApp.waitUntilExit().then(
           () => {

@@ -2,6 +2,8 @@ import { writeSync as fsWriteSync } from "node:fs";
 import process from "node:process";
 import type { Readable, Writable } from "node:stream";
 import { MAX_LAYOUT_VALUE } from "../../layout/numeric-limits.ts";
+import { createNodeProcessLifecycle, type NodeProcessLifecycle } from "./lifecycle.ts";
+import type { SuspensionHost } from "./process-suspension.ts";
 import type {
   TerminalBackend,
   TerminalCapabilities,
@@ -39,13 +41,18 @@ type NodeWritable = NodeJS.WriteStream & {
 };
 
 export interface NodeTerminalBackendOptions {
-  readonly stdin: Readable;
-  readonly stdout: Writable;
-  readonly stderr: Writable;
+  readonly stdin: unknown;
+  readonly stdout: unknown;
+  readonly stderr: unknown;
   /** Process environment the colour probe and capability facts read; defaults to `process.env`. */
   readonly environment?: Readonly<Record<string, string | undefined>>;
   /** Repository-only deterministic replacement for controlling-terminal size detection. */
   readonly sizeProbe?: TerminalSizeProbe;
+}
+
+export interface NodeTerminalBackendLifecycleOptions {
+  /** Deterministic mounts replace job-control signals without changing streams. */
+  readonly suspensionHost?: SuspensionHost;
 }
 
 function isReadable(value: unknown): value is Readable {
@@ -178,15 +185,22 @@ export class NodeTerminalBackend implements TerminalBackend {
   readonly #environment: Readonly<Record<string, string | undefined>>;
   readonly #sizeProbe: TerminalSizeProbe;
   readonly #freshSizeProbe: TerminalSizeProbe;
+  readonly #processLifecycle: NodeProcessLifecycle;
   readonly capabilities: TerminalCapabilities;
 
-  constructor(options: NodeTerminalBackendOptions) {
-    assertReadable(options.stdin);
-    assertWritable(options.stdout, "stdout");
-    assertWritable(options.stderr, "stderr");
-    this.#stdin = options.stdin as NodeReadable;
-    this.#stdout = options.stdout as NodeWritable;
-    this.#stderr = options.stderr as NodeWritable;
+  constructor(
+    options: NodeTerminalBackendOptions,
+    lifecycleOptions: NodeTerminalBackendLifecycleOptions = {},
+  ) {
+    const stdin = options.stdin;
+    const stdout = options.stdout;
+    const stderr = options.stderr;
+    assertReadable(stdin);
+    assertWritable(stdout, "stdout");
+    assertWritable(stderr, "stderr");
+    this.#stdin = stdin as NodeReadable;
+    this.#stdout = stdout as NodeWritable;
+    this.#stderr = stderr as NodeWritable;
     this.#environment = options.environment ?? process.env;
     const usesProcessOutput =
       options.sizeProbe === undefined &&
@@ -204,9 +218,10 @@ export class NodeTerminalBackend implements TerminalBackend {
               env: {},
             })
         : unavailableSizeProbe);
+    this.#processLifecycle = createNodeProcessLifecycle(lifecycleOptions);
 
-    const stdin = this.#stdin;
-    const stdout = this.#stdout;
+    const inputStream = this.#stdin;
+    const outputStream = this.#stdout;
     const rawModeSupported = (): boolean => this.isRawModeSupported();
     const colorDepthFor = (stream: NodeWritable, output: TerminalOutput): number | undefined =>
       this.colorDepthFor(stream, output);
@@ -228,21 +243,26 @@ export class NodeTerminalBackend implements TerminalBackend {
     this.capabilities = Object.freeze({
       stdin: Object.freeze({
         get isTTY() {
-          return stdin.isTTY === true;
+          return inputStream.isTTY === true;
         },
         get canRead() {
-          return canRead(stdin);
+          return canRead(inputStream);
         },
         get canSetRawMode() {
           // A readable TTY beside redirected stdout is a document host: it may
           // deliver ordinary input, but Runtime must not negotiate raw input.
-          return stdout.isTTY === true && rawModeSupported();
+          return outputStream.isTTY === true && rawModeSupported();
         },
       }),
       stdout: outputFacts(this.#stdout, "stdout"),
       stderr: outputFacts(this.#stderr, "stderr"),
       environment: this.#environment,
     });
+  }
+
+  /** Process exits and job-control signals belong to the Node terminal backend. */
+  get processLifecycle(): NodeProcessLifecycle {
+    return this.#processLifecycle;
   }
 
   get size(): TerminalSize {
@@ -517,16 +537,22 @@ export class NodeTerminalBackend implements TerminalBackend {
 }
 
 /** Resolve borrowed streams and their process defaults inside the Node backend. */
-export function createNodeTerminalBackend(options: {
-  readonly stdin?: Readable;
-  readonly stdout?: Writable;
-  readonly stderr?: Writable;
-  readonly sizeProbe?: TerminalSizeProbe;
-}): NodeTerminalBackend {
-  return new NodeTerminalBackend({
-    stdin: options.stdin ?? process.stdin,
-    stdout: options.stdout ?? process.stdout,
-    stderr: options.stderr ?? process.stderr,
-    sizeProbe: options.sizeProbe,
-  });
+export function createNodeTerminalBackend(
+  options: {
+    readonly stdin?: unknown;
+    readonly stdout?: unknown;
+    readonly stderr?: unknown;
+    readonly sizeProbe?: TerminalSizeProbe;
+  },
+  lifecycleOptions?: NodeTerminalBackendLifecycleOptions,
+): NodeTerminalBackend {
+  return new NodeTerminalBackend(
+    {
+      stdin: options.stdin ?? process.stdin,
+      stdout: options.stdout ?? process.stdout,
+      stderr: options.stderr ?? process.stderr,
+      sizeProbe: options.sizeProbe,
+    },
+    lifecycleOptions,
+  );
 }

@@ -13,7 +13,7 @@ const styled: Style = {
 const link = { parameters: "id=frame", target: "https://example.com" };
 
 describe("Frame", () => {
-  test("stores inline cell style and hyperlink data without an object grid", () => {
+  test("stores inline cell style and hyperlink data", () => {
     const frame = new Frame(2, 1);
     frame.set(0, 0, {
       grapheme: "界",

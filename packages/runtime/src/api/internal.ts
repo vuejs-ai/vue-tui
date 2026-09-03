@@ -19,9 +19,9 @@ export {
   type InternalMountOptionsInput,
 } from "./internal-mount-options.ts";
 export { INTERNAL_KITTY_KEYBOARD, type KittyKeyboardOptions } from "../terminal/kitty-keyboard.ts";
-export { INTERNAL_RENDER_OBSERVER, type InternalRenderObserver } from "./render-observer.ts";
+export { INTERNAL_RENDER_OBSERVER, type InternalRenderObserver } from "../session/session.ts";
 export { INTERNAL_TERMINAL_SIZE_PROBE } from "../terminal/node/terminal-size-probe.ts";
-export { useInternalRenderSession } from "../render-session.ts";
+export { useInternalRenderSession } from "../session/render-session.ts";
 export {
   INTERNAL_SUSPENSION_HOST,
   createManualSuspensionHost,
@@ -32,7 +32,7 @@ export {
 export { messageForNonError } from "../vue/error-value.ts";
 export { useStdout, type UseStdoutReturn } from "../vue/composables/useStdout.ts";
 export { useStderr, type UseStderrReturn } from "../vue/composables/useStderr.ts";
-export type { CoordinatedWriteResult } from "../terminal/output-coordinator.ts";
+export type { CoordinatedWriteResult } from "../vue/context.ts";
 export { bsu, esu, shouldSynchronize } from "../terminal/write-synchronized.ts";
 export { nextLineEscape } from "../surface/cursor-helpers.ts";
 export { MAX_LAYOUT_VALUE } from "../layout/numeric-limits.ts";

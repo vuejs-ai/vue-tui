@@ -1,19 +1,16 @@
 import { hasInjectionContext, inject, shallowRef, type ShallowRef } from "vue";
-import { AppContextKey } from "./context.ts";
+import { AppContextKey, InternalGeometryServiceKey } from "./context.ts";
 import type { TuiBox } from "../host/nodes.ts";
-import { useRenderedTargetRegistration } from "../session/rendered-target.ts";
 import { tryOnScopeDispose } from "./composables/scope.ts";
-import {
-  getInternalGeometryService,
-  type InternalBoxSizeState,
-} from "../session/geometry-service.ts";
+import type { InternalBoxSizeState } from "../session/geometry-service.ts";
+import { useRenderedTargetRegistration } from "./rendered-target.ts";
 
 export function useInternalBoxSize(
   resolveTarget: () => TuiBox | null,
   observe?: (state: InternalBoxSizeState, target: TuiBox | null) => void,
 ): Readonly<ShallowRef<InternalBoxSizeState>> {
   const app = hasInjectionContext() ? inject(AppContextKey, null) : null;
-  const service = app ? getInternalGeometryService(app) : undefined;
+  const service = hasInjectionContext() ? inject(InternalGeometryServiceKey, null) : null;
   if (!app || !service) {
     const state = shallowRef<InternalBoxSizeState>(
       Object.freeze({ status: "unavailable" as const }),

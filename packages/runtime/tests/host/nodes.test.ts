@@ -196,10 +196,8 @@ test("isContainer rejects text-leaf and accepts box", () => {
 });
 
 test("setElementText rejecting a non-text container leaves existing children intact", () => {
-  // Regression: setElementText used to remove ALL children FIRST, then try to
-  // insert the text-leaf — which throws the text-context guard for a non-text
-  // container, leaving the box half-cleared (children gone, nothing inserted).
-  // The context must be validated BEFORE the destructive remove.
+  // Validate the text context before replacing children so a rejected update
+  // leaves the existing child list intact.
   const ops = buildNodeOps({ onCommit: () => {} });
   const box = ops.createElement("tui-box") as ReturnType<typeof createBox>;
   const child = ops.createElement("tui-text");
@@ -207,7 +205,6 @@ test("setElementText rejecting a non-text container leaves existing children int
   expect(box.children.length).toBe(1);
 
   expect(() => ops.setElementText(box, "hello")).toThrow(/must be rendered inside <Text>/);
-  // Key assertion: the rejected insert must not have removed the box's children.
   expect(box.children.length).toBe(1);
   expect(box.children[0]).toBe(child);
 });

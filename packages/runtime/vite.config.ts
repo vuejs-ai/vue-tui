@@ -11,7 +11,7 @@ const HOST_TAGS = ["tui-box", "tui-text", "tui-virtual-text", "tui-static"];
 
 export default defineConfig({
   // `VueVite` parses `.vue` SFCs in the TEST/dev graph (unit tests may import the
-  // .vue components directly, e.g. tests/host/text-measure.test.ts). The `pack` build has
+  // .vue components directly, e.g. tests/text/text-measure.test.ts). The `pack` build has
   // its own `Vue` rolldown plugin below; both need `isCustomElement` so the host
   // tags (`<tui-box>` / `<tui-text>` / …) inside SFC templates compile to raw element
   // vnodes instead of being resolved as components.

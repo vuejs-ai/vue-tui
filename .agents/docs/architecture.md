@@ -1,6 +1,6 @@
 # Runtime architecture
 
-This record owns the **internal** structure of `@vue-tui/runtime`: which units exist, what data crosses each boundary, which entity owns which responsibility, and why the lines are where they are. It describes the target structure; the code diverges from it, and [TODOs — architecture](./todos-architecture.md) lists the concrete work that closes the gap. Judgments Yunfei expressed about this structure live in the [architecture decision ledger](./architecture-decisions.md).
+This record owns the **internal** structure of `@vue-tui/runtime`: which units exist, what data crosses each boundary, which entity owns which responsibility, and why the lines are where they are. It describes the target structure; where the code still diverges from it, [TODOs — architecture](./todos-architecture.md) lists the concrete work that closes the gap. Judgments Yunfei expressed about this structure live in the [architecture decision ledger](./architecture-decisions.md).
 
 Neighbouring records own their own subjects and are not restated here:
 
@@ -115,14 +115,14 @@ These are plain data: they hold no resources, perform no I/O, and can be tested 
 
 A grapheme, its display width, and its style. **Style is stored inline**, not in a dedup table: a per-frame table makes indices incomparable across frames, which breaks integer `diff`; a per-session table has an unbounded key space once truecolor and arbitrary OSC 8 links are in play, so a log viewer that hyperlinks every row grows it forever. Ratatui's `Cell` stores `fg`, `bg` and `modifier` inline for the same reason.
 
-| Field       | Content                                                                                                                                                                                                                                      |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fg` / `bg` | Structured colour (default / 16 / 256 / truecolor). Colour degradation becomes a pure function.                                                                                                                                              |
-| `attrs`     | Bitmask over the structured SGR attributes, including 1–9 and 53: bold, dim, italic, underline, blink, rapid blink, inverse, conceal, strikethrough and overline. Room for further attributes at one bit each.                               |
-| `extraSgr`  | Ordered active SGR pairs that have no structured field. This exact fallback preserves authored terminal attributes until a product decision promotes one into `attrs` or deliberately stops supporting it.                                   |
-| `link`      | The OSC 8 hyperlink target, nullable. **Required**: `text/sanitize-ansi.ts` preserves OSC 8 end to end, the hyperlink cases in `tests/paint/sanitize-ansi.test.ts` pin that, and `text/text-measure.ts` accounts for its zero visible width. |
+| Field       | Content                                                                                                                                                                                                                                     |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fg` / `bg` | Structured colour (default / 16 / 256 / truecolor). Colour degradation becomes a pure function.                                                                                                                                             |
+| `attrs`     | Bitmask over the structured SGR attributes, including 1–9 and 53: bold, dim, italic, underline, blink, rapid blink, inverse, conceal, strikethrough and overline. Room for further attributes at one bit each.                              |
+| `extraSgr`  | Ordered active SGR pairs that have no structured field. This exact fallback preserves authored terminal attributes until a product decision promotes one into `attrs` or deliberately stops supporting it.                                  |
+| `link`      | The OSC 8 hyperlink target, nullable. **Required**: `text/sanitize-ansi.ts` preserves OSC 8 end to end, the hyperlink cases in `tests/text/sanitize-ansi.test.ts` pin that, and `text/text-measure.ts` accounts for its zero visible width. |
 
-`@alcalzone/ansi-tokenize` 0.3.0 pairs SGR 1–4, 7–9 and 53 with their dedicated off codes and carries 5, 6 and other numeric SGR, such as 21, 51, 73 and 11, with the generic reset. The string pipeline therefore carries those numeric forms to the screen. Colon sub-parameter forms need their own parser path: colour forms are recognised, while a form such as `\x1b[4:3m` currently reaches output as raw bytes and causes its following `\x1b[24m` terminator to be lost. The target treats a complete colon-form SGR as one style token and retains an exact fallback for any authored attribute that has no structured representation.
+`@alcalzone/ansi-tokenize` 0.3.0 pairs SGR 1–4, 7–9 and 53 with their dedicated off codes and carries other numeric SGR with the generic reset. Runtime assigns family-specific terminators to 5, 6, 21, underline colours and complete colon forms. Numeric and colon-form attributes without a structured field remain ordered in `extraSgr`, including framed text, superscript, alternate fonts and styled underlines.
 
 ### `Frame` — one rendered picture
 
@@ -137,7 +137,7 @@ Plain data holding one picture's worth of cells, plus its size. Four properties 
 
 Every node's rectangle and its resolved border and padding insets, whether the node is laid out at all, **and the wrapped lines measurement already produced**. `paint/paint.ts` reads the first three from `ComputedLayout`; nothing outside `layout/` holds a Yoga node.
 
-The [layout transaction boundary](./rendering-modes.md#layout-transaction-boundary) is vouched direction and already requires that "the layout system must return final geometry for every output region", with intermediate geometry forbidden from escaping into renderer control flow. Wrapped lines are part of that geometry: `layout/yoga.ts`'s measure callback already produces them and caches per `(revision, available width, width mode, wrap)`, and `60e96fd` (fixing #283) exists to make measurement and painting share one conservative whole-cell budget. A `ComputedLayout` of rectangles alone forces the painter to wrap a second time, so the two budgets diverge again — which is what #283 was. `tests/host/layout-transaction/single-pass-text-measurement.test.ts` asserts `layoutCalls === 1`.
+The [layout transaction boundary](./rendering-modes.md#layout-transaction-boundary) is vouched direction and already requires that "the layout system must return final geometry for every output region", with intermediate geometry forbidden from escaping into renderer control flow. Wrapped lines are part of that geometry: `layout/yoga.ts`'s measure callback already produces them and caches per `(revision, available width, width mode, wrap)`, and `60e96fd` (fixing #283) exists to make measurement and painting share one conservative whole-cell budget. A `ComputedLayout` of rectangles alone forces the painter to wrap a second time, so the two budgets diverge again — which is what #283 was. `tests/layout/layout-transaction/single-pass-text-measurement.test.ts` asserts `layoutCalls === 1`.
 
 Wrapping and measurement therefore live in `text/`, which both `layout/` and `paint/` may import. They cannot live in the painter: the dependency direction forbids `layout/` from importing `paint/`, so a painter-owned cache could never be the shared one.
 
@@ -169,6 +169,8 @@ Every entity works within one layer, with one deliberate exception: `Session` is
 | `InputDispatcher`    | The subscription set and delivery                                                                                                                                               | Hands each `InputEvent` to active subscriptions, and translates "is anyone listening" into terminal demand. Focus ownership is not here: that requires reading the tree and layout order, which is `Session`'s.                                                                                   |
 | `Session`            | The Vue app, the node tree, `LayoutEngine`, `Painter`, `Surface`, terminal leases, the scheduler, `InputDispatcher`, focus ownership, geometry registration and exit settlement | One commit is layout → paint → `surface.present(frame)`. Its lifecycle is a union type — `"mounting" \| "running" \| "suspended" \| "tearing-down" \| "torn-down"` — and it is a **session** state rather than a process state: `SIGTSTP`, signal exit and exit codes belong to the node backend. |
 | `DevSession`         | The HMR bridge, the error overlay, the in-process record of which session owns the terminal                                                                                     | Replaces a whole `Session` during development: dispose the old one, build a new one. Not a development branch inside `Session`.                                                                                                                                                                   |
+
+`LayoutEngine` and `Painter` name roles rather than exported types: the engine is the `layout/` module, whose node-to-engine map and allocation ledger are module-private, and the painter is `paint()`, which holds nothing between calls.
 
 ### The three surfaces
 
@@ -218,9 +220,9 @@ Vue already supplies three things a terminal framework otherwise has to build: c
 
 ## Evidence
 
-- [`sanitize-ansi.test.ts`](../../packages/runtime/tests/paint/sanitize-ansi.test.ts) pins the OSC 8 hyperlink and SGR preservation that `Cell` must not narrow.
-- [`single-pass-text-measurement.test.ts`](../../packages/runtime/tests/host/layout-transaction/single-pass-text-measurement.test.ts) asserts `layoutCalls === 1`, which a `ComputedLayout` without wrapped lines would break.
-- [`render-session.test.ts`](../../packages/runtime/tests/render-session.test.ts) pins the three-variant surface resolution the three `Surface` implementations take over.
+- [`sanitize-ansi.test.ts`](../../packages/runtime/tests/text/sanitize-ansi.test.ts) pins the OSC 8 hyperlink and SGR preservation that `Cell` must not narrow.
+- [`single-pass-text-measurement.test.ts`](../../packages/runtime/tests/layout/layout-transaction/single-pass-text-measurement.test.ts) asserts `layoutCalls === 1`, which a `ComputedLayout` without wrapped lines would break.
+- [`render-session.test.ts`](../../packages/runtime/tests/session/render-session.test.ts) pins the three-variant surface resolution the three `Surface` implementations take over.
 - The [Runtime benchmark workspace](../../benchmarks/runtime) is where `Frame`'s memory layout is decided.
 
 The peer sources cited inline are read at the snapshots [`peer-frameworks.md`](./peer-frameworks.md) retains.

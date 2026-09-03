@@ -1,9 +1,8 @@
 import { inject, isRef, onMounted, watch, type Ref } from "vue";
 import { isPublicBoxInstance, type PublicBoxInstance } from "../components/public-box.ts";
-import { AppContextKey, type AppContext } from "../context.ts";
+import { AppContextKey, type AppContext, useInternalRenderSession } from "../context.ts";
 import { resolveTuiNode } from "../../host/resolve-node.ts";
 import type { TuiBox } from "../../host/nodes.ts";
-import { useInternalRenderSession } from "../../render-session.ts";
 
 export interface DirectBoxTarget {
   readonly app: AppContext;
