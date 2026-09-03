@@ -40,6 +40,8 @@ import {
 
 export interface TtyRendererOptions {
   onCommit: () => void;
+  /** Host policy supplied by the terminal/session boundary. */
+  isProduction?: () => boolean;
   /**
    * Optional render-local engine lifetime. The string and live renderers use
    * its ledger form to release hosts an interrupted initial patch allocated
@@ -599,7 +601,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
         }
       } else if (key === "key" || key === "ref" || key.startsWith("on")) {
         // Reserved by Vue / event keys, ignore.
-      } else if (process.env["NODE_ENV"] !== "production") {
+      } else if (!options.isProduction?.()) {
         // eslint-disable-next-line no-console
         console.warn(`[vue-tui] unknown prop "${key}" on <${el.type}>`);
       }

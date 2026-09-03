@@ -1,15 +1,15 @@
 import { nextTick, type ComponentPublicInstance } from "vue";
-import { mountWithInternalOptions, type MountOptions, type TuiApp } from "../render.ts";
+import { mountWithInternalOptions, type TuiApp } from "../render.ts";
+import type { MountOptions } from "./mount-options.ts";
 import { INTERNAL_KITTY_KEYBOARD } from "../terminal/kitty-keyboard.ts";
 import { INTERNAL_RENDER_OBSERVER, type InternalRenderObserver } from "./render-observer.ts";
-import { getSharedStdinIngress, type SharedStdinIngress } from "../terminal/stdin-ingress.ts";
+import { createNodeTestHostMountFacts, type NodeTestHostMountFacts } from "./node-testing.ts";
 import {
   createManualSuspensionHost,
   INTERNAL_SUSPENSION_HOST,
 } from "../terminal/node/process-suspension.ts";
 import { INTERNAL_TERMINAL_SIZE_PROBE } from "../terminal/node/terminal-size-probe.ts";
 import { createInternalMountOptions } from "./internal-mount-options.ts";
-import { createTerminalStyle } from "../paint/terminal-style.ts";
 
 export interface TestContentFrame {
   readonly dynamic: string;
@@ -46,7 +46,7 @@ export function createTestHostBridge(options: TestHostBridgeOptions = {}): TestH
   const suspensionHost = createManualSuspensionHost();
   let phase: "created" | "mounting" | "active" | "suspended" | "inactive" = "created";
   let app: TuiApp | undefined;
-  let ingress: SharedStdinIngress | undefined;
+  let writeInput: NodeTestHostMountFacts["writeInput"] | undefined;
   let operationQueue: Promise<void> = Promise.resolve();
   const isInactive = (): boolean => phase === "inactive";
 
@@ -75,15 +75,18 @@ export function createTestHostBridge(options: TestHostBridgeOptions = {}): TestH
     },
   };
 
-  const assertActive = (): { readonly app: TuiApp; readonly ingress: SharedStdinIngress } => {
+  const assertActive = (): {
+    readonly app: TuiApp;
+    readonly writeInput: NodeTestHostMountFacts["writeInput"];
+  } => {
     if (phase === "created" || phase === "mounting") {
       throw new Error("Test host bridge has not mounted an application.");
     }
-    if (phase === "inactive" || !app || !ingress) {
+    if (phase === "inactive" || !app || !writeInput) {
       throw new Error("Test host bridge application is no longer mounted.");
     }
     if (phase === "suspended") throw new Error("Test host bridge is suspended.");
-    return { app, ingress };
+    return { app, writeInput };
   };
 
   const enqueue = <T>(operation: () => Promise<T>): Promise<T> => {
@@ -115,16 +118,13 @@ export function createTestHostBridge(options: TestHostBridgeOptions = {}): TestH
       // unthrottled so one Vue update turn deterministically produces its
       // corresponding content observation, independent of wall-clock timing.
       const publicOptions = { ...mountOptions };
-      const stdin = publicOptions.stdin ?? process.stdin;
-      const stdout = publicOptions.stdout ?? process.stdout;
+      const nodeFacts = createNodeTestHostMountFacts(publicOptions);
       const resolvedOptions = createInternalMountOptions({
         ...publicOptions,
         maxFps: 0,
         // The official test host models output capability explicitly instead
         // of inheriting the test worker's FORCE_COLOR / NO_COLOR state.
-        terminalStyle: createTerminalStyle(
-          (stdout as { readonly isTTY?: boolean }).isTTY === true ? 3 : 0,
-        ),
+        terminalStyle: nodeFacts.terminalStyle,
         [INTERNAL_RENDER_OBSERVER]: observer,
         [INTERNAL_SUSPENSION_HOST]: suspensionHost,
         [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),
@@ -134,7 +134,7 @@ export function createTestHostBridge(options: TestHostBridgeOptions = {}): TestH
       try {
         const instance = mountWithInternalOptions(targetApp, resolvedOptions);
         app = targetApp;
-        ingress = getSharedStdinIngress(stdin as NodeJS.ReadStream);
+        writeInput = (data) => nodeFacts.writeInput(data);
         phase = "active";
         void targetApp.waitUntilExit().then(
           () => {
@@ -154,7 +154,7 @@ export function createTestHostBridge(options: TestHostBridgeOptions = {}): TestH
       const input = typeof data === "string" ? data : Uint8Array.from(data);
       return enqueue(async () => {
         const active = assertActive();
-        await active.ingress.writeForTest(input);
+        await active.writeInput(input);
         await settleRuntimeWork(active.app);
         if (!isInactive()) assertActive();
       });
@@ -171,7 +171,7 @@ export function createTestHostBridge(options: TestHostBridgeOptions = {}): TestH
     },
     resume() {
       return enqueue(async () => {
-        if (phase !== "suspended" || !app || !ingress) {
+        if (phase !== "suspended" || !app || !writeInput) {
           throw new Error("Test host bridge is not suspended.");
         }
         await suspensionHost.resume();

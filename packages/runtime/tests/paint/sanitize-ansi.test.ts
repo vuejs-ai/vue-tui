@@ -26,7 +26,7 @@ describe("sanitize-ansi", () => {
   test("NO_COLOR strips color SGR while preserving non-color attributes", () => {
     const terminalStyle = resolveTerminalStyle({
       color: true,
-      stdout: { isTTY: true, getColorDepth: () => 24 },
+      stdout: { isTTY: true, colorDepth: 24 },
       environment: { NO_COLOR: "1" },
     });
 

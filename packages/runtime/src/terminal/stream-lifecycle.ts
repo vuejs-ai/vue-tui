@@ -1,11 +1,11 @@
-import type { Readable, Writable } from "node:stream";
+import type { TerminalBackend, TerminalOutput } from "./backend.ts";
 
 interface TrackedWrite {
   active: boolean;
 }
 
-interface WritableState {
-  readonly stream: Writable;
+interface OutputState {
+  readonly output: TerminalOutput;
   readonly isStdout: boolean;
   readonly isStderr: boolean;
   readonly writes: Set<TrackedWrite>;
@@ -26,12 +26,13 @@ interface StreamEventBroker {
 
 export interface MountedStreamLifecycle {
   activate(): void;
-  trackWrite(stream: Writable): (error?: unknown) => void;
+  trackWrite(output: TerminalOutput): (error?: unknown) => void;
   waitForIdle(): Promise<void>;
   dispose(): void;
 }
 
-const streamEventBrokers = new WeakMap<object, StreamEventBroker>();
+const outputEventBrokers = new WeakMap<object, StreamEventBroker>();
+const inputEventBrokers = new WeakMap<object, StreamEventBroker>();
 
 type CleanupStackResult =
   | { readonly failed: false }
@@ -53,48 +54,29 @@ function runCleanupStack(cleanups: Array<() => void>): CleanupStackResult {
   return failed ? { failed: true, error: firstError } : { failed: false };
 }
 
-/**
- * Keep one physical listener set per borrowed stream and fan events out to the
- * mounted applications that currently depend on it. Distinct apps may share
- * stderr or stdin, so attaching listeners per app both exceeds EventEmitter's
- * warning threshold and makes one app's cleanup prone to disturbing another.
- */
-function subscribeToStreamEvents(
-  stream: Readable | Writable,
+function subscribeToOutputEvents(
+  terminal: TerminalBackend,
+  output: TerminalOutput,
   subscriber: StreamEventSubscriber,
 ): () => void {
-  let broker = streamEventBrokers.get(stream);
+  const owner = terminal.outputOwnerFor(output);
+  let broker = outputEventBrokers.get(owner);
   if (!broker) {
     const subscribers = new Set<StreamEventSubscriber>();
-    // Preserve the subscriber set that existed when the physical event began,
-    // even when one callback removes itself or another application.
     const snapshotSubscribers = (): StreamEventSubscriber[] => Array.from(subscribers);
-    const onError = (error: unknown): void => {
-      for (const current of snapshotSubscribers()) current.onError?.(error);
-    };
-    const onClose = (): void => {
-      for (const current of snapshotSubscribers()) current.onClose?.();
-    };
-    const onFinish = (): void => {
-      for (const current of snapshotSubscribers()) current.onFinish?.();
-    };
-    const onEnd = (): void => {
-      for (const current of snapshotSubscribers()) current.onEnd?.();
-    };
-    const listeners = [
-      ["error", onError],
-      ["close", onClose],
-      ["finish", onFinish],
-      ["end", onEnd],
-    ] as const;
     const cleanups: Array<() => void> = [];
     try {
-      for (const [event, listener] of listeners) {
-        stream.on(event, listener);
-        cleanups.push(() => {
-          stream.off(event, listener);
-        });
-      }
+      cleanups.push(
+        terminal.onOutputEvent(output, "error", (error) => {
+          for (const current of snapshotSubscribers()) current.onError?.(error);
+        }),
+        terminal.onOutputEvent(output, "close", () => {
+          for (const current of snapshotSubscribers()) current.onClose?.();
+        }),
+        terminal.onOutputEvent(output, "finish", () => {
+          for (const current of snapshotSubscribers()) current.onFinish?.();
+        }),
+      );
     } catch (error) {
       runCleanupStack(cleanups);
       throw error;
@@ -105,11 +87,11 @@ function subscribeToStreamEvents(
       subscribers,
       dispose() {
         const cleanup = runCleanupStack(cleanups);
-        if (streamEventBrokers.get(stream) === created) streamEventBrokers.delete(stream);
+        if (outputEventBrokers.get(owner) === created) outputEventBrokers.delete(owner);
         if (cleanup.failed) throw cleanup.error;
       },
     };
-    streamEventBrokers.set(stream, created);
+    outputEventBrokers.set(owner, created);
     broker = created;
   }
 
@@ -123,39 +105,94 @@ function subscribeToStreamEvents(
   };
 }
 
+function subscribeToInputEvents(
+  terminal: TerminalBackend,
+  subscriber: StreamEventSubscriber,
+): () => void {
+  const owner = terminal.inputOwner;
+  let broker = inputEventBrokers.get(owner);
+  if (!broker) {
+    const subscribers = new Set<StreamEventSubscriber>();
+    const snapshotSubscribers = (): StreamEventSubscriber[] => Array.from(subscribers);
+    const cleanups: Array<() => void> = [];
+    try {
+      cleanups.push(
+        terminal.onInputEvent("error", (error) => {
+          for (const current of snapshotSubscribers()) current.onError?.(error);
+        }),
+        terminal.onInputEvent("close", () => {
+          for (const current of snapshotSubscribers()) current.onClose?.();
+        }),
+        terminal.onInputEvent("end", () => {
+          for (const current of snapshotSubscribers()) current.onEnd?.();
+        }),
+      );
+    } catch (error) {
+      runCleanupStack(cleanups);
+      throw error;
+    }
+
+    let created!: StreamEventBroker;
+    created = {
+      subscribers,
+      dispose() {
+        const cleanup = runCleanupStack(cleanups);
+        if (inputEventBrokers.get(owner) === created) inputEventBrokers.delete(owner);
+        if (cleanup.failed) throw cleanup.error;
+      },
+    };
+    inputEventBrokers.set(owner, created);
+    broker = created;
+  }
+
+  broker.subscribers.add(subscriber);
+  let active = true;
+  return () => {
+    if (!active) return;
+    active = false;
+    broker!.subscribers.delete(subscriber);
+    if (broker!.subscribers.size === 0) broker!.dispose();
+  };
+}
+
+/**
+ * Observe one mounted backend's borrowed I/O without leaking host streams into
+ * the session. Physical listeners are shared by opaque backend identities.
+ */
 export function createMountedStreamLifecycle(options: {
-  readonly stdin: Readable;
-  readonly stdout: Writable;
-  readonly stderr: Writable;
+  readonly terminal: TerminalBackend;
   readonly hasManagedInputDemand: () => boolean;
   readonly onFailure: (error: unknown) => void;
 }): MountedStreamLifecycle {
-  const writableStates = new Map<Writable, WritableState>();
-  const stdoutState: WritableState = {
-    stream: options.stdout,
+  const stdoutOwner = options.terminal.outputOwnerFor("stdout");
+  const stdoutState: OutputState = {
+    output: "stdout",
     isStdout: true,
-    isStderr: options.stderr === options.stdout,
+    isStderr: options.terminal.outputOwnerFor("stderr") === stdoutOwner,
     writes: new Set(),
     stopObserving: null,
   };
-  writableStates.set(options.stdout, stdoutState);
-  if (options.stderr !== options.stdout) {
-    writableStates.set(options.stderr, {
-      stream: options.stderr,
-      isStdout: false,
-      isStderr: true,
-      writes: new Set(),
-      stopObserving: null,
-    });
-  }
+  const stderrState: OutputState = stdoutState.isStderr
+    ? stdoutState
+    : {
+        output: "stderr",
+        isStdout: false,
+        isStderr: true,
+        writes: new Set(),
+        stopObserving: null,
+      };
+  const outputStates = new Map<TerminalOutput, OutputState>([
+    ["stdout", stdoutState],
+    ["stderr", stderrState],
+  ]);
 
   const idleWaiters = new Set<() => void>();
-  let stopObservingStdin: (() => void) | null = null;
+  let stopObservingInput: (() => void) | null = null;
   let active = false;
   let disposed = false;
   let pendingWrites = 0;
 
-  function settleWrite(state: WritableState, write: TrackedWrite): void {
+  function settleWrite(state: OutputState, write: TrackedWrite): void {
     if (!write.active) return;
     write.active = false;
     state.writes.delete(write);
@@ -179,11 +216,11 @@ export function createMountedStreamLifecycle(options: {
     if (observerCleanupFailed) options.onFailure(observerCleanupError);
   }
 
-  function abandonWrites(state: WritableState): void {
+  function abandonWrites(state: OutputState): void {
     for (const write of Array.from(state.writes)) settleWrite(state, write);
   }
 
-  function reportWritableLoss(state: WritableState, event: "close" | "finish"): void {
+  function reportWritableLoss(state: OutputState, event: "close" | "finish"): void {
     if (!active || disposed) return;
     const hadPendingWrites = state.writes.size > 0;
     abandonWrites(state);
@@ -206,9 +243,9 @@ export function createMountedStreamLifecycle(options: {
     }
   }
 
-  function observeWritableState(state: WritableState): void {
+  function observeOutputState(state: OutputState): void {
     if (state.stopObserving) return;
-    state.stopObserving = subscribeToStreamEvents(state.stream, {
+    state.stopObserving = subscribeToOutputEvents(options.terminal, state.output, {
       onError(error) {
         if (!active || disposed) return;
         const hadPendingWrites = state.writes.size > 0;
@@ -228,17 +265,11 @@ export function createMountedStreamLifecycle(options: {
     if (active || disposed) return;
     active = true;
     try {
-      for (const state of writableStates.values()) {
-        if (state.isStdout) observeWritableState(state);
-      }
-
-      const reportInputError = (error: unknown): void => {
-        if (!active || disposed || !options.hasManagedInputDemand()) return;
-        options.onFailure(error);
-      };
-      stopObservingStdin = subscribeToStreamEvents(options.stdin, {
+      observeOutputState(stdoutState);
+      stopObservingInput = subscribeToInputEvents(options.terminal, {
         onError(error) {
-          reportInputError(error);
+          if (!active || disposed || !options.hasManagedInputDemand()) return;
+          options.onFailure(error);
         },
       });
     } catch (error) {
@@ -251,14 +282,14 @@ export function createMountedStreamLifecycle(options: {
     }
   }
 
-  function trackWrite(stream: Writable): (error?: unknown) => void {
-    const state = writableStates.get(stream);
+  function trackWrite(output: TerminalOutput): (error?: unknown) => void {
+    const state = outputStates.get(output);
     if (!state || disposed) {
       return (error) => {
         if (error !== undefined && error !== null) options.onFailure(error);
       };
     }
-    if (!state.isStdout) observeWritableState(state);
+    if (!state.isStdout) observeOutputState(state);
     const write: TrackedWrite = { active: true };
     state.writes.add(write);
     pendingWrites++;
@@ -266,10 +297,7 @@ export function createMountedStreamLifecycle(options: {
       if (!write.active) return;
       if (error !== undefined && error !== null) {
         options.onFailure(error);
-        // Node reports a failed write callback before emitting the matching
-        // stream `error`/`close` events. Keep the shared observer and idle
-        // barrier alive through that event turn so Runtime's borrowed listener
-        // handles the error instead of exposing an uncaught EventEmitter error.
+        // Keep the shared observer through the matching host-error event turn.
         setImmediate(() => settleWrite(state, write));
         return;
       }
@@ -295,18 +323,18 @@ export function createMountedStreamLifecycle(options: {
       failed = true;
       firstError = error;
     };
-    const stopStdin = stopObservingStdin;
-    stopObservingStdin = null;
+    const stopInput = stopObservingInput;
+    stopObservingInput = null;
     try {
-      stopStdin?.();
+      stopInput?.();
     } catch (error) {
       recordCleanupError(error);
     }
-    for (const state of writableStates.values()) {
-      const stopWritable = state.stopObserving;
+    for (const state of new Set(outputStates.values())) {
+      const stopOutput = state.stopObserving;
       state.stopObserving = null;
       try {
-        stopWritable?.();
+        stopOutput?.();
       } catch (error) {
         recordCleanupError(error);
       }

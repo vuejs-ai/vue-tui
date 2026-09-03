@@ -1,3 +1,4 @@
+import type { TerminalOutput } from "../terminal/backend.ts";
 import {
   SurfaceBase,
   type SurfaceDisposeOptions,
@@ -30,8 +31,8 @@ export class DocumentSurface extends SurfaceBase {
     return presentation.history.output !== "";
   }
 
-  handoffHistory(stream: NodeJS.WriteStream, data: string, runtime: SurfaceRuntime): void {
-    if (data !== "") runtime.write(stream, data);
+  handoffHistory(output: TerminalOutput, data: string, runtime: SurfaceRuntime): void {
+    if (data !== "") runtime.write(output, data);
   }
 
   suspend(_runtime: SurfaceRuntime): void {

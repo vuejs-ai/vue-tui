@@ -1,33 +1,14 @@
-import { PassThrough } from "node:stream";
 import { expect, test, vi } from "vite-plus/test";
+import type { TerminalBackend } from "../../src/terminal/backend.ts";
+import { createTestTerminalBackend } from "../../src/terminal/test/backend.ts";
 import { createMountedStreamLifecycle } from "../../src/terminal/stream-lifecycle.ts";
 
-test("shared borrowed streams use one physical observer set and release it with the last app", () => {
-  const stdin = new PassThrough();
-  const stderr = new PassThrough();
-  const stderrCallerError = vi.fn();
-  stderr.on("error", stderrCallerError);
-  const stderrBaseline = {
-    error: stderr.listenerCount("error"),
-    close: stderr.listenerCount("close"),
-    finish: stderr.listenerCount("finish"),
-    end: stderr.listenerCount("end"),
-  };
-  const stdinBaseline = {
-    error: stdin.listenerCount("error"),
-    close: stdin.listenerCount("close"),
-    finish: stdin.listenerCount("finish"),
-    end: stdin.listenerCount("end"),
-  };
+test("shared terminal observers fan a failed stderr write out to every mounted app", () => {
+  const terminal = createTestTerminalBackend();
   const failures = Array.from({ length: 12 }, () => vi.fn());
-  const stdoutStreams: PassThrough[] = [];
   const lifecycles = failures.map((onFailure) => {
-    const stdout = new PassThrough();
-    stdoutStreams.push(stdout);
     const lifecycle = createMountedStreamLifecycle({
-      stdin,
-      stdout,
-      stderr,
+      terminal,
       hasManagedInputDemand: () => false,
       onFailure,
     });
@@ -35,101 +16,94 @@ test("shared borrowed streams use one physical observer set and release it with 
     return lifecycle;
   });
 
-  expect(stdin.listenerCount("error")).toBe(stdinBaseline.error + 1);
-  expect(stdin.listenerCount("close")).toBe(stdinBaseline.close + 1);
-  expect(stdin.listenerCount("finish")).toBe(stdinBaseline.finish + 1);
-  expect(stdin.listenerCount("end")).toBe(stdinBaseline.end + 1);
-  // Idle stderr is caller-owned and has no Runtime observer.
-  expect(stderr.listenerCount("error")).toBe(stderrBaseline.error);
-
-  for (const lifecycle of lifecycles) lifecycle.trackWrite(stderr);
-  expect(stderr.listenerCount("error")).toBe(stderrBaseline.error + 1);
-  expect(stderr.listenerCount("close")).toBe(stderrBaseline.close + 1);
-  expect(stderr.listenerCount("finish")).toBe(stderrBaseline.finish + 1);
-  expect(stderr.listenerCount("end")).toBe(stderrBaseline.end + 1);
-
+  for (const lifecycle of lifecycles) lifecycle.trackWrite("stderr");
   const failure = new Error("shared stderr failed");
-  stderr.emit("error", failure);
-  expect(stderrCallerError).toHaveBeenCalledWith(failure);
+  terminal.emitOutput("stderr", "error", failure);
+
   for (const onFailure of failures) expect(onFailure).toHaveBeenCalledWith(failure);
 
+  const first = failures[0]!;
   lifecycles[0]!.dispose();
-  expect(stdin.listenerCount("error")).toBe(stdinBaseline.error + 1);
+  terminal.emitOutput("stderr", "error", new Error("after dispose"));
+  expect(first).toHaveBeenCalledTimes(1);
   for (const lifecycle of lifecycles.slice(1)) lifecycle.dispose();
-
-  expect(stderr.listenerCount("error")).toBe(stderrBaseline.error);
-  expect(stderr.listenerCount("close")).toBe(stderrBaseline.close);
-  expect(stderr.listenerCount("finish")).toBe(stderrBaseline.finish);
-  expect(stderr.listenerCount("end")).toBe(stderrBaseline.end);
-  expect(stdin.listenerCount("error")).toBe(stdinBaseline.error);
-  expect(stdin.listenerCount("close")).toBe(stdinBaseline.close);
-  expect(stdin.listenerCount("finish")).toBe(stdinBaseline.finish);
-  expect(stdin.listenerCount("end")).toBe(stdinBaseline.end);
-
-  for (const stdout of stdoutStreams) stdout.destroy();
-  stderr.destroy();
-  stdin.destroy();
 });
 
-test("hostile listener cleanup still releases every observer resource and forgets the broker", () => {
-  const stdin = new PassThrough();
-  const stdout = new PassThrough();
-  const stderr = new PassThrough();
-  const baseline = {
-    stdoutError: stdout.listenerCount("error"),
-    stdoutClose: stdout.listenerCount("close"),
-    stdoutFinish: stdout.listenerCount("finish"),
-    stdoutEnd: stdout.listenerCount("end"),
-    stdinError: stdin.listenerCount("error"),
-    stdinClose: stdin.listenerCount("close"),
-    stdinFinish: stdin.listenerCount("finish"),
-    stdinEnd: stdin.listenerCount("end"),
+test("a shared stdout and stderr destination reports one failed write once", () => {
+  const base = createTestTerminalBackend();
+  const terminal: TerminalBackend = {
+    ...base,
+    outputOwnerFor: () => base.outputOwnerFor("stdout"),
+  };
+  const onFailure = vi.fn();
+  const lifecycle = createMountedStreamLifecycle({
+    terminal,
+    hasManagedInputDemand: () => false,
+    onFailure,
+  });
+  lifecycle.activate();
+  lifecycle.trackWrite("stderr");
+
+  const failure = new Error("shared output failed");
+  base.emitOutput("stdout", "error", failure);
+
+  expect(onFailure).toHaveBeenCalledTimes(1);
+  expect(onFailure).toHaveBeenCalledWith(failure);
+  lifecycle.dispose();
+});
+
+test("input errors matter only while the app has managed input demand", () => {
+  const terminal = createTestTerminalBackend();
+  const onFailure = vi.fn();
+  let hasManagedInputDemand = false;
+  const lifecycle = createMountedStreamLifecycle({
+    terminal,
+    hasManagedInputDemand: () => hasManagedInputDemand,
+    onFailure,
+  });
+  lifecycle.activate();
+
+  terminal.emitInput("error", new Error("idle input"));
+  expect(onFailure).not.toHaveBeenCalled();
+
+  hasManagedInputDemand = true;
+  const failure = new Error("managed input failed");
+  terminal.emitInput("error", failure);
+  expect(onFailure).toHaveBeenCalledWith(failure);
+  lifecycle.dispose();
+});
+
+test("hostile listener cleanup still forgets the observer broker", () => {
+  const base = createTestTerminalBackend();
+  let removalFailed = false;
+  const cleanupFailure = new Error("output listener removal failed");
+  const terminal: TerminalBackend = {
+    ...base,
+    onOutputEvent(output, event, listener) {
+      const remove = base.onOutputEvent(output, event, listener);
+      return () => {
+        remove();
+        if (!removalFailed) {
+          removalFailed = true;
+          throw cleanupFailure;
+        }
+      };
+    },
   };
   const lifecycle = createMountedStreamLifecycle({
-    stdin,
-    stdout,
-    stderr,
+    terminal,
     hasManagedInputDemand: () => false,
     onFailure: vi.fn(),
   });
   lifecycle.activate();
 
-  const cleanupFailure = new Error("stdout off failed");
-  const originalOff = stdout.off.bind(stdout);
-  let failedOnce = false;
-  stdout.off = ((event: string | symbol, listener: (...args: unknown[]) => void) => {
-    const result = originalOff(event, listener);
-    if (!failedOnce) {
-      failedOnce = true;
-      throw cleanupFailure;
-    }
-    return result;
-  }) as typeof stdout.off;
-
   expect(() => lifecycle.dispose()).toThrow(cleanupFailure);
-  expect(stdout.listenerCount("error")).toBe(baseline.stdoutError);
-  expect(stdout.listenerCount("close")).toBe(baseline.stdoutClose);
-  expect(stdout.listenerCount("finish")).toBe(baseline.stdoutFinish);
-  expect(stdout.listenerCount("end")).toBe(baseline.stdoutEnd);
-  expect(stdin.listenerCount("error")).toBe(baseline.stdinError);
-  expect(stdin.listenerCount("close")).toBe(baseline.stdinClose);
-  expect(stdin.listenerCount("finish")).toBe(baseline.stdinFinish);
-  expect(stdin.listenerCount("end")).toBe(baseline.stdinEnd);
 
-  stdout.off = originalOff as typeof stdout.off;
   const next = createMountedStreamLifecycle({
-    stdin,
-    stdout,
-    stderr,
+    terminal,
     hasManagedInputDemand: () => false,
     onFailure: vi.fn(),
   });
   next.activate();
-  expect(stdout.listenerCount("error")).toBe(baseline.stdoutError + 1);
   next.dispose();
-  expect(stdout.listenerCount("error")).toBe(baseline.stdoutError);
-
-  stdout.destroy();
-  stderr.destroy();
-  stdin.destroy();
 });

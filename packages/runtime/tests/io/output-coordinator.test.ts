@@ -1,24 +1,16 @@
-import { EventEmitter } from "node:events";
 import { describe, expect, test, vi } from "vite-plus/test";
+import type { TerminalBackend, TerminalOutput } from "../../src/terminal/backend.ts";
+import {
+  createTestTerminalBackend,
+  type TestTerminalBackend,
+} from "../../src/terminal/test/backend.ts";
 import {
   createOutputCoordinator,
   type CoordinatedWriteResult,
 } from "../../src/terminal/output-coordinator.ts";
 
-function createWritable(results: readonly (boolean | Error)[]) {
-  const events = new EventEmitter();
-  const chunks: string[] = [];
-  let index = 0;
-  const stream = Object.assign(events, {
-    write(data: string, callback?: () => void): boolean {
-      const result = results[index++] ?? true;
-      chunks.push(data);
-      if (result instanceof Error) throw result;
-      callback?.();
-      return result;
-    },
-  }) as unknown as NodeJS.WriteStream;
-  return { stream, chunks, events };
+function chunks(terminal: TestTerminalBackend, output: TerminalOutput = "stdout"): string[] {
+  return terminal.writes.filter((write) => write.output === output).map((write) => write.data);
 }
 
 async function readyOf(result: CoordinatedWriteResult): Promise<void> {
@@ -27,71 +19,70 @@ async function readyOf(result: CoordinatedWriteResult): Promise<void> {
 
 describe("output coordinator", () => {
   test("captures the full body before an all-writable handoff", () => {
-    const { stream, chunks } = createWritable([true]);
-    const coordinator = createOutputCoordinator();
+    const terminal = createTestTerminalBackend();
+    const coordinator = createOutputCoordinator({ terminal });
     const observations: number[] = [];
 
     const result = coordinator.run(() => {
-      coordinator.write(stream, "a");
-      observations.push(chunks.length);
-      coordinator.write(stream, "b");
-      observations.push(chunks.length);
+      coordinator.write("stdout", "a");
+      observations.push(chunks(terminal).length);
+      coordinator.write("stdout", "b");
+      observations.push(chunks(terminal).length);
     });
 
     expect(result).toEqual({ status: "accepted", writable: true });
     expect(observations).toEqual([0, 0]);
-    expect(chunks).toEqual(["ab"]);
+    expect(chunks(terminal)).toEqual(["ab"]);
   });
 
   test("hands no bytes when transaction construction throws", () => {
     const failure = new Error("construction failed");
-    const { stream, chunks } = createWritable([true]);
+    const terminal = createTestTerminalBackend();
     const onUnhandedFailure = vi.fn();
-    const coordinator = createOutputCoordinator();
+    const coordinator = createOutputCoordinator({ terminal });
 
     expect(() =>
       coordinator.run(
         () => {
-          coordinator.write(stream, "captured");
+          coordinator.write("stdout", "captured");
           throw failure;
         },
         { onUnhandedFailure },
       ),
     ).toThrow(failure);
-    expect(chunks).toEqual([]);
+    expect(chunks(terminal)).toEqual([]);
     expect(onUnhandedFailure).toHaveBeenCalledWith(failure);
     expect(coordinator.isBlocked()).toBe(false);
   });
 
-  test("combines one stdout transaction before handing it to the stream", async () => {
-    const { stream, chunks, events } = createWritable([false]);
-    const coordinator = createOutputCoordinator();
+  test("combines one stdout transaction before handing it to the backend", async () => {
+    const terminal = createTestTerminalBackend({ writeResults: { stdout: [false] } });
+    const coordinator = createOutputCoordinator({ terminal });
 
     const result = coordinator.run(() => {
-      coordinator.write(stream, "a");
-      coordinator.write(stream, "b");
-      coordinator.write(stream, "c");
+      coordinator.write("stdout", "a");
+      coordinator.write("stdout", "b");
+      coordinator.write("stdout", "c");
     });
 
     expect(result).toMatchObject({ status: "accepted", writable: false });
-    expect(chunks).toEqual(["abc"]);
-    events.emit("drain");
+    expect(chunks(terminal)).toEqual(["abc"]);
+    terminal.emitOutput("stdout", "drain");
     await readyOf(result);
   });
 
   test("blocks a public transaction that synchronously re-enters physical write", async () => {
-    const events = new EventEmitter();
     const nestedBody = vi.fn();
     let nestedResult: CoordinatedWriteResult | undefined;
-    const coordinator = createOutputCoordinator();
-    const stream = Object.assign(events, {
-      write(): boolean {
+    let coordinator!: ReturnType<typeof createOutputCoordinator>;
+    const terminal = createTestTerminalBackend({
+      onWrite() {
         nestedResult = coordinator.run(nestedBody);
-        return true;
       },
-    }) as unknown as NodeJS.WriteStream;
+    });
+    coordinator = createOutputCoordinator({ terminal });
 
-    const outer = coordinator.run(() => coordinator.write(stream, "outer"));
+    const outer = coordinator.run(() => coordinator.write("stdout", "outer"));
 
     expect(outer).toEqual({ status: "accepted", writable: true });
     expect(nestedResult?.status).toBe("blocked");
@@ -100,56 +91,58 @@ describe("output coordinator", () => {
   });
 
   test("does not retain a later public transaction while backpressured", async () => {
-    const { stream, chunks, events } = createWritable([false]);
-    const coordinator = createOutputCoordinator();
-    coordinator.run(() => coordinator.write(stream, "accepted"));
+    const terminal = createTestTerminalBackend({ writeResults: { stdout: [false] } });
+    const coordinator = createOutputCoordinator({ terminal });
+    coordinator.run(() => coordinator.write("stdout", "accepted"));
     const body = vi.fn();
 
     const result = coordinator.run(body);
 
     expect(result.status).toBe("blocked");
     expect(body).not.toHaveBeenCalled();
-    expect(chunks).toEqual(["accepted"]);
-    events.emit("drain");
+    expect(chunks(terminal)).toEqual(["accepted"]);
+    terminal.emitOutput("stdout", "drain");
     await readyOf(result);
   });
 
-  test("preserves cross-stream segments and stops at every false return", async () => {
-    const first = createWritable([false, true]);
-    const second = createWritable([false]);
-    const coordinator = createOutputCoordinator();
+  test("preserves cross-output segments and stops at every false return", async () => {
+    const terminal = createTestTerminalBackend({
+      writeResults: { stdout: [false, true], stderr: [false] },
+    });
+    const coordinator = createOutputCoordinator({ terminal });
     const result = coordinator.run(() => {
-      coordinator.write(first.stream, "a");
-      coordinator.write(second.stream, "b");
-      coordinator.write(first.stream, "c");
+      coordinator.write("stdout", "a");
+      coordinator.write("stderr", "b");
+      coordinator.write("stdout", "c");
     });
 
-    expect(first.chunks).toEqual(["a"]);
-    expect(second.chunks).toEqual([]);
-    first.events.emit("drain");
-    expect(second.chunks).toEqual(["b"]);
-    expect(first.chunks).toEqual(["a"]);
-    second.events.emit("drain");
-    expect(first.chunks).toEqual(["a", "c"]);
+    expect(chunks(terminal)).toEqual(["a"]);
+    expect(chunks(terminal, "stderr")).toEqual([]);
+    terminal.emitOutput("stdout", "drain");
+    expect(chunks(terminal, "stderr")).toEqual(["b"]);
+    expect(chunks(terminal)).toEqual(["a"]);
+    terminal.emitOutput("stderr", "drain");
+    expect(chunks(terminal)).toEqual(["a", "c"]);
     await readyOf(result);
   });
 
   test("rejects readiness and reports a deferred unhanded failure", async () => {
     const failure = new Error("deferred failure");
-    const first = createWritable([false]);
-    const second = createWritable([failure]);
+    const terminal = createTestTerminalBackend({
+      writeResults: { stdout: [false], stderr: [failure] },
+    });
     const onDeferredError = vi.fn();
     const onUnhandedFailure = vi.fn();
-    const coordinator = createOutputCoordinator({ onDeferredError });
+    const coordinator = createOutputCoordinator({ terminal, onDeferredError });
     const result = coordinator.run(
       () => {
-        coordinator.write(first.stream, "a");
-        coordinator.write(second.stream, "b");
+        coordinator.write("stdout", "a");
+        coordinator.write("stderr", "b");
       },
       { onUnhandedFailure },
     );
 
-    first.events.emit("drain");
+    terminal.emitOutput("stdout", "drain");
 
     await expect(readyOf(result)).rejects.toBe(failure);
     expect(onUnhandedFailure).toHaveBeenCalledWith(failure);
@@ -158,12 +151,12 @@ describe("output coordinator", () => {
 
   test("reports a synchronous physical write failure without retaining the gate", () => {
     const failure = new Error("write failed");
-    const { stream } = createWritable([failure]);
+    const terminal = createTestTerminalBackend({ writeResults: { stdout: [failure] } });
     const onUnhandedFailure = vi.fn();
-    const coordinator = createOutputCoordinator();
+    const coordinator = createOutputCoordinator({ terminal });
 
     expect(() =>
-      coordinator.run(() => coordinator.write(stream, "a"), { onUnhandedFailure }),
+      coordinator.run(() => coordinator.write("stdout", "a"), { onUnhandedFailure }),
     ).toThrow(failure);
     expect(onUnhandedFailure).toHaveBeenCalledWith(failure);
     expect(coordinator.isBlocked()).toBe(false);
@@ -171,91 +164,97 @@ describe("output coordinator", () => {
 
   test("marks only the segment whose physical write starts", () => {
     const failure = new Error("first write failed");
-    const { stream, chunks } = createWritable([failure]);
-    const coordinator = createOutputCoordinator();
+    const terminal = createTestTerminalBackend({ writeResults: { stdout: [failure] } });
+    const coordinator = createOutputCoordinator({ terminal });
     const attempts: string[] = [];
 
     expect(() =>
       coordinator.run(() => {
-        coordinator.write(stream, "a", undefined, undefined, () => attempts.push("a"));
-        coordinator.write(stream, "b", undefined, undefined, () => attempts.push("b"));
+        coordinator.write("stdout", "a", undefined, undefined, () => attempts.push("a"));
+        coordinator.write("stdout", "b", undefined, undefined, () => attempts.push("b"));
       }),
     ).toThrow(failure);
 
-    expect(chunks).toEqual(["a"]);
+    expect(chunks(terminal)).toEqual(["a"]);
     expect(attempts).toEqual(["a"]);
   });
 
-  test("settles and releases drain listeners when a blocked stream closes", async () => {
-    const { stream, events } = createWritable([false]);
+  test("settles and releases drain listeners when a blocked output closes", async () => {
+    const terminal = createTestTerminalBackend({ writeResults: { stdout: [false] } });
     const onDeferredError = vi.fn();
-    const coordinator = createOutputCoordinator({ onDeferredError });
-    const result = coordinator.run(() => coordinator.write(stream, "a"));
+    const coordinator = createOutputCoordinator({ terminal, onDeferredError });
+    const result = coordinator.run(() => coordinator.write("stdout", "a"));
 
-    events.emit("close");
+    terminal.emitOutput("stdout", "close");
 
     await expect(readyOf(result)).rejects.toThrow("closed before drain");
     expect(onDeferredError).toHaveBeenCalledOnce();
     expect(coordinator.isBlocked()).toBe(false);
   });
 
-  test("settles and releases drain listeners when a blocked stream finishes", async () => {
-    const { stream, events } = createWritable([false]);
+  test("settles and releases drain listeners when a blocked output finishes", async () => {
+    const terminal = createTestTerminalBackend({ writeResults: { stdout: [false] } });
     const onDeferredError = vi.fn();
-    const coordinator = createOutputCoordinator({ onDeferredError });
-    const result = coordinator.run(() => coordinator.write(stream, "a"));
+    const coordinator = createOutputCoordinator({ terminal, onDeferredError });
+    const result = coordinator.run(() => coordinator.write("stdout", "a"));
 
-    events.emit("finish");
+    terminal.emitOutput("stdout", "finish");
 
     await expect(readyOf(result)).rejects.toThrow("ended before drain");
     expect(onDeferredError).toHaveBeenCalledOnce();
     expect(coordinator.isBlocked()).toBe(false);
   });
 
-  test("settles and releases drain listeners when a blocked stream errors", async () => {
+  test("settles and releases drain listeners when a blocked output errors", async () => {
     const failure = new Error("stream failed");
-    const { stream, events } = createWritable([false]);
+    const terminal = createTestTerminalBackend({ writeResults: { stdout: [false] } });
     const onDeferredError = vi.fn();
-    const coordinator = createOutputCoordinator({ onDeferredError });
-    const result = coordinator.run(() => coordinator.write(stream, "a"));
+    const coordinator = createOutputCoordinator({ terminal, onDeferredError });
+    const result = coordinator.run(() => coordinator.write("stdout", "a"));
 
-    events.emit("error", failure);
+    terminal.emitOutput("stdout", "error", failure);
 
     await expect(readyOf(result)).rejects.toBe(failure);
     expect(onDeferredError).toHaveBeenCalledWith(failure);
   });
 
   test("aborts an accepted remainder and permits a fresh transaction", async () => {
-    const first = createWritable([false]);
-    const second = createWritable([true]);
-    const coordinator = createOutputCoordinator();
+    const terminal = createTestTerminalBackend({
+      writeResults: { stdout: [false], stderr: [true] },
+    });
+    const coordinator = createOutputCoordinator({ terminal });
     const result = coordinator.run(() => {
-      coordinator.write(first.stream, "a");
-      coordinator.write(second.stream, "b");
+      coordinator.write("stdout", "a");
+      coordinator.write("stderr", "b");
     });
     const failure = new Error("suspended");
 
     coordinator.abort(failure);
 
     await expect(readyOf(result)).rejects.toBe(failure);
-    expect(second.chunks).toEqual([]);
-    expect(coordinator.run(() => coordinator.write(second.stream, "fresh"))).toEqual({
+    expect(chunks(terminal, "stderr")).toEqual([]);
+    expect(coordinator.run(() => coordinator.write("stderr", "fresh"))).toEqual({
       status: "accepted",
       writable: true,
     });
-    expect(second.chunks).toEqual(["fresh"]);
+    expect(chunks(terminal, "stderr")).toEqual(["fresh"]);
   });
 
-  test("abort still clears the gate when borrowed listener removal throws", async () => {
-    const { stream, events } = createWritable([false]);
-    const coordinator = createOutputCoordinator();
-    const result = coordinator.run(() => coordinator.write(stream, "blocked"));
+  test("abort still clears the gate when backend listener removal throws", async () => {
+    const base = createTestTerminalBackend({ writeResults: { stdout: [false] } });
+    const terminal: TerminalBackend = {
+      ...base,
+      onOutputEvent(output, event, listener) {
+        const remove = base.onOutputEvent(output, event, listener);
+        return () => {
+          remove();
+          throw new Error("hostile listener removal");
+        };
+      },
+    };
+    const coordinator = createOutputCoordinator({ terminal });
+    const result = coordinator.run(() => coordinator.write("stdout", "blocked"));
     const failure = new Error("reload abandoned output");
-    const originalOff = events.off.bind(events);
-    events.off = ((event: string | symbol, listener: (...args: unknown[]) => void) => {
-      originalOff(event, listener);
-      throw new Error("hostile off");
-    }) as typeof events.off;
 
     expect(() => coordinator.abort(failure)).not.toThrow();
     await expect(readyOf(result)).rejects.toBe(failure);
@@ -263,27 +262,26 @@ describe("output coordinator", () => {
   });
 
   test("stops handoff when a physical write synchronously aborts the transaction", () => {
-    const events = new EventEmitter();
-    const chunks: string[] = [];
-    const later = createWritable([true]);
-    const coordinator = createOutputCoordinator();
+    const chunksWritten: string[] = [];
+    let coordinator!: ReturnType<typeof createOutputCoordinator>;
     const failure = new Error("interrupted");
-    const stream = Object.assign(events, {
-      write(data: string): boolean {
-        chunks.push(data);
+    const terminal = createTestTerminalBackend({
+      onWrite(output, data) {
+        if (output !== "stdout") return;
+        chunksWritten.push(data);
         coordinator.abort(failure);
-        return true;
       },
-    }) as unknown as NodeJS.WriteStream;
+    });
+    coordinator = createOutputCoordinator({ terminal });
 
     expect(() =>
       coordinator.run(() => {
-        coordinator.write(stream, "a");
-        coordinator.write(later.stream, "b");
+        coordinator.write("stdout", "a");
+        coordinator.write("stderr", "b");
       }),
     ).toThrow(failure);
-    expect(chunks).toEqual(["a"]);
-    expect(later.chunks).toEqual([]);
+    expect(chunksWritten).toEqual(["a"]);
+    expect(chunks(terminal, "stderr")).toEqual([]);
     expect(coordinator.isBlocked()).toBe(false);
   });
 });

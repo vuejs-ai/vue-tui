@@ -1,25 +1,26 @@
-import { createInputParser, type InputSequence } from "../input/input-parser.ts";
-import { normalizeInputSequence, type InputEvent } from "../input/normalized-input.ts";
+import { createInputParser, type InputSequence } from "./input-parser.ts";
+import { normalizeInputSequence, type InputEvent } from "./normalized-input.ts";
+import type { TerminalBackend } from "../terminal/backend.ts";
 
 const ESC = "\x1b";
 const FLUSH_DELAY = 20;
 const KITTY_QUERY_TIMEOUT = 200;
 
-export interface SharedStdinSubscription {
+export interface SharedInputSubscription {
   setActive(active: boolean): void;
   /** Invalidate framing units that began in an earlier application lifetime. */
   invalidate(options?: { readonly retainPending?: boolean }): void;
   dispose(): void;
 }
 
-export interface SharedStdinIngress {
+export interface SharedInputIngress {
   subscribe<Context>(
     capture: () => Context,
     listener: (event: InputEvent, context: Context) => void,
-  ): SharedStdinSubscription;
+  ): SharedInputSubscription;
   startKittyQueryResponseDetection(
     onResult: (supported: boolean) => void,
-    owner?: SharedStdinSubscription,
+    owner?: SharedInputSubscription,
   ): (options?: { readonly discard?: boolean }) => void;
   /**
    * Repository testing bridge only. Route one complete physical input write
@@ -27,7 +28,10 @@ export interface SharedStdinIngress {
    * Escape ambiguity has resolved. Definite incomplete framing is retained for
    * a later write and reported instead of being manufactured into an event.
    */
-  writeForTest(data: Uint8Array | string): Promise<void>;
+  writeForTest(
+    data: Uint8Array | string,
+    emitInput: (data: string | Uint8Array) => void,
+  ): Promise<void>;
 }
 
 interface Subscriber {
@@ -71,7 +75,7 @@ interface DecodedSegment {
   readonly recipients: RecipientSnapshot;
 }
 
-const ingressRegistry = new WeakMap<NodeJS.ReadStream, SharedStdinIngress>();
+const ingressRegistry = new WeakMap<object, SharedInputIngress>();
 
 function isPartialKittyQueryResponse(value: string): boolean {
   return (
@@ -100,9 +104,9 @@ function isValidUtf8SecondByte(leadingByte: number, secondByte: number): boolean
   return true;
 }
 
-function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress {
+function createSharedInputIngress(terminal: TerminalBackend): SharedInputIngress {
   const subscribers = new Set<Subscriber>();
-  const subscriptionOwners = new WeakMap<SharedStdinSubscription, Subscriber>();
+  const subscriptionOwners = new WeakMap<SharedInputSubscription, Subscriber>();
   const detections = new Set<KittyQueryDetection>();
   const chunkQueue: QueuedChunk[] = [];
   const afterCurrentChunk: Array<() => void> = [];
@@ -112,11 +116,10 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
   let pendingInputRecipients: RecipientSnapshot | undefined;
   let pendingFlushTimer: ReturnType<typeof setTimeout> | undefined;
   let inputListenerAttached = false;
+  let stopInputListener: (() => void) | undefined;
+  let detachRequestedDuringAttachment = false;
   let inputAttachmentEpoch = 0;
   let inputDemandEpoch = 0;
-  let flowOwnedByIngress = false;
-  let reconcilingFlow = false;
-  let flowReconcileRequested = false;
   let processing = false;
   let firstProcessingError: unknown;
   const testInputWaiters = new Set<{
@@ -264,124 +267,25 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
     afterCurrentChunk.length = 0;
   }
 
-  function externalDataListenerCount(): number {
-    let frameworkListeners = 0;
-    for (const listener of stdin.listeners("data")) {
-      if (listener === handleData) frameworkListeners++;
-    }
-    return Math.max(0, stdin.listenerCount("data") - frameworkListeners);
-  }
-
-  function reconcileOwnedFlow(): void {
-    if (!("readableFlowing" in stdin)) return;
-    if (reconcilingFlow) {
-      flowReconcileRequested = true;
-      return;
-    }
-
-    reconcilingFlow = true;
-    let firstError: unknown;
-    try {
-      while (true) {
-        if (firstError !== undefined && !flowReconcileRequested) break;
-        flowReconcileRequested = false;
-        const externalListeners = externalDataListenerCount();
-        if (externalListeners > 0) {
-          // An external data owner controls its own paused/flowing state. Merely
-          // observing a paused stream is not evidence that the framework caused
-          // it, so relinquish ownership without calling resume().
-          flowOwnedByIngress = false;
-          break;
-        }
-
-        if (!flowOwnedByIngress) {
-          if (!inputListenerAttached || stdin.readableFlowing === true) break;
-          // No external data owner existed when the framework started this
-          // non-flowing stream, so it must restore the paused state on detach.
-          flowOwnedByIngress = true;
-        }
-
-        const shouldFlow = inputListenerAttached;
-        const isFlowing = stdin.readableFlowing === true;
-        if (shouldFlow === isFlowing) {
-          if (!flowReconcileRequested) break;
-          continue;
-        }
-
-        const before = stdin.readableFlowing;
-        try {
-          if (shouldFlow && typeof stdin.resume === "function") stdin.resume();
-          else if (!shouldFlow && typeof stdin.pause === "function") {
-            const externalBeforePause = externalDataListenerCount();
-            stdin.pause();
-            if (
-              externalBeforePause === 0 &&
-              externalDataListenerCount() > 0 &&
-              stdin.readableFlowing !== true &&
-              typeof stdin.resume === "function"
-            ) {
-              // An external listener joined re-entrantly before our pause took
-              // effect. Undo this specific framework transition, then relinquish
-              // ownership; do not generalize this to externally paused streams.
-              flowOwnedByIngress = false;
-              stdin.resume();
-            }
-          } else break;
-        } catch (error) {
-          firstError ??= error;
-        }
-        if (firstError !== undefined && flowReconcileRequested) {
-          continue;
-        }
-        if (firstError !== undefined) break;
-        // A non-Node custom stream may expose readableFlowing without updating
-        // it. Do not spin forever when the host call made no observable progress.
-        if (stdin.readableFlowing === before && !flowReconcileRequested) break;
-      }
-    } finally {
-      reconcilingFlow = false;
-    }
-    if (firstError !== undefined) throw firstError;
-  }
-
   function attachInputListener(): void {
     if (inputListenerAttached) return;
     const attachDemandEpoch = inputDemandEpoch;
-    const canObserveFlow = "readableFlowing" in stdin;
-    if (
-      canObserveFlow &&
-      flowOwnedByIngress &&
-      !reconcilingFlow &&
-      stdin.listenerCount("data") === 0 &&
-      stdin.readableFlowing === true
-    ) {
-      // While detached, outside code resumed the stream and then removed its
-      // own listener. That changes the baseline: the framework must no longer
-      // restore its older paused state after this new attachment lifetime.
-      flowOwnedByIngress = false;
-    }
-    const startsFlow =
-      canObserveFlow && stdin.readableFlowing !== true && stdin.listenerCount("data") === 0;
-    if (startsFlow) flowOwnedByIngress = true;
-    // Record ownership before calling an arbitrary stream. Its on() method may
-    // synchronously emit data or may attach and then throw.
+    // Record ownership before calling an arbitrary backend. Its subscription
+    // can synchronously deliver input or activate another application.
     inputListenerAttached = true;
+    detachRequestedDuringAttachment = false;
     const attachEpoch = ++inputAttachmentEpoch;
     try {
-      stdin.on("data", handleData);
-      reconcileOwnedFlow();
+      const stop = terminal.onData(handleData);
+      if (detachRequestedDuringAttachment || !inputListenerAttached) {
+        stop();
+        return;
+      }
+      stopInputListener = stop;
     } catch (error) {
-      try {
-        stdin.off("data", handleData);
-      } catch {
-        // Preserve the acquisition error; listener rollback is best-effort.
-      }
-      inputListenerAttached = stdin.listeners("data").includes(handleData);
-      try {
-        reconcileOwnedFlow();
-      } catch {
-        // Preserve the listener/resume acquisition error below.
-      }
+      inputListenerAttached = false;
+      stopInputListener = undefined;
+      detachRequestedDuringAttachment = false;
       const hasNewerAttachment = inputAttachmentEpoch !== attachEpoch;
       const hasNewerDemand = inputDemandEpoch !== attachDemandEpoch;
       if (!hasNewerAttachment && !hasNewerDemand) {
@@ -419,21 +323,21 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
     const detachEpoch = inputAttachmentEpoch;
     inputListenerAttached = false;
     let detachError: unknown;
-    try {
-      stdin.off("data", handleData);
-    } catch (error) {
-      detachError = error;
+    const stop = stopInputListener;
+    stopInputListener = undefined;
+    if (!stop) {
+      detachRequestedDuringAttachment = true;
+    } else {
       try {
-        stdin.off("data", handleData);
-      } catch {
-        // Preserve the first detach error after one best-effort retry.
+        stop();
+      } catch (error) {
+        detachError = error;
+        try {
+          stop();
+        } catch {
+          // Preserve the first detach error after one best-effort retry.
+        }
       }
-    }
-    inputListenerAttached = stdin.listeners("data").includes(handleData);
-    try {
-      reconcileOwnedFlow();
-    } catch (error) {
-      detachError ??= error;
     }
     if (inputAttachmentEpoch === detachEpoch) {
       resetFramingState();
@@ -830,7 +734,7 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
     else runInputTransaction(release);
   }
 
-  const ingress: SharedStdinIngress = {
+  const ingress: SharedInputIngress = {
     subscribe<Context>(
       capture: () => Context,
       listener: (event: InputEvent, context: Context) => void,
@@ -843,7 +747,7 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
         generation: 0,
       };
       subscribers.add(subscriber);
-      const subscription: SharedStdinSubscription = {
+      const subscription: SharedInputSubscription = {
         setActive(active) {
           if (subscriber.disposed || subscriber.requestedActive === active) return;
           subscriber.requestedActive = active;
@@ -951,10 +855,10 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
       return (options) =>
         options?.discard ? abortDetection(detection) : cancelDetection(detection);
     },
-    writeForTest(data) {
+    writeForTest(data, emitInput) {
       const hadRuntimeListener = inputListenerAttached;
       try {
-        stdin.emit("data", typeof data === "string" ? data : Uint8Array.from(data));
+        emitInput(typeof data === "string" ? data : Uint8Array.from(data));
       } catch (error) {
         return Promise.reject(error);
       }
@@ -969,11 +873,11 @@ function createSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress 
   return ingress;
 }
 
-export function getSharedStdinIngress(stdin: NodeJS.ReadStream): SharedStdinIngress {
-  let ingress = ingressRegistry.get(stdin);
+export function getSharedInputIngress(terminal: TerminalBackend): SharedInputIngress {
+  let ingress = ingressRegistry.get(terminal.inputOwner);
   if (!ingress) {
-    ingress = createSharedStdinIngress(stdin);
-    ingressRegistry.set(stdin, ingress);
+    ingress = createSharedInputIngress(terminal);
+    ingressRegistry.set(terminal.inputOwner, ingress);
   }
   return ingress;
 }

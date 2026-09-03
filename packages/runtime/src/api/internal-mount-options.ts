@@ -1,4 +1,4 @@
-import type { MountOptions } from "../render.ts";
+import type { MountOptions } from "./mount-options.ts";
 import {
   INTERNAL_KITTY_KEYBOARD,
   type InternalKittyKeyboardMountOptions,

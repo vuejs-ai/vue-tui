@@ -1,4 +1,5 @@
 import logUpdate, { type LogUpdate, type LogUpdateWrite, type ResetOptions } from "./log-update.ts";
+import type { TerminalBackend, TerminalOutput } from "../terminal/backend.ts";
 
 export interface FrameWriter {
   write: (frame: string) => void;
@@ -14,13 +15,14 @@ export interface FrameWriter {
 }
 
 export function createFrameWriter(
-  stream: NodeJS.WriteStream,
-  options: { write?: LogUpdateWrite } = {},
+  terminal: TerminalBackend,
+  options: { output?: TerminalOutput; write?: LogUpdateWrite } = {},
 ): FrameWriter {
   // Sentinel: use a value that can never equal a real frame so the very first
   // write (even an empty string) is always emitted.
   let lastFrame: string | null = null;
-  const log: LogUpdate = logUpdate.create(stream, {
+  const log: LogUpdate = logUpdate.create(terminal, {
+    output: options.output,
     write: options.write,
   });
 

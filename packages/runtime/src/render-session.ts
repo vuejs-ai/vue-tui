@@ -7,7 +7,6 @@ import type {
   SurfaceLayoutSize,
   SurfaceSize,
 } from "./surface/surface-types.ts";
-import type { TerminalSizeProbeResult } from "./terminal/node/terminal-size-probe.ts";
 
 export type { ResolvedLiveDimensions, ResolvedLiveSurface } from "./surface/surface-types.ts";
 
@@ -46,7 +45,6 @@ export interface LiveHostInput {
     readonly columns: unknown;
     readonly rows: unknown;
   };
-  readonly terminalProbe: TerminalSizeProbeResult;
 }
 
 /** Validate the accepted mount-mode contract without reading any stream option. */
@@ -73,20 +71,13 @@ function positiveCellCount(value: unknown): number | null {
     : null;
 }
 
-export function needsTerminalSizeProbe(stdout: LiveHostInput["stdout"]): boolean {
-  return positiveCellCount(stdout.columns) === null || positiveCellCount(stdout.rows) === null;
-}
-
 /** Fixed modeled document layout shared by default `renderToString()` and non-TTY mounts. */
 export const MODELED_DOCUMENT_LAYOUT = Object.freeze({
   columns: 80,
   rows: 24,
 } satisfies RenderLayoutSize);
 
-export function resolveLiveDimensions(
-  stdout: LiveHostInput["stdout"],
-  probe: TerminalSizeProbeResult,
-): ResolvedLiveDimensions {
+export function resolveLiveDimensions(stdout: LiveHostInput["stdout"]): ResolvedLiveDimensions {
   // Non-TTY mounts use the supported secondary document host with a fixed
   // modeled 80×24 root. Stream-reported columns/rows are not live layout facts.
   if (!stdout.isTTY) {
@@ -98,19 +89,12 @@ export function resolveLiveDimensions(
 
   const stdoutColumns = positiveCellCount(stdout.columns);
   const stdoutRows = positiveCellCount(stdout.rows);
-  const probeColumns = probe.kind === "detected" ? positiveCellCount(probe.size.columns) : null;
-  const probeRows = probe.kind === "detected" ? positiveCellCount(probe.size.rows) : null;
   const stdoutSize =
     stdoutColumns !== null && stdoutRows !== null
       ? { columns: stdoutColumns, rows: stdoutRows }
       : null;
-  const probeSize =
-    probeColumns !== null && probeRows !== null ? { columns: probeColumns, rows: probeRows } : null;
-  // A physical terminal size is one coherent observation. Never splice a
-  // column from one source together with a row from another source and then
-  // claim the result as an addressable viewport.
-  const terminal = stdoutSize ?? probeSize;
-  const layoutColumns = terminal?.columns ?? stdoutColumns ?? probeColumns ?? 80;
+  const terminal = stdoutSize;
+  const layoutColumns = terminal?.columns ?? stdoutColumns ?? 80;
 
   return {
     terminal,
@@ -136,7 +120,7 @@ export function resolveLiveDimensions(
  * is always the document final host.
  */
 export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
-  const dimensions = resolveLiveDimensions(input.stdout, input.terminalProbe);
+  const dimensions = resolveLiveDimensions(input.stdout);
 
   if (!input.stdout.isTTY) {
     const documentDimensions: ResolvedLiveDimensions = {

@@ -1,7 +1,19 @@
 import { describe, expect, test } from "vite-plus/test";
 import { PassThrough } from "node:stream";
 import { normalizeInputSequence, type InputEvent } from "../../src/input/normalized-input.ts";
-import { getSharedStdinIngress } from "../../src/terminal/stdin-ingress.ts";
+import { getSharedInputIngress } from "../../src/input/shared-input-ingress.ts";
+import { createNodeTerminalBackend } from "../../src/terminal/node/backend.ts";
+import { createTestTerminalBackend } from "../../src/terminal/test/backend.ts";
+
+function getIngress(stdin: NodeJS.ReadStream) {
+  return getSharedInputIngress(
+    createNodeTerminalBackend({
+      stdin,
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+    }),
+  );
+}
 
 function fact(event: string | { readonly paste: string }): InputEvent {
   const result = normalizeInputSequence(event);
@@ -212,11 +224,26 @@ describe("normalizeInputSequence", () => {
   });
 });
 
-describe("shared stdin normalization", () => {
+describe("shared input normalization", () => {
+  test("observes input through the terminal backend", () => {
+    const terminal = createTestTerminalBackend();
+    const facts: InputEvent[] = [];
+    const subscription = getSharedInputIngress(terminal).subscribe(
+      () => undefined,
+      (inputFact) => facts.push(inputFact),
+    );
+
+    subscription.setActive(true);
+    terminal.emitData("a");
+
+    expect(facts).toEqual([{ kind: "text", text: "a", phase: undefined }]);
+    subscription.dispose();
+  });
+
   const collect = (chunks: Array<string | Uint8Array>): InputEvent[] => {
     const stdin = new PassThrough() as unknown as NodeJS.ReadStream;
     const facts: InputEvent[] = [];
-    const subscription = getSharedStdinIngress(stdin).subscribe(
+    const subscription = getIngress(stdin).subscribe(
       () => undefined,
       (inputFact) => facts.push(inputFact),
     );
@@ -229,7 +256,7 @@ describe("shared stdin normalization", () => {
 
   test("multicasts the same once-normalized fact object to every application", () => {
     const stdin = new PassThrough() as unknown as NodeJS.ReadStream;
-    const ingress = getSharedStdinIngress(stdin);
+    const ingress = getIngress(stdin);
     const first: InputEvent[] = [];
     const second: InputEvent[] = [];
     const firstSubscription = ingress.subscribe(
@@ -255,7 +282,7 @@ describe("shared stdin normalization", () => {
 
   test("disposing an application removes its unresolved Kitty query tombstones", () => {
     const stdin = new PassThrough() as unknown as NodeJS.ReadStream;
-    const ingress = getSharedStdinIngress(stdin);
+    const ingress = getIngress(stdin);
     const subscription = ingress.subscribe(
       () => undefined,
       () => {},

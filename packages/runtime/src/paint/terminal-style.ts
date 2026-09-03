@@ -14,13 +14,13 @@ export interface TerminalStyle {
 
 interface ColorAwareStream {
   readonly isTTY?: boolean;
-  getColorDepth?(environment?: NodeJS.ProcessEnv): number;
+  readonly colorDepth?: number;
 }
 
 interface AutomaticTerminalStyleInput {
   readonly color: true;
   readonly stdout: ColorAwareStream;
-  readonly environment: Readonly<NodeJS.ProcessEnv>;
+  readonly environment: Readonly<Record<string, string | undefined>>;
 }
 
 interface ExplicitTerminalStyleInput {
@@ -78,9 +78,9 @@ function forcedColorLevel(value: string | undefined): ColorLevel | undefined {
 }
 
 function environmentWithoutColorControls(
-  environment: Readonly<NodeJS.ProcessEnv>,
-): NodeJS.ProcessEnv {
-  const detectedEnvironment: NodeJS.ProcessEnv = {};
+  environment: Readonly<Record<string, string | undefined>>,
+): Record<string, string | undefined> {
+  const detectedEnvironment: Record<string, string | undefined> = {};
   for (const [name, value] of Object.entries(environment)) {
     if (
       value === undefined ||
@@ -104,12 +104,12 @@ function colorLevelFromDepth(depth: number): ColorLevel {
 
 function detectTtyColorLevel(
   stdout: ColorAwareStream,
-  environment: Readonly<NodeJS.ProcessEnv>,
+  environment: Readonly<Record<string, string | undefined>>,
 ): ColorLevel {
   if (!stdout.isTTY) return 0;
   const detectedEnvironment = environmentWithoutColorControls(environment);
-  if (typeof stdout.getColorDepth === "function") {
-    return colorLevelFromDepth(stdout.getColorDepth(detectedEnvironment));
+  if (stdout.colorDepth !== undefined) {
+    return colorLevelFromDepth(stdout.colorDepth);
   }
   if (detectedEnvironment.TERM === "dumb") return 0;
   if (/^(truecolor|24bit)$/i.test(detectedEnvironment.COLORTERM ?? "")) return 3;

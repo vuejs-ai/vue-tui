@@ -1,33 +1,31 @@
-import { writeSync as fsWriteSync } from "node:fs";
-import type { AppContext, StdinContext } from "../vue/context.ts";
-import {
-  getSharedStdinIngress,
-  type SharedStdinIngress,
-  type SharedStdinSubscription,
-} from "./stdin-ingress.ts";
 import type { InputEvent } from "../input/normalized-input.ts";
-import { projectPublicInputEvent } from "../vue/public-input.ts";
 import {
   createInputDispatcher,
   type InternalInputDemandLease,
   type InternalInputSubscriber,
 } from "../input/input-subscriptions.ts";
-import type { StartKittyQueryResponseDetection } from "./kitty-keyboard.ts";
+import type { TerminalBackend, TerminalLease } from "../terminal/backend.ts";
+import type { StartKittyQueryResponseDetection } from "../terminal/kitty-keyboard.ts";
+import type { StdinContext } from "../vue/context.ts";
+import { projectPublicInputEvent } from "../vue/public-input.ts";
+import {
+  getSharedInputIngress,
+  type SharedInputIngress,
+  type SharedInputSubscription,
+} from "../input/shared-input-ingress.ts";
 
-export function hasRawInputCapability(stdin: NodeJS.ReadStream): boolean {
-  const input = stdin as NodeJS.ReadStream & {
-    readonly isRaw?: boolean;
-    readonly setRawMode?: (mode: boolean) => unknown;
-  };
-  return input.isRaw === true || typeof input.setRawMode === "function";
-}
-
-function isReadableHostLive(stdin: NodeJS.ReadStream): boolean {
-  const stream = stdin as NodeJS.ReadStream & {
-    readonly readable?: boolean;
-    readonly readableEnded?: boolean;
-  };
-  return !stream.destroyed && !stream.readableEnded && stream.readable !== false;
+/**
+ * Session-owned coordination required before managed input can operate the device.
+ * The terminal backend remains a device boundary and does not know the surface.
+ */
+export interface ManagedInputSession {
+  prepareManagedInput(): boolean;
+  readonly isManagedInputReady: boolean;
+  acquireKittyKeyboard(): () => void;
+  readonly isKittyKeyboardReady: boolean;
+  writeTerminal(data: string, onHandoff?: () => void, onAttempt?: () => void): boolean;
+  requestTerminalReconcile(): void;
+  reportManagedInputFailure(error: unknown): void;
 }
 
 export interface StdinController extends StdinContext {
@@ -74,10 +72,10 @@ interface RawModeState {
   reconcilingPhysical: boolean;
   physicalReconcileRequested: boolean;
 }
-const rawModeRegistry = new WeakMap<NodeJS.ReadStream, RawModeState>();
+const rawModeRegistry = new WeakMap<object, RawModeState>();
 
-function getRawModeState(stdin: NodeJS.ReadStream): RawModeState {
-  let state = rawModeRegistry.get(stdin);
+function getRawModeState(inputOwner: object): RawModeState {
+  let state = rawModeRegistry.get(inputOwner);
   if (!state) {
     state = {
       refs: 0,
@@ -92,37 +90,30 @@ function getRawModeState(stdin: NodeJS.ReadStream): RawModeState {
       reconcilingPhysical: false,
       physicalReconcileRequested: false,
     };
-    rawModeRegistry.set(stdin, state);
+    rawModeRegistry.set(inputOwner, state);
   }
   return state;
 }
 
 interface CreateStdinControllerOptions {
-  appCtx: AppContext;
   exitOnCtrlC: boolean;
-  acquireKittyKeyboardDemand: () => () => void;
-  isKittyKeyboardReady: () => boolean;
-  /** Acquire the output surface after capability preflight and before input modes. */
-  beforeManagedInputAcquire: () => boolean;
-  isManagedInputSurfaceReady: () => boolean;
-  /** Route async terminal-control bytes through the application's output gate. */
-  writeTerminalOutput: (data: string, onHandoff?: () => void) => boolean;
-  requestTerminalReconcile: () => void;
-  reportManagedInputFailure: (error: unknown) => void;
+  exit(): void;
 }
 
 export function createStdinController(
-  stdin: NodeJS.ReadStream,
+  terminal: TerminalBackend,
+  stdin: StdinContext["stdin"],
+  session: ManagedInputSession,
   opts: CreateStdinControllerOptions,
 ): StdinController {
-  const { appCtx } = opts;
+  const inputOwner = terminal.inputOwner;
   let controller!: StdinController;
   const inputSubscriptions = createInputDispatcher({
     acquire() {
       return controller.acquireSemanticInput();
     },
   });
-  const sharedIngress = getSharedStdinIngress(stdin);
+  const sharedIngress = getSharedInputIngress(terminal);
   interface ApplicationInputSnapshot {
     readonly kind: "subscribers";
     readonly subscribers: readonly InternalInputSubscriber[];
@@ -140,7 +131,7 @@ export function createStdinController(
     readonly fact: InputEvent;
     readonly snapshot: CapturedApplicationInputSnapshot;
   }
-  let sharedSubscription: SharedStdinSubscription;
+  let sharedSubscription: SharedInputSubscription;
   let sharedSubscriptionActive = false;
   let inputDeliveryActive = false;
   let drainingApplicationInput = false;
@@ -151,7 +142,8 @@ export function createStdinController(
   };
   let cleanupErrorSink: ((error: unknown) => void) | null = null;
   let bracketedPasteModeCount = 0;
-  let pendingBracketedPasteMode: { readonly enabled: boolean } | undefined;
+  const bracketedPasteLeases: TerminalLease<"bracketed-paste">[] = [];
+  let pendingBracketedPasteMode: { readonly enabled: boolean; attempted: boolean } | undefined;
   let reconcilingBracketedPaste = false;
   let bracketedPasteReconcileRequested = false;
   let bracketedPasteSyncRequested = false;
@@ -163,6 +155,7 @@ export function createStdinController(
   let bracketedPastePhysicallyEnabled = false;
   let bracketedPastePhysicalUncertain = false;
   let localRefs = 0;
+  const rawModeLeases: TerminalLease<"raw">[] = [];
   /** Logical managed-input owners, whether or not this stream supports raw mode. */
   let managedInputRefs = 0;
   /** Raw refs that require Runtime's parser and negotiated input protocols. */
@@ -189,42 +182,31 @@ export function createStdinController(
   // bracketedPasteModeCount (see dispose(sync) below).
   let everEnabledBracketedPaste = false;
 
-  // Write terminal-mode escapes only when stdout can still take them.
-  // `isTTY` stays cached-truthy after a stream is destroy()ed/end()ed, so gating
-  // the restore write on isTTY alone throws ERR_STREAM_DESTROYED on a teardown
-  // where stdout is already gone. Require isTTY AND
-  // `!destroyed && !writableEnded`, matching the render-level writeBestEffort
-  // helper that is outside this function's scope.
+  // Write terminal-mode escapes only when stdout can still take them. `isTTY`
+  // stays truthy after a stream is destroyed or ended, so a restore gated on it
+  // alone throws ERR_STREAM_DESTROYED on a teardown where stdout is already
+  // gone; the backend's `canWrite` fact carries that check.
   function canWriteTerminalMode(): boolean {
-    const stdout = appCtx.stdout;
-    return Boolean(stdout.isTTY) && !stdout.destroyed && !stdout.writableEnded;
+    return terminal.capabilities.stdout.isTTY && terminal.capabilities.stdout.canWrite;
   }
 
   function writeTerminalMode(
     data: string,
     sync = false,
     onHandoff: () => void = () => {},
+    onAttempt: () => void = () => {},
   ): boolean {
     if (!canWriteTerminalMode()) return false;
-    const stdout = appCtx.stdout;
     if (sync) {
       // The base WriteStream type doesn't declare `fd`; tty/fs streams do.
       // Let failures propagate to the reconciler: OFF transitions are retried
       // once before the outer signal/suspension cleanup swallows the error.
-      const streamFd = (stdout as { fd?: number }).fd;
-      if (typeof streamFd === "number") {
-        fsWriteSync(streamFd, data);
-      } else if (stdout === process.stdout) {
-        fsWriteSync(1, data);
-      } else if (stdout === process.stderr) {
-        fsWriteSync(2, data);
-      } else {
-        stdout.write(data);
-      }
+      onAttempt();
+      terminal.writeSync("stdout", data);
       onHandoff();
       return true;
     }
-    return opts.writeTerminalOutput(data, onHandoff);
+    return session.writeTerminal(data, onHandoff, onAttempt);
   }
 
   function runTerminalCleanup(operation: () => void): void {
@@ -243,7 +225,7 @@ export function createStdinController(
       cleanupErrorSink(error);
       return;
     }
-    opts.reportManagedInputFailure(error);
+    session.reportManagedInputFailure(error);
   }
 
   function reconcileBracketedPasteMode(sync = false): void {
@@ -263,23 +245,32 @@ export function createStdinController(
           !disposed && !suspended && bracketedPasteModeCount > 0 && canWriteTerminalMode();
         if (pendingBracketedPasteMode) break;
         if (bracketedPastePhysicalUncertain) {
-          const pending = { enabled: false } as const;
+          const pending = { enabled: false, attempted: false };
           pendingBracketedPasteMode = pending;
           try {
-            const accepted = writeTerminalMode("\x1b[?2004l", useSync, () => {
-              if (pendingBracketedPasteMode !== pending) return;
-              pendingBracketedPasteMode = undefined;
-              bracketedPastePhysicallyEnabled = false;
-              bracketedPastePhysicalUncertain = false;
-              opts.requestTerminalReconcile();
-            });
+            const accepted = writeTerminalMode(
+              "\x1b[?2004l",
+              useSync,
+              () => {
+                if (pendingBracketedPasteMode !== pending) return;
+                pendingBracketedPasteMode = undefined;
+                bracketedPastePhysicallyEnabled = false;
+                bracketedPastePhysicalUncertain = false;
+                session.requestTerminalReconcile();
+              },
+              () => {
+                if (pendingBracketedPasteMode === pending) pending.attempted = true;
+              },
+            );
             if (!accepted) {
               if (pendingBracketedPasteMode === pending) pendingBracketedPasteMode = undefined;
-              opts.requestTerminalReconcile();
+              session.requestTerminalReconcile();
             }
           } catch (error) {
-            if (pendingBracketedPasteMode === pending) pendingBracketedPasteMode = undefined;
-            bracketedPastePhysicalUncertain = true;
+            if (pendingBracketedPasteMode === pending) {
+              pendingBracketedPasteMode = undefined;
+              if (pending.attempted) bracketedPastePhysicalUncertain = true;
+            }
             throw error;
           }
           break;
@@ -289,7 +280,7 @@ export function createStdinController(
           continue;
         }
 
-        const pending = { enabled: shouldEnable } as const;
+        const pending = { enabled: shouldEnable, attempted: false };
         pendingBracketedPasteMode = pending;
         try {
           const accepted = writeTerminalMode(
@@ -301,19 +292,24 @@ export function createStdinController(
               bracketedPastePhysicallyEnabled = shouldEnable;
               bracketedPastePhysicalUncertain = false;
               if (shouldEnable) everEnabledBracketedPaste = true;
-              opts.requestTerminalReconcile();
+              session.requestTerminalReconcile();
+            },
+            () => {
+              if (pendingBracketedPasteMode === pending) pending.attempted = true;
             },
           );
           if (!accepted) {
             if (pendingBracketedPasteMode === pending) {
               pendingBracketedPasteMode = undefined;
             }
-            opts.requestTerminalReconcile();
+            session.requestTerminalReconcile();
             break;
           }
         } catch (error) {
-          if (pendingBracketedPasteMode === pending) pendingBracketedPasteMode = undefined;
-          bracketedPastePhysicalUncertain = true;
+          if (pendingBracketedPasteMode === pending) {
+            pendingBracketedPasteMode = undefined;
+            if (pending.attempted) bracketedPastePhysicalUncertain = true;
+          }
           throw error;
         }
         if (pendingBracketedPasteMode) break;
@@ -343,8 +339,8 @@ export function createStdinController(
     if (
       resumeAwaitingTerminalModes &&
       (managedRawRefs === 0 ||
-        (opts.isManagedInputSurfaceReady() &&
-          opts.isKittyKeyboardReady() &&
+        (session.isManagedInputReady &&
+          session.isKittyKeyboardReady &&
           (!canWriteTerminalMode() ||
             (bracketedPasteModeCount === 0
               ? !bracketedPastePhysicallyEnabled && !bracketedPastePhysicalUncertain
@@ -378,7 +374,7 @@ export function createStdinController(
         if (shouldHoldDemand && !releaseKittyKeyboardDemand) {
           let release: (() => void) | undefined;
           try {
-            release = opts.acquireKittyKeyboardDemand();
+            release = session.acquireKittyKeyboard();
           } catch (error) {
             if (!hasError) {
               firstError = error;
@@ -491,7 +487,7 @@ export function createStdinController(
   function processInputEvent(event: InputEvent, snapshot: ApplicationInputSnapshot): void {
     if (suspended || disposed || !snapshot.managedInputActive) return;
     if (opts.exitOnCtrlC && isCtrlC(event)) {
-      appCtx.exit();
+      opts.exit();
       return;
     }
 
@@ -501,11 +497,11 @@ export function createStdinController(
   sharedSubscription = sharedIngress.subscribe(captureApplicationInputSnapshot, acceptSharedInput);
 
   function canAcquireManagedRawMode(): boolean {
-    return appCtx.isRawModeSupported && hasRawInputCapability(stdin) && isReadableHostLive(stdin);
+    return terminal.capabilities.stdin.canSetRawMode && terminal.capabilities.stdin.canRead;
   }
 
   function assertPublicRawModeAvailable(): void {
-    if (!appCtx.isRawModeSupported || !hasRawInputCapability(stdin) || !isReadableHostLive(stdin)) {
+    if (!terminal.capabilities.stdin.canSetRawMode || !terminal.capabilities.stdin.canRead) {
       throw new Error("Raw mode is unavailable because Runtime cannot control the mounted stdin.");
     }
   }
@@ -559,7 +555,7 @@ export function createStdinController(
             state.physicalRawUncertain = false;
             if (state.changedRawMode) {
               try {
-                appCtx.setRawMode(true);
+                terminal.setRawMode(true);
               } catch (error) {
                 // A throwing custom stream may have failed before or after the
                 // ioctl. Mark the state uncertain so the next desired owner
@@ -572,14 +568,11 @@ export function createStdinController(
             }
             continue;
           }
-          if (
-            (!state.physicalRefHeld || state.physicalRefUncertain) &&
-            typeof stdin.ref === "function"
-          ) {
+          if (!state.physicalRefHeld || state.physicalRefUncertain) {
             state.physicalRefHeld = true;
             state.physicalRefUncertain = false;
             try {
-              stdin.ref();
+              terminal.refInput();
             } catch (error) {
               state.physicalRefHeld = false;
               state.physicalRefUncertain = true;
@@ -593,7 +586,7 @@ export function createStdinController(
             state.physicalRawUncertain = false;
             if (state.changedRawMode) {
               try {
-                appCtx.setRawMode(state.baselineRaw);
+                terminal.setRawMode(state.baselineRaw);
               } catch (error) {
                 // A failed release may have left the terminal raw. Retain the
                 // ownership fact so teardown can retry instead of assuming the
@@ -607,14 +600,11 @@ export function createStdinController(
             }
             continue;
           }
-          if (
-            (state.physicalRefHeld || state.physicalRefUncertain) &&
-            typeof stdin.unref === "function"
-          ) {
+          if (state.physicalRefHeld || state.physicalRefUncertain) {
             state.physicalRefHeld = false;
             state.physicalRefUncertain = false;
             try {
-              stdin.unref();
+              terminal.unrefInput();
             } catch (error) {
               state.physicalRefUncertain = true;
               // Node's unref() is idempotent. Retry a failed final release once
@@ -691,9 +681,7 @@ export function createStdinController(
       (bracketedPastePhysicallyEnabled &&
         !bracketedPastePhysicalUncertain &&
         pendingBracketedPasteMode === undefined);
-    return (
-      !suspended && opts.isManagedInputSurfaceReady() && opts.isKittyKeyboardReady() && pasteReady
-    );
+    return !suspended && session.isManagedInputReady && session.isKittyKeyboardReady && pasteReady;
   }
 
   function reconcileSemanticInputDemands(): void {
@@ -743,7 +731,7 @@ export function createStdinController(
                 const acquired = acquireLogicalRawMode(true) !== false;
                 if (!acquired) {
                   setSemanticDemandInputAcquired(demand, false);
-                  opts.requestTerminalReconcile();
+                  session.requestTerminalReconcile();
                   continue;
                 }
                 demand.physicalAcquired = true;
@@ -783,16 +771,17 @@ export function createStdinController(
       throw new Error("Cannot acquire raw mode after the vue-tui application has unmounted");
     }
     if (managed) {
-      if (!suspended && !opts.beforeManagedInputAcquire()) return false;
+      if (!suspended && !session.prepareManagedInput()) return false;
     } else {
       assertPublicRawModeAvailable();
     }
 
-    const state = getRawModeState(stdin);
+    const state = getRawModeState(inputOwner);
     const firstSharedRef = state.refs === 0;
     const localRefsBefore = localRefs;
     const kindRefsBefore = managed ? managedRawRefs : publicRawRefs;
     let committedRef = false;
+    let rawModeLease: TerminalLease<"raw"> | undefined;
     try {
       if (
         firstSharedRef &&
@@ -802,7 +791,7 @@ export function createStdinController(
         !state.physicalRefHeld &&
         !state.physicalRefUncertain
       ) {
-        state.baselineRaw = Boolean((stdin as { isRaw?: boolean }).isRaw);
+        state.baselineRaw = terminal.isRawModeEnabled;
         state.changedRawMode = !state.baselineRaw;
       }
       const participatesPhysically = !suspended;
@@ -812,6 +801,8 @@ export function createStdinController(
       if (managed) managedRawRefs++;
       else publicRawRefs++;
       committedRef = true;
+      rawModeLease = terminal.acquire("raw");
+      rawModeLeases.push(rawModeLease);
       if (participatesPhysically) state.pendingDisable = false;
       reconcilePhysicalRawMode(state);
       reconcileSharedSubscription();
@@ -827,6 +818,11 @@ export function createStdinController(
         if (managed) managedRawRefs = Math.max(0, managedRawRefs - 1);
         else publicRawRefs = Math.max(0, publicRawRefs - 1);
       }
+      if (rawModeLease) {
+        const index = rawModeLeases.lastIndexOf(rawModeLease);
+        if (index !== -1) rawModeLeases.splice(index, 1);
+        rawModeLease.release();
+      }
       if (state.activeRefs === 0) state.pendingDisable = false;
       runTerminalCleanup(() => reconcilePhysicalRawMode(state));
       resetRawModeStateIfIdle(state);
@@ -838,14 +834,14 @@ export function createStdinController(
   }
 
   function releaseLogicalRawMode(managed: boolean): void {
-    if (!appCtx.isRawModeSupported) return;
     if (managed ? managedRawRefs === 0 : publicRawRefs === 0) return;
-    const state = getRawModeState(stdin);
+    const state = getRawModeState(inputOwner);
     state.refs = Math.max(0, state.refs - 1);
     if (!suspended) state.activeRefs = Math.max(0, state.activeRefs - 1);
     localRefs = Math.max(0, localRefs - 1);
     if (managed) managedRawRefs = Math.max(0, managedRawRefs - 1);
     else publicRawRefs = Math.max(0, publicRawRefs - 1);
+    rawModeLeases.pop()?.release();
     let firstError: unknown;
     let hasError = false;
     try {
@@ -891,7 +887,7 @@ export function createStdinController(
 
   controller = {
     stdin,
-    isRawModeSupported: appCtx.isRawModeSupported,
+    isRawModeSupported: terminal.capabilities.stdin.canSetRawMode,
     inputSubscriptions,
     setCleanupErrorSink(sink) {
       cleanupErrorSink = sink;
@@ -929,7 +925,7 @@ export function createStdinController(
             try {
               reconcileSemanticInputDemands();
             } catch (error) {
-              opts.reportManagedInputFailure(error);
+              session.reportManagedInputFailure(error);
               throw error;
             }
           },
@@ -952,7 +948,7 @@ export function createStdinController(
           },
         });
       } catch (error) {
-        opts.reportManagedInputFailure(error);
+        session.reportManagedInputFailure(error);
         throw error;
       }
     },
@@ -962,7 +958,7 @@ export function createStdinController(
     startKittyQueryResponseDetection(onResult) {
       let settled = false;
       let cancelSharedDetection:
-        | ReturnType<SharedStdinIngress["startKittyQueryResponseDetection"]>
+        | ReturnType<SharedInputIngress["startKittyQueryResponseDetection"]>
         | undefined;
       cancelSharedDetection = sharedIngress.startKittyQueryResponseDetection((supported) => {
         if (settled) return;
@@ -1011,9 +1007,7 @@ export function createStdinController(
       flushPendingApplicationInput();
     },
     abandonPendingTerminalOutput(options) {
-      if (options?.physicalStateUncertain) {
-        if (pendingBracketedPasteMode) bracketedPastePhysicalUncertain = true;
-      }
+      if (pendingBracketedPasteMode?.attempted) bracketedPastePhysicalUncertain = true;
       pendingBracketedPasteMode = undefined;
       for (const demand of semanticInputDemands) {
         if (demand.physicalAcquired && !semanticTerminalModesReady()) {
@@ -1025,13 +1019,15 @@ export function createStdinController(
         // Converge immediately to a terminal-safe paste-OFF state.
         runTerminalCleanup(reconcileBracketedPasteMode);
       } else {
-        opts.requestTerminalReconcile();
+        session.requestTerminalReconcile();
       }
     },
     setBracketedPasteMode(enabled: boolean) {
       if (disposed) return;
       if (enabled) {
         const bracketedPasteModeCountBefore = bracketedPasteModeCount;
+        const lease = terminal.acquire("bracketed-paste");
+        bracketedPasteLeases.push(lease);
         bracketedPasteModeCount++;
         try {
           reconcileBracketedPasteMode();
@@ -1039,12 +1035,16 @@ export function createStdinController(
           if (!disposed && bracketedPasteModeCount > bracketedPasteModeCountBefore) {
             bracketedPasteModeCount--;
           }
+          const index = bracketedPasteLeases.lastIndexOf(lease);
+          if (index !== -1) bracketedPasteLeases.splice(index, 1);
+          lease.release();
           runTerminalCleanup(reconcileBracketedPasteMode);
           throw error;
         }
       } else {
         if (bracketedPasteModeCount === 0) return;
         bracketedPasteModeCount--;
+        bracketedPasteLeases.pop()?.release();
         // Let the semantic release finish before retrying an ambiguous OFF. A
         // re-entrant replacement can then establish the newest desired count,
         // so reconciliation emits ON directly instead of an obsolete second
@@ -1076,8 +1076,8 @@ export function createStdinController(
 
       runTerminalCleanup(() => reconcileBracketedPasteMode(sync));
 
-      if (appCtx.isRawModeSupported) {
-        const state = getRawModeState(stdin);
+      if (terminal.capabilities.stdin.canSetRawMode) {
+        const state = getRawModeState(inputOwner);
         state.activeRefs = Math.max(0, state.activeRefs - localRefs);
         state.pendingDisable = false;
         runTerminalCleanup(() => reconcilePhysicalRawMode(state));
@@ -1086,7 +1086,9 @@ export function createStdinController(
     },
     resume() {
       if (!suspended) return;
-      const state = appCtx.isRawModeSupported ? getRawModeState(stdin) : undefined;
+      const state = terminal.capabilities.stdin.canSetRawMode
+        ? getRawModeState(inputOwner)
+        : undefined;
       let addedActiveRawRefs = 0;
 
       suspended = false;
@@ -1182,8 +1184,9 @@ export function createStdinController(
         }
       }
       bracketedPasteModeCount = 0;
-      if (appCtx.isRawModeSupported) {
-        const state = getRawModeState(stdin);
+      for (const lease of bracketedPasteLeases.splice(0)) lease.release();
+      if (terminal.capabilities.stdin.canSetRawMode) {
+        const state = getRawModeState(inputOwner);
         // Drop this controller's outstanding refs (if Vue's unmount hasn't already
         // released them via onScopeDispose → releaseRawMode).
         if (localRefs > 0) {
@@ -1209,6 +1212,7 @@ export function createStdinController(
         runTerminalCleanup(() => reconcilePhysicalRawMode(state));
         resetRawModeStateIfIdle(state);
       }
+      for (const lease of rawModeLeases.splice(0)) lease.release();
       suspended = false;
     },
   };
