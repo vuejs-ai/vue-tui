@@ -4,7 +4,7 @@ The work that moves `@vue-tui/runtime` from its current internal structure to th
 
 **This file deletes itself.** It exists only to hold the gap between the record and the code. When every task below has landed, delete this file and remove its route from [the records map](./README.md); nothing here needs to be preserved, because the architecture record already states the target and git keeps the history. Do not add ordinary follow-up work here — that belongs in [TODOs](./todos.md).
 
-Counts below were measured at `b21674e`; the `render.ts` line numbers reflect the tree after task 2. Re-measure before relying on any of them.
+Counts below were measured at `b21674e`; task-specific line numbers state which prerequisite tree they reflect. Re-measure before relying on any of them.
 
 ## Order
 
@@ -45,26 +45,11 @@ Focus asks `layout/` for authored visibility as a live tree query, so hidden tar
 
 ## 4. Give each surface its own implementation
 
-**Today.** `render-session.ts` already resolves a three-variant union, `ResolvedLiveSurface` (`inline-terminal` / `fullscreen-terminal` / `final-stream`). `render.ts:1445`–`1452` immediately flattens it into six booleans — `dynamicUpdatesLive`, `fixedFullscreenSurface`, `boundedInlineSurface`, `inlineTerminalSurface`, `documentHostSurface`, `boundedDocumentSurface` — read at 38 sites. Two pairs are the same expression written twice: `boundedInlineSurface` and `inlineTerminalSurface` are both `kind === "inline-terminal"`, `documentHostSurface` and `boundedDocumentSurface` are both `kind === "final-stream"`.
-
-**Steps.**
-
-1. Collapse the two duplicate pairs, six booleans to four. Mechanical and behaviour-preserving; it makes the remaining branches countable.
-2. Define the `Surface` interface — take a frame, present it, suspend, resume, hand off history and dispose.
-3. `FullscreenSurface` takes the 15 `fixedFullscreenSurface` branches, along with the alternate-screen and cursor-hidden leases and the resize repaint.
-4. `InlineSurface` takes the inline branches, along with the region bookkeeping and the handling for consecutive frames that differ in height.
-5. `DocumentSurface` takes the final-stream branches: it writes history immediately while mounted and encodes the dynamic frame once on clean teardown.
-6. Delete the booleans. What is left at each of the 38 sites is a call on `surface`.
-
-**Done when.** The three variants have three implementations that each hold their own previous frame, comparison strategy, write path and history handling, dispatched from one place.
-
-**Verify.** No occurrence of the six names remains in `render.ts`. The rendering-mode suites and the PTY suites are the behavioural check; nothing about what reaches the screen changes.
-
-**Watch for.** Renaming `fixedFullscreenSurface` to `surface.kind === "fullscreen-terminal"` is mechanical and behaviour-preserving but only buys readability. The compiler catches a missing case once the branches are gathered into per-variant dispatch; that is where the work is. [Rendering modes](./rendering-modes.md) is the contract these three implement and is not restated by them.
+`surface/` dispatches a resolved surface kind once to `InlineSurface`, `FullscreenSurface` or `DocumentSurface`. The shared `Surface` contract owns frame presentation, history handoff, suspension, resume and teardown, and `SurfaceRuntime` supplies stream writes and transactions, viewport dimensions, stdout facts and lifecycle callbacks. Inline owns its bounded region, variable-height reset and previous-frame rewrite; Fullscreen owns the alternate-screen and cursor leases, resize-invalidated row diffs and output-transaction rollback; Document writes history immediately and its latest dynamic frame exactly once on clean teardown. `render.ts` coordinates Vue and output transactions and reads surface facts only through `Surface`.
 
 ## 5. Extract the terminal backend
 
-**Today.** Terminal state is spread across eight files. Five write to an output stream (`render.ts`, `surface/log-update.ts`, `terminal/kitty-keyboard.ts`, `terminal/output-coordinator.ts`, `terminal/stdin-controller.ts`) and five name `setRawMode`: `render.ts` and `terminal/stdin-controller.ts` call it on the stream, `vue/composables/useStdin.ts` routes through the context, `vue/context.ts` declares the type and `render-to-string.ts` supplies an inert stub. `exitAlternativeScreen` has three write sites in `render.ts` alone (`784`, `1186`, `1709`), each with its own best-effort write and ownership bookkeeping, against a single enter site at `2301`. `StdinController` receives seven callbacks from the mount closure — `acquireKittyKeyboardDemand`, `isKittyKeyboardReady`, `beforeManagedInputAcquire`, `isManagedInputSurfaceReady`, `writeTerminalOutput`, `requestTerminalReconcile`, `reportManagedInputFailure` — because enabling bracketed paste and the Kitty protocol requires writing bytes and there is no terminal object to ask. Eleven files import `node:*`, and eight use `process` for a value — three more only name it in comments — including `render-to-string.ts` (inert streams from `node:stream`, colour resolved against `process.stdout` and `process.env`), `api/testing.ts` (stream defaults) and `vue/node-ops.ts` (`NODE_ENV`), each of which the steps below must route through the backend or the Done line must list as an exception.
+**Today.** Terminal state is spread across eight files. Five write to an output stream (`render.ts`, `surface/log-update.ts`, `terminal/kitty-keyboard.ts`, `terminal/output-coordinator.ts`, `terminal/stdin-controller.ts`) and five name `setRawMode`: `render.ts` and `terminal/stdin-controller.ts` call it on the stream, `vue/composables/useStdin.ts` routes through the context, `vue/context.ts` declares the type and `render-to-string.ts` supplies an inert stub. `exitAlternativeScreen` is written from two sites in `surface/fullscreen-surface.ts` and `enterAlternativeScreen` from one; each carries its own best-effort write and ownership bookkeeping rather than a lease. `StdinController` receives seven callbacks from the mount closure — `acquireKittyKeyboardDemand`, `isKittyKeyboardReady`, `beforeManagedInputAcquire`, `isManagedInputSurfaceReady`, `writeTerminalOutput`, `requestTerminalReconcile`, `reportManagedInputFailure` — because enabling bracketed paste and the Kitty protocol requires writing bytes and there is no terminal object to ask. Eleven files import `node:*`, and eight use `process` for a value — three more only name it in comments — including `render-to-string.ts` (inert streams from `node:stream`, colour resolved against `process.stdout` and `process.env`), `api/testing.ts` (stream defaults) and `vue/node-ops.ts` (`NODE_ENV`), each of which the steps below must route through the backend or the Done line must list as an exception.
 
 **Steps.**
 
@@ -84,7 +69,7 @@ Focus asks `layout/` for authored visibility as a live tree query, so hidden tar
 
 ## 6. Make paint return a frame
 
-**Today.** `paint()` returns a `string`. `Output.get()` in `paint/paint.ts` builds a `StyledChar[][]`, fills it, joins it with newlines and discards it; the shared `blankCell` at `paint/paint.ts:317` exists to avoid one object per cell. `StyledChar` carries its style as `AnsiCode[]` — an array of `{ code, endCode }` objects. Four separate stores hold "the previous frame": `frameState.lastOutput` in `render.ts`, `FrameWriter`'s `lastFrame`, `log-update`'s `previousOutput`, and the Fullscreen baseline fields. `FrameWriter.sync()`'s comment records the defect two of them produced by drifting apart. Inline compares whole strings; Fullscreen splits on newlines and compares rows.
+**Today.** `paint()` returns a `string`. `Output.get()` in `paint/paint.ts` builds a `StyledChar[][]`, fills it, joins it with newlines and discards it; the shared `blankCell` at `paint/paint.ts:317` exists to avoid one object per cell. `StyledChar` carries its style as `AnsiCode[]` — an array of `{ code, endCode }` objects. Four separate stores hold "the previous frame": `SurfaceBase`'s `frame` in `surface/surface-contract.ts`, `FrameWriter`'s `lastFrame`, `log-update`'s `previousOutput`, and the Fullscreen baseline fields. `FrameWriter.sync()`'s comment records the defect two of them produced by drifting apart. Inline compares whole strings; Fullscreen splits on newlines and compares rows.
 
 **Steps.**
 
@@ -101,11 +86,11 @@ Focus asks `layout/` for authored visibility as a live tree query, so hidden tar
 
 ## 7. Turn the mount closure into a session object
 
-**Today.** `createApp` spans `render.ts:339`–`3217`; the mount closure inside it spans `1352`–`3149`. The enclosing closure holds 35 `let mounted*` variables, declared between `354` and `1291`, whose only purpose is to let `teardown()` reach resources the mount created. `render.ts` declares 62 function-scope boolean flags in all: 19 of them, between `352` and `740`, track exit, teardown and mount settlement alone, alongside the `lifecycleTransactionDepth` counter at `732`; a further seven, between `1646` and `1780`, track suspend and resume. `mountedDevApp` reaches back into teardown to implement development replacement.
+**Today.** After task 4, `createApp` spans `render.ts:343`–`2803`; the mount closure inside it spans `1294`–`2735`. The enclosing closure holds 31 `let mounted*` variables, declared between `358` and `1233`, whose only purpose is to let `teardown()` reach resources the mount created. `render.ts` declares 51 function-scope boolean flags in all, most of them tracking exit, teardown and mount settlement alongside the `lifecycleTransactionDepth` counter at `722`; a further five, between `1547` and `1628`, track suspend and resume. `mountedDevApp` reaches back into teardown to implement development replacement.
 
 **Steps.**
 
-1. Lift the 35 mirror variables into fields of one object constructed by mount and read by teardown. Their null checks go with them.
+1. Lift the 31 mirror variables into fields of one object constructed by mount and read by teardown. Their null checks go with them.
 2. Replace the exit, teardown and settlement flags with the lifecycle union `"mounting" | "running" | "suspended" | "tearing-down" | "torn-down"`, and let exhaustiveness checking reject the combinations the booleans could express.
 3. Move `SIGTSTP`, signal exit and exit codes to the node backend: they are process facts, and what is left is a session state.
 4. Give `DevSession` its own object that disposes one session and builds another, rather than branching inside `Session` through `mountedDevApp`.

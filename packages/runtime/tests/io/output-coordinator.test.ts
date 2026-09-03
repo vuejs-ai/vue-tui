@@ -169,6 +169,23 @@ describe("output coordinator", () => {
     expect(coordinator.isBlocked()).toBe(false);
   });
 
+  test("marks only the segment whose physical write starts", () => {
+    const failure = new Error("first write failed");
+    const { stream, chunks } = createWritable([failure]);
+    const coordinator = createOutputCoordinator();
+    const attempts: string[] = [];
+
+    expect(() =>
+      coordinator.run(() => {
+        coordinator.write(stream, "a", undefined, undefined, () => attempts.push("a"));
+        coordinator.write(stream, "b", undefined, undefined, () => attempts.push("b"));
+      }),
+    ).toThrow(failure);
+
+    expect(chunks).toEqual(["a"]);
+    expect(attempts).toEqual(["a"]);
+  });
+
   test("settles and releases drain listeners when a blocked stream closes", async () => {
     const { stream, events } = createWritable([false]);
     const onDeferredError = vi.fn();

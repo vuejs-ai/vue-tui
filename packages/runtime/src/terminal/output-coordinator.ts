@@ -26,6 +26,7 @@ interface PendingWrite {
   data: string;
   readonly callback?: () => void;
   onHandoff?: () => void;
+  readonly onAttempt?: () => void;
 }
 
 interface TransactionState {
@@ -70,12 +71,17 @@ export interface OutputCoordinator {
    * It never appends to an already-handed or backpressured transaction.
    */
   readonly continue: (body: () => void) => CoordinatedWriteResult;
-  /** Capture one ordered segment inside the current building transaction. */
+  /**
+   * Capture one ordered segment inside the current building transaction.
+   * `onAttempt` runs immediately before `stream.write()`, including when that
+   * call throws; `onHandoff` runs only after the call returns.
+   */
   readonly write: (
     stream: NodeJS.WriteStream,
     data: string,
     callback?: () => void,
     onHandoff?: () => void,
+    onAttempt?: () => void,
   ) => boolean;
   /**
    * Hand every captured segment to its stream now. Returns false only when a
@@ -193,6 +199,7 @@ export function createOutputCoordinator(options?: {
     };
     let writable: boolean;
     try {
+      write.onAttempt?.();
       writable =
         write.callback || settleTrackedWrite
           ? write.stream.write(write.data, complete)
@@ -314,6 +321,7 @@ export function createOutputCoordinator(options?: {
     data: string,
     callback?: () => void,
     onHandoff?: () => void,
+    onAttempt?: () => void,
   ): boolean {
     const current = transaction;
     if (state !== "building" || !current || current.handoffStarted) {
@@ -325,12 +333,14 @@ export function createOutputCoordinator(options?: {
       previous.stream === stream &&
       previous.callback === undefined &&
       callback === undefined &&
-      previous.onHandoff === undefined
+      previous.onHandoff === undefined &&
+      previous.onAttempt === undefined &&
+      onAttempt === undefined
     ) {
       previous.data += data;
       previous.onHandoff = onHandoff;
     } else {
-      current.pending.push({ stream, data, callback, onHandoff });
+      current.pending.push({ stream, data, callback, onHandoff, onAttempt });
     }
     // Capture itself never means backpressure. Runtime helpers use the boolean
     // only for Writable compatibility while the transaction owns handoff.
