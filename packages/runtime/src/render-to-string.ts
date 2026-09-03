@@ -1,5 +1,4 @@
 import { createRenderer, createVNode, type Component, type VNode } from "vue";
-import { Readable, Writable } from "node:stream";
 import { createRoot, type TuiNode } from "./host/nodes.ts";
 import { runLayoutTransaction } from "./layout/layout-transaction.ts";
 import { attachYoga, detachYoga } from "./layout/yoga.ts";
@@ -7,13 +6,7 @@ import { buildNodeOps } from "./vue/node-ops.ts";
 import { createHostYogaAllocationLedger } from "./layout/yoga-allocation-ledger.ts";
 import { paint } from "./paint/paint.ts";
 import { findStatics, prepareStaticOutput } from "./paint/static-channel.ts";
-import {
-  AppContextKey,
-  StdinContextKey,
-  type AppContext,
-  type StdinContext,
-} from "./vue/context.ts";
-import { createInputDispatcher } from "./input/input-subscriptions.ts";
+import { AppContextKey, StdinContextKey } from "./vue/context.ts";
 import {
   createRenderedTargetController,
   setRenderedTargetController,
@@ -29,6 +22,8 @@ import {
 import { MAX_LAYOUT_VALUE } from "./layout/numeric-limits.ts";
 import { resolveTerminalStyle } from "./paint/terminal-style.ts";
 import { normalizeColorOption, type ColorProfile } from "./color-profile.ts";
+import { createNodeStringContexts, type NodeStringContexts } from "./session/string-context.ts";
+import { getDefaultNodeTerminalStyleFacts, isNodeProduction } from "./terminal/node/backend.ts";
 
 export interface RenderToStringOptions {
   /**
@@ -84,18 +79,23 @@ interface NormalizedStringOptions {
 }
 
 function renderToStringInternal(component: Component, options: NormalizedStringOptions): string {
+  const nodeStyleFacts = options.color === true ? getDefaultNodeTerminalStyleFacts() : undefined;
   const terminalStyle =
     options.color === true
-      ? resolveTerminalStyle({ color: true, stdout: process.stdout, environment: process.env })
+      ? resolveTerminalStyle({
+          color: true,
+          stdout: nodeStyleFacts!.stdout,
+          environment: nodeStyleFacts!.environment,
+        })
       : resolveTerminalStyle({ color: options.color });
   const renderSession = createStringRenderSessionService({
     columns: options.width,
     rows: options.height,
     terminalStyle,
   });
-  const contexts = createStringContexts(options.width);
+  const contexts = createNodeStringContexts();
   try {
-    return renderStringDocument(component, options, renderSession, contexts);
+    return renderStringDocument(component, options, renderSession, contexts, isNodeProduction());
   } finally {
     renderSession.dispose();
     contexts.dispose();
@@ -106,9 +106,10 @@ function renderStringDocument(
   component: Component,
   options: NormalizedStringOptions,
   renderSession: InternalStringRenderSessionService,
-  contexts: ReturnType<typeof createStringContexts>,
+  contexts: NodeStringContexts,
+  isProduction: boolean,
 ): string {
-  // Create a standalone root node --- no stdout, stdin, or terminal bindings.
+  // Create a standalone root node with no live terminal bindings.
   const { appContext, stdinContext } = contexts;
   const root = createRoot(appContext);
   const focusController = createInternalFocusController({
@@ -124,6 +125,7 @@ function renderStringDocument(
       // Static on each host mutation: the tui-static host is inserted before
       // its slot children. The complete tree is collected once after render.
       onCommit: () => {},
+      isProduction: () => isProduction,
       hostYogaLifecycle: hostYogaLedger,
     }),
   );
@@ -323,67 +325,5 @@ function normalizePublicOptions(options: unknown): NormalizedStringOptions {
     width: normalizeWidth(object.width),
     height: normalizeHeight(object.height),
     color: normalizeColorOption(object.color, false, "renderToString"),
-  };
-}
-
-function createDiscardWritable(columns: number): NodeJS.WriteStream {
-  const stream = new Writable({
-    write(_chunk, _encoding, callback) {
-      callback();
-    },
-  }) as NodeJS.WriteStream;
-  Object.assign(stream, { isTTY: false, columns });
-  return stream;
-}
-
-function createInertReadable(): NodeJS.ReadStream {
-  const stream = new Readable({ read() {} }) as NodeJS.ReadStream;
-  Object.assign(stream, {
-    isTTY: false,
-    setRawMode() {
-      return stream;
-    },
-  });
-  return stream;
-}
-
-function createStringContexts(columns: number): {
-  readonly appContext: AppContext;
-  readonly stdinContext: StdinContext;
-  dispose(): void;
-} {
-  const stdout = createDiscardWritable(columns);
-  const stderr = createDiscardWritable(columns);
-  const stdin = createInertReadable();
-  const appContext: AppContext = {
-    exit: () => {},
-    stdout,
-    stderr,
-    stdin,
-    isRawModeSupported: false,
-    setRawMode: () => {},
-    writeToStdout: () => ({ status: "accepted", writable: true }),
-    writeToStderr: () => ({ status: "accepted", writable: true }),
-  };
-
-  const stdinContext = createNoOpStdinContext(stdin);
-  return {
-    appContext,
-    stdinContext,
-    dispose() {
-      stdinContext.inputSubscriptions.clear();
-      stdin.destroy();
-      stdout.destroy();
-      stderr.destroy();
-    },
-  };
-}
-
-function createNoOpStdinContext(stdin: NodeJS.ReadStream): StdinContext {
-  return {
-    stdin,
-    isRawModeSupported: false,
-    inputSubscriptions: createInputDispatcher(),
-    acquirePublicRawMode: () => () => {},
   };
 }

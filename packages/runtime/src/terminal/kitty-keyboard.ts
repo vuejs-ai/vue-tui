@@ -1,6 +1,4 @@
-// packages/runtime/src/terminal/kitty-keyboard.ts
-
-import { writeSync as fsWriteSync } from "node:fs";
+import type { TerminalBackend, TerminalLease } from "./backend.ts";
 
 /** Fixed Kitty progressive-enhancement flag: disambiguate escape codes only. */
 const KITTY_DISAMBIGUATE_ESCAPE_CODES = 1;
@@ -52,22 +50,25 @@ export interface KittyKeyboardController {
   readonly isEnabled: boolean;
 }
 
-export type WriteKittyOutput = (data: string, onHandoff?: () => void) => boolean;
+export type WriteKittyOutput = (
+  data: string,
+  onHandoff?: () => void,
+  onAttempt?: () => void,
+) => boolean;
 
 export type StartKittyQueryResponseDetection = (
   onResult: (supported: boolean) => void,
 ) => (options?: { readonly discard?: boolean }) => void;
 
 export function createKittyKeyboardController(
-  stdin: NodeJS.ReadStream,
-  stdout: NodeJS.WriteStream,
+  terminal: TerminalBackend,
   startQueryResponseDetection: StartKittyQueryResponseDetection,
   options?: KittyKeyboardOptions,
-  writeOutput: WriteKittyOutput = (data, onHandoff) => {
-    // A direct Node Writable accepts the chunk even when write() returns false;
-    // false there means backpressure, not rejection. The injected Runtime gate
-    // instead returns false only when it did not capture this control write.
-    stdout.write(data);
+  writeOutput: WriteKittyOutput = (data, onHandoff, onAttempt) => {
+    // A direct backend write can report backpressure after accepting its bytes.
+    // The Runtime gate reports false only before it captures this control write.
+    onAttempt?.();
+    terminal.write("stdout", data);
     onHandoff?.();
     return true;
   },
@@ -80,6 +81,8 @@ export function createKittyKeyboardController(
   let autoSupport: "unknown" | "supported" | "unsupported" = "unknown";
   let demandCount = 0;
   let pendingDeactivate = false;
+  let protocolLease: TerminalLease<"kitty-keyboard"> | undefined;
+  let protocolMayBeEnabled = false;
   let deferredDisableSync = false;
   let nextOutputGeneration = 0;
   let nextDetectionGeneration = 0;
@@ -89,6 +92,7 @@ export function createKittyKeyboardController(
   type PendingOutput = {
     readonly generation: number;
     readonly kind: "push" | "query" | "pop";
+    attempted: boolean;
   };
 
   type ActiveDetection = {
@@ -105,12 +109,24 @@ export function createKittyKeyboardController(
 
   function canUseControlOutput(): boolean {
     return (
-      (stdin as { readonly isTTY?: boolean }).isTTY === true &&
-      (stdout as { readonly isTTY?: boolean }).isTTY === true &&
-      !(stdout as { readonly destroyed?: boolean }).destroyed &&
-      !(stdout as { readonly writableEnded?: boolean }).writableEnded &&
-      (stdout as { readonly writable?: boolean }).writable !== false
+      terminal.capabilities.stdin.isTTY &&
+      terminal.capabilities.stdin.canRead &&
+      terminal.capabilities.stdout.isTTY &&
+      terminal.capabilities.stdout.canWrite
     );
+  }
+
+  /**
+   * Enabling the protocol needs a readable stdin, because the terminal answers
+   * the query there. Restoring it does not: the pop only travels outward, and a
+   * stdin that has gone away -- a PTY hangup, a host closing it during teardown
+   * -- is exactly when leaving the protocol pushed costs the user their shell.
+   *
+   * This gates the asynchronous pop, which travels through the output gate. The
+   * synchronous one bypasses it deliberately; see `writeSyncPop`.
+   */
+  function canRestoreControlOutput(): boolean {
+    return terminal.capabilities.stdout.canWrite;
   }
 
   function notifyStateChange(): void {
@@ -127,20 +143,28 @@ export function createKittyKeyboardController(
     commit: () => void,
   ): boolean {
     if (pendingOutput) return true;
-    const pending: PendingOutput = { generation: ++nextOutputGeneration, kind };
+    const pending: PendingOutput = { generation: ++nextOutputGeneration, kind, attempted: false };
     pendingOutput = pending;
     let handed = false;
     let accepted = false;
 
     try {
-      accepted = writeOutput(data, () => {
-        if (pendingOutput !== pending) return;
-        handed = true;
-        pendingOutput = null;
-        commit();
-        reconcileDesired();
-        notifyStateChange();
-      });
+      accepted = writeOutput(
+        data,
+        () => {
+          if (pendingOutput !== pending) return;
+          handed = true;
+          pendingOutput = null;
+          commit();
+          reconcileDesired();
+          notifyStateChange();
+        },
+        () => {
+          if (pendingOutput !== pending) return;
+          pending.attempted = true;
+          if (kind === "push") protocolMayBeEnabled = true;
+        },
+      );
     } catch (error) {
       if (pendingOutput === pending) pendingOutput = null;
       notifyStateChange();
@@ -163,32 +187,30 @@ export function createKittyKeyboardController(
     // Fixed progressive-enhancement level: only disambiguate escape codes.
     return writeControlOutput("push", `\x1b[>${KITTY_DISAMBIGUATE_ESCAPE_CODES}u`, () => {
       enabled = true;
+      protocolMayBeEnabled = false;
+      protocolLease ??= terminal.acquire("kitty-keyboard");
     });
   }
 
   function writeSyncPop(): boolean {
-    const streamFd = (stdout as { fd?: number }).fd;
-    if (typeof streamFd === "number") {
-      fsWriteSync(streamFd, "\x1b[<u");
-    } else if (stdout === process.stdout) {
-      fsWriteSync(1, "\x1b[<u");
-    } else if (stdout === process.stderr) {
-      fsWriteSync(2, "\x1b[<u");
-    } else if (!stdout.destroyed && !(stdout as { writableEnded?: boolean }).writableEnded) {
-      // A custom stream without an fd may model a different terminal. Never
-      // guess process fd 1; write through the stream that was actually used.
-      stdout.write("\x1b[<u");
-    } else {
-      return false;
-    }
+    // No capability gate. This runs on the signal path and on the emergency
+    // restore, and the emergency restore is entered because coordinated output
+    // just failed -- so the stream's own `destroyed` flag is the least reliable
+    // signal available exactly when the pop matters most. `writeSync` tries the
+    // file descriptor first and gives up on its own if there is nothing to
+    // write to.
+    terminal.writeSync("stdout", "\x1b[<u");
     enabled = false;
+    protocolMayBeEnabled = false;
+    protocolLease?.release();
+    protocolLease = undefined;
     deferredDisableSync = false;
     notifyStateChange();
     return true;
   }
 
   function disableProtocol(sync = false): boolean {
-    if (!enabled) return true;
+    if (!enabled && !protocolMayBeEnabled) return true;
     if (pendingOutput) {
       deferredDisableSync ||= sync;
       return true;
@@ -199,9 +221,12 @@ export function createKittyKeyboardController(
     try {
       if (effectiveSync) {
         return writeSyncPop();
-      } else if (!stdout.destroyed && !(stdout as { writableEnded?: boolean }).writableEnded) {
+      } else if (canRestoreControlOutput()) {
         return writeControlOutput("pop", "\x1b[<u", () => {
           enabled = false;
+          protocolMayBeEnabled = false;
+          protocolLease?.release();
+          protocolLease = undefined;
           deferredDisableSync = false;
         });
       } else {
@@ -360,6 +385,9 @@ export function createKittyKeyboardController(
     }
 
     const wantsInput = wantsManagedInput();
+    if (protocolMayBeEnabled) {
+      return disableProtocol(sync) ? "settled" : "blocked";
+    }
     if (!wantsInput) {
       let cancellationError: unknown;
       if (activeDetection) {
@@ -435,7 +463,9 @@ export function createKittyKeyboardController(
         // synchronous throw rejects the pop before acceptance, so retry once at
         // the exact last-demand boundary instead of retaining the protocol until
         // whole-app teardown.
-        if (enabled && !pendingOutput && demandCount === 0) disableProtocol();
+        if ((enabled || protocolMayBeEnabled) && !pendingOutput && demandCount === 0) {
+          disableProtocol();
+        }
       } catch {
         // A release is terminal cleanup. The ingress has already ended the
         // logical detector even if a hostile listener removal reports failure;
@@ -472,6 +502,7 @@ export function createKittyKeyboardController(
       const pending = pendingOutput;
       if (!pending) return;
       pendingOutput = null;
+      if (pending.kind === "push" && pending.attempted) protocolMayBeEnabled = true;
       if (pending.kind === "query" && activeDetection) {
         try {
           cancelDetection({ discard: true });
@@ -529,7 +560,11 @@ export function createKittyKeyboardController(
         // the escape was not accepted. Retry once before suspension completes;
         // a re-entrant resume clears `suspended` and protects its replacement
         // level from this retry.
-        if (enabled && !pendingOutput && (disposed || suspended || demandCount === 0)) {
+        if (
+          (enabled || protocolMayBeEnabled) &&
+          !pendingOutput &&
+          (disposed || suspended || demandCount === 0)
+        ) {
           disableProtocol(sync);
         }
       }
@@ -560,7 +595,7 @@ export function createKittyKeyboardController(
       // A synchronous stream failure normally means the first pop was not
       // accepted. Retry once inside the same terminal-cleanup pass, and keep
       // repeated dispose calls useful if a hostile stream fails more than once.
-      if (enabled && !pendingOutput) disableProtocol(sync);
+      if ((enabled || protocolMayBeEnabled) && !pendingOutput) disableProtocol(sync);
       suspended = false;
     },
   };

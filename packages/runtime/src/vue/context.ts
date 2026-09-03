@@ -1,20 +1,16 @@
 import type { InjectionKey } from "vue";
+import type { Readable } from "node:stream";
 import type { InputDispatcher } from "../input/input-subscriptions.ts";
 import type { CoordinatedWriteResult } from "../terminal/output-coordinator.ts";
 
 export interface AppContext {
   exit: (error?: Error) => void;
-  stdout: NodeJS.WriteStream;
-  stderr: NodeJS.WriteStream;
-  stdin: NodeJS.ReadStream;
-  isRawModeSupported: boolean;
-  setRawMode: (mode: boolean) => void;
   writeToStdout: (data: string) => CoordinatedWriteResult;
   writeToStderr: (data: string) => CoordinatedWriteResult;
 }
 
 export interface StdinContext {
-  stdin: NodeJS.ReadStream;
+  stdin: Readable;
   isRawModeSupported: boolean;
   inputSubscriptions: InputDispatcher;
   /** Acquire one independently releasable public raw-mode hold. */

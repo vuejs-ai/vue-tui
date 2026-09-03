@@ -1,6 +1,6 @@
 import { Console as NodeConsole } from "node:console";
 import patchConsole from "patch-console";
-import type { CoordinatedWriteResult } from "./output-coordinator.ts";
+import type { CoordinatedWriteResult } from "../output-coordinator.ts";
 
 type ConsoleStream = "stdout" | "stderr";
 type ConsoleSink = (stream: ConsoleStream, data: string) => CoordinatedWriteResult | undefined;

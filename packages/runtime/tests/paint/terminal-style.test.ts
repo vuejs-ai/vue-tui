@@ -2,13 +2,10 @@ import { expect, test } from "vite-plus/test";
 import { createTerminalStyle, resolveTerminalStyle } from "../../src/paint/terminal-style.ts";
 import { applyChalk } from "../../src/paint/text-style.ts";
 
-function ttyWithDepth(depth: number, observedEnvironments: NodeJS.ProcessEnv[] = []) {
+function ttyWithDepth(depth: number) {
   return {
     isTTY: true,
-    getColorDepth(environment: NodeJS.ProcessEnv) {
-      observedEnvironments.push(environment);
-      return depth;
-    },
+    colorDepth: depth,
   };
 }
 
@@ -50,11 +47,10 @@ test("an empty NO_COLOR value is absent", () => {
   expect(style.colorLevel).toBe(3);
 });
 
-test("FORCE_COLOR wins over NO_COLOR without passing either variable to stream detection", () => {
-  const observedEnvironments: NodeJS.ProcessEnv[] = [];
+test("FORCE_COLOR wins over NO_COLOR", () => {
   const style = resolveTerminalStyle({
     color: true,
-    stdout: ttyWithDepth(4, observedEnvironments),
+    stdout: ttyWithDepth(4),
     environment: {
       FORCE_COLOR: "2",
       NO_COLOR: "1",
@@ -65,7 +61,6 @@ test("FORCE_COLOR wins over NO_COLOR without passing either variable to stream d
 
   expect(style.chalk.level).toBe(2);
   expect(style.colorLevel).toBe(2);
-  expect(observedEnvironments).toEqual([]);
 });
 
 test.each([
@@ -107,22 +102,6 @@ test("an explicit profile does not inspect environment or stream color capabilit
 
   expect(style.chalk.level).toBe(1);
   expect(style.colorLevel).toBe(1);
-});
-
-test("automatic stream detection receives an environment without color-control overrides", () => {
-  const observedEnvironments: NodeJS.ProcessEnv[] = [];
-  resolveTerminalStyle({
-    color: true,
-    stdout: ttyWithDepth(8, observedEnvironments),
-    environment: {
-      FORCE_COLOR: undefined,
-      NO_COLOR: "",
-      NODE_DISABLE_COLORS: "",
-      TERM: "xterm-256color",
-    },
-  });
-
-  expect(observedEnvironments).toEqual([{ TERM: "xterm-256color" }]);
 });
 
 test("a terminal style cannot drift away from its paint-cache identity", () => {

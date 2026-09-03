@@ -1,4 +1,5 @@
 import { hideCursorEscape, nextLineEscape, showCursorEscape } from "./cursor-helpers.ts";
+import type { TerminalOutput } from "../terminal/backend.ts";
 import {
   SurfaceBase,
   type SurfaceDisposeOptions,
@@ -66,18 +67,21 @@ export class InlineSurface extends SurfaceBase {
     return frameWritten;
   }
 
-  handoffHistory(stream: NodeJS.WriteStream, data: string, runtime: SurfaceRuntime): void {
+  handoffHistory(output: TerminalOutput, data: string, runtime: SurfaceRuntime): void {
     if (data === "") return;
     const writer = this.getWriter();
     runtime.runCoordinatedWrite(
       () => {
         writer.clear();
         this.ensureRegionStart(runtime);
-        runtime.write(stream, data);
+        runtime.write(output, data);
         // History is terminal-owned before the dynamic region is restored. NEL
         // creates a physical boundary without relying on LF/CRLF translation.
-        if (!data.endsWith("\n") && (stream === runtime.stdout || Boolean(stream.isTTY))) {
-          runtime.write(stream, nextLineEscape);
+        if (
+          !data.endsWith("\n") &&
+          (output === runtime.stdout || runtime.terminal.capabilities[output].isTTY)
+        ) {
+          runtime.write(output, nextLineEscape);
         }
       },
       () => this.restoreLastOutput(),

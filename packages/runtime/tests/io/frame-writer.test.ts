@@ -1,157 +1,148 @@
-import { EventEmitter } from "node:events";
 import ansiEscapes from "ansi-escapes";
 import { describe, expect, test } from "vite-plus/test";
+import type { TerminalBackend } from "../../src/terminal/backend.ts";
+import { createTestTerminalBackend } from "../../src/terminal/test/backend.ts";
 import { hideCursorEscape, showCursorEscape } from "../../src/surface/cursor-helpers.ts";
 import { createFrameWriter } from "../../src/surface/frame-writer.ts";
 import logUpdate from "../../src/surface/log-update.ts";
 
-interface FakeStdout extends NodeJS.WriteStream {
-  readonly chunks: string[];
-}
-
-function createStdout({ isTTY = true }: { isTTY?: boolean } = {}): FakeStdout {
-  const stdout = new EventEmitter() as unknown as FakeStdout;
-  const chunks: string[] = [];
-  Object.assign(stdout, {
-    columns: 100,
-    rows: 24,
-    isTTY,
-    destroyed: false,
-    writableEnded: false,
-    chunks,
-    write(chunk: unknown) {
-      chunks.push(String(chunk));
-      return true;
-    },
-  });
-  return stdout;
+function chunks(terminal: ReturnType<typeof createTestTerminalBackend>): string[] {
+  return terminal.writes.map((write) => write.data);
 }
 
 describe("standard log updates", () => {
   test("renders, replaces, and deduplicates frames", () => {
-    const stdout = createStdout();
-    const render = logUpdate.create(stdout, { showCursor: true });
+    const terminal = createTestTerminalBackend();
+    const render = logUpdate.create(terminal, { showCursor: true });
 
     expect(render("Hello\n")).toBe(true);
     expect(render("Hello\n")).toBe(false);
     expect(render("World\n")).toBe(true);
 
-    expect(stdout.chunks).toHaveLength(2);
-    expect(stdout.chunks[0]).toBe("Hello\n");
-    expect(stdout.chunks[1]).toBe(ansiEscapes.eraseLines(2) + "World\n");
+    expect(chunks(terminal)).toEqual(["Hello\n", ansiEscapes.eraseLines(2) + "World\n"]);
   });
 
   test("sync changes the physical baseline without writing", () => {
-    const stdout = createStdout();
-    const render = logUpdate.create(stdout, { showCursor: true });
+    const terminal = createTestTerminalBackend();
+    const render = logUpdate.create(terminal, { showCursor: true });
 
     render.sync("already visible\n");
-    expect(stdout.chunks).toEqual([]);
+    expect(chunks(terminal)).toEqual([]);
     expect(render.willRender("already visible\n")).toBe(false);
     expect(render.willRender("changed\n")).toBe(true);
   });
 
   test("clear erases the current frame and reset only forgets it", () => {
-    const stdout = createStdout();
-    const render = logUpdate.create(stdout, { showCursor: true });
+    const terminal = createTestTerminalBackend();
+    const render = logUpdate.create(terminal, { showCursor: true });
 
     render("Hello\n");
     render.clear();
-    expect(stdout.chunks.at(-1)).toBe(ansiEscapes.eraseLines(2));
+    expect(chunks(terminal).at(-1)).toBe(ansiEscapes.eraseLines(2));
 
-    const count = stdout.chunks.length;
+    const count = chunks(terminal).length;
     render("Hello\n");
     render.reset();
-    expect(stdout.chunks).toHaveLength(count + 1);
+    expect(chunks(terminal)).toHaveLength(count + 1);
     render("Hello\n");
-    expect(stdout.chunks).toHaveLength(count + 2);
+    expect(chunks(terminal)).toHaveLength(count + 2);
   });
 });
 
 describe("terminal cursor ownership", () => {
   test("hides lazily on a TTY and restores on done", () => {
-    const stdout = createStdout();
-    const render = logUpdate.create(stdout);
+    const terminal = createTestTerminalBackend();
+    const render = logUpdate.create(terminal);
 
     expect(render.isCursorHidden()).toBe(false);
     render("Hello\n");
-    expect(stdout.chunks[0]).toBe(hideCursorEscape);
+    expect(chunks(terminal)[0]).toBe(hideCursorEscape);
     expect(render.isCursorHidden()).toBe(true);
 
     render.done();
-    expect(stdout.chunks.at(-1)).toBe(showCursorEscape);
+    expect(chunks(terminal).at(-1)).toBe(showCursorEscape);
     expect(render.isCursorHidden()).toBe(false);
   });
 
   test("does not emit terminal cursor controls for non-TTY output", () => {
-    const stdout = createStdout({ isTTY: false });
-    const render = logUpdate.create(stdout);
+    const terminal = createTestTerminalBackend({ capabilities: { stdout: { isTTY: false } } });
+    const render = logUpdate.create(terminal);
 
     render("Hello\n");
     render.done();
 
-    expect(stdout.chunks).toEqual(["Hello\n"]);
+    expect(chunks(terminal)).toEqual(["Hello\n"]);
     expect(render.isCursorHidden()).toBe(false);
   });
 
-  test("does not write restoration bytes to a destroyed stream", () => {
-    const stdout = createStdout();
-    const render = logUpdate.create(stdout);
+  test("does not write restoration bytes after output becomes unavailable", () => {
+    const base = createTestTerminalBackend();
+    let writable = true;
+    const terminal: TerminalBackend = {
+      ...base,
+      get capabilities() {
+        return {
+          ...base.capabilities,
+          stdout: { ...base.capabilities.stdout, canWrite: writable },
+        };
+      },
+    };
+    const render = logUpdate.create(terminal);
     render("Hello\n");
-    Object.assign(stdout, { destroyed: true });
+    writable = false;
 
     expect(() => render.done()).not.toThrow();
-    expect(stdout.chunks.at(-1)).not.toBe(showCursorEscape);
+    expect(chunks(base).at(-1)).not.toBe(showCursorEscape);
     expect(render.isCursorHidden()).toBe(false);
   });
 });
 
 describe("frame writer", () => {
   test("deduplicates and allows the same frame after clear or reset", () => {
-    const stdout = createStdout();
-    const writer = createFrameWriter(stdout);
+    const terminal = createTestTerminalBackend();
+    const writer = createFrameWriter(terminal);
 
     writer.write("Hello\n");
-    const afterFirst = stdout.chunks.length;
+    const afterFirst = chunks(terminal).length;
     writer.write("Hello\n");
-    expect(stdout.chunks).toHaveLength(afterFirst);
+    expect(chunks(terminal)).toHaveLength(afterFirst);
 
     writer.clear();
-    const afterClear = stdout.chunks.length;
+    const afterClear = chunks(terminal).length;
     writer.write("Hello\n");
-    expect(stdout.chunks.length).toBeGreaterThan(afterClear);
+    expect(chunks(terminal).length).toBeGreaterThan(afterClear);
 
     writer.reset();
-    const afterReset = stdout.chunks.length;
+    const afterReset = chunks(terminal).length;
     writer.write("Hello\n");
-    expect(stdout.chunks.length).toBeGreaterThan(afterReset);
+    expect(chunks(terminal).length).toBeGreaterThan(afterReset);
   });
 
   test("sync aligns both dedup layers without writing", () => {
-    const stdout = createStdout();
-    const writer = createFrameWriter(stdout);
+    const terminal = createTestTerminalBackend();
+    const writer = createFrameWriter(terminal);
 
     writer.write("A\n");
-    const count = stdout.chunks.length;
+    const count = chunks(terminal).length;
     writer.sync("B\n");
-    expect(stdout.chunks).toHaveLength(count);
+    expect(chunks(terminal)).toHaveLength(count);
     expect(writer.willRender("B\n")).toBe(false);
 
     writer.write("A\n");
-    expect(stdout.chunks.length).toBeGreaterThan(count);
+    expect(chunks(terminal).length).toBeGreaterThan(count);
   });
 
   test("retries a write that throws", () => {
-    const stdout = createStdout();
+    const terminal = createTestTerminalBackend();
     let fail = true;
-    const chunks: string[] = [];
-    const writer = createFrameWriter(stdout, {
+    const chunksWritten: string[] = [];
+    const writer = createFrameWriter(terminal, {
       write(chunk) {
         if (fail && chunk.includes("NEXT")) {
           fail = false;
           throw new Error("injected write failure");
         }
-        chunks.push(chunk);
+        chunksWritten.push(chunk);
         return true;
       },
     });
@@ -161,13 +152,13 @@ describe("frame writer", () => {
     expect(writer.willRender("NEXT\n")).toBe(true);
 
     writer.write("NEXT\n");
-    expect(chunks.at(-1)).toContain("NEXT");
+    expect(chunksWritten.at(-1)).toContain("NEXT");
     expect(writer.willRender("NEXT\n")).toBe(false);
   });
 
   test("a transaction rollback restores the accepted baseline", () => {
-    const stdout = createStdout();
-    const writer = createFrameWriter(stdout);
+    const terminal = createTestTerminalBackend();
+    const writer = createFrameWriter(terminal);
 
     writer.write("OLD\n");
     const rollback = writer.createRollback();

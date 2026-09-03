@@ -1,5 +1,5 @@
-import type { Writable } from "node:stream";
 import ansiEscapes from "ansi-escapes";
+import type { TerminalBackend, TerminalOutput } from "../terminal/backend.ts";
 import { hideCursorEscape, showCursorEscape } from "./cursor-helpers.ts";
 
 export type ResetOptions = {
@@ -21,35 +21,50 @@ export type LogUpdate = {
   (str: string): boolean;
 };
 
-const isTtyStream = (stream: Writable): boolean => Boolean((stream as { isTTY?: boolean }).isTTY);
-
-const canWriteToStream = (stream: Writable): boolean =>
-  !stream.destroyed && !(stream as { writableEnded?: boolean }).writableEnded;
-
 const defaultWrite =
-  (stream: Writable): LogUpdateWrite =>
+  (terminal: TerminalBackend, output: TerminalOutput): LogUpdateWrite =>
   (data) =>
-    stream.write(data);
+    terminal.write(output, data);
 
-const hideCursor = (stream: Writable, write: LogUpdateWrite): void => {
-  if (isTtyStream(stream) && canWriteToStream(stream)) write(hideCursorEscape);
+const canWriteToOutput = (terminal: TerminalBackend, output: TerminalOutput): boolean =>
+  terminal.capabilities[output].canWrite;
+
+const hideCursor = (
+  terminal: TerminalBackend,
+  output: TerminalOutput,
+  write: LogUpdateWrite,
+): void => {
+  if (terminal.capabilities[output].isTTY && canWriteToOutput(terminal, output)) {
+    write(hideCursorEscape);
+  }
 };
 
-const showCursor = (stream: Writable, write: LogUpdateWrite): void => {
-  if (isTtyStream(stream) && canWriteToStream(stream)) write(showCursorEscape);
+const showCursor = (
+  terminal: TerminalBackend,
+  output: TerminalOutput,
+  write: LogUpdateWrite,
+): void => {
+  if (terminal.capabilities[output].isTTY && canWriteToOutput(terminal, output)) {
+    write(showCursorEscape);
+  }
 };
 
-function createCursorOwnership(stream: Writable, write: LogUpdateWrite, showCursorOption: boolean) {
+function createCursorOwnership(
+  terminal: TerminalBackend,
+  output: TerminalOutput,
+  write: LogUpdateWrite,
+  showCursorOption: boolean,
+) {
   let hidden = false;
   return {
     hideForRender() {
       if (showCursorOption || hidden) return;
-      hideCursor(stream, write);
-      hidden = isTtyStream(stream) && canWriteToStream(stream);
+      hideCursor(terminal, output, write);
+      hidden = terminal.capabilities[output].isTTY && canWriteToOutput(terminal, output);
     },
     done() {
       if (showCursorOption || !hidden) return;
-      showCursor(stream, write);
+      showCursor(terminal, output, write);
       hidden = false;
     },
     reset(next = hidden) {
@@ -61,15 +76,16 @@ function createCursorOwnership(stream: Writable, write: LogUpdateWrite, showCurs
 }
 
 const createStandard = (
-  stream: Writable,
+  terminal: TerminalBackend,
+  output: TerminalOutput,
   {
     showCursor: showCursorOption = false,
-    write = defaultWrite(stream),
+    write = defaultWrite(terminal, output),
   }: { showCursor?: boolean; write?: LogUpdateWrite } = {},
 ): LogUpdate => {
   let previousLineCount = 0;
   let previousOutput = "";
-  const cursor = createCursorOwnership(stream, write, showCursorOption);
+  const cursor = createCursorOwnership(terminal, output, write, showCursorOption);
 
   const render = (str: string) => {
     cursor.hideForRender();
@@ -126,11 +142,12 @@ const createStandard = (
 };
 
 const create = (
-  stream: Writable,
+  terminal: TerminalBackend,
   {
+    output = "stdout",
     showCursor: showCursorOption = false,
     write,
-  }: { showCursor?: boolean; write?: LogUpdateWrite } = {},
-): LogUpdate => createStandard(stream, { showCursor: showCursorOption, write });
+  }: { output?: TerminalOutput; showCursor?: boolean; write?: LogUpdateWrite } = {},
+): LogUpdate => createStandard(terminal, output, { showCursor: showCursorOption, write });
 
 export default { create };

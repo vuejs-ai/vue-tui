@@ -49,23 +49,9 @@ Focus asks `layout/` for authored visibility as a live tree query, so hidden tar
 
 ## 5. Extract the terminal backend
 
-**Today.** Terminal state is spread across eight files. Five write to an output stream (`render.ts`, `surface/log-update.ts`, `terminal/kitty-keyboard.ts`, `terminal/output-coordinator.ts`, `terminal/stdin-controller.ts`) and five name `setRawMode`: `render.ts` and `terminal/stdin-controller.ts` call it on the stream, `vue/composables/useStdin.ts` routes through the context, `vue/context.ts` declares the type and `render-to-string.ts` supplies an inert stub. `exitAlternativeScreen` is written from two sites in `surface/fullscreen-surface.ts` and `enterAlternativeScreen` from one; each carries its own best-effort write and ownership bookkeeping rather than a lease. `StdinController` receives seven callbacks from the mount closure — `acquireKittyKeyboardDemand`, `isKittyKeyboardReady`, `beforeManagedInputAcquire`, `isManagedInputSurfaceReady`, `writeTerminalOutput`, `requestTerminalReconcile`, `reportManagedInputFailure` — because enabling bracketed paste and the Kitty protocol requires writing bytes and there is no terminal object to ask. Eleven files import `node:*`, and eight use `process` for a value — three more only name it in comments — including `render-to-string.ts` (inert streams from `node:stream`, colour resolved against `process.stdout` and `process.env`), `api/testing.ts` (stream defaults) and `vue/node-ops.ts` (`NODE_ENV`), each of which the steps below must route through the backend or the Done line must list as an exception.
+`TerminalBackend` owns the byte channel, live capability facts, current and post-resume size reads, output and input observation, raw transitions, and reference-counted mode leases. The node and test implementations use the same lease ledger. `exitAlternativeScreen` has a single write site. `createStdinController` takes the backend and a `ManagedInputSession` whose seven members carry surface readiness and the output gate, which the backend does not know. Only `terminal/node/` imports `node:*` and `process` for values, with type-only `node:stream` in `api/` and `vue/` as the recorded exception.
 
-**Steps.**
-
-1. Define `TerminalBackend`: `write` / `onData` / `size` / `onResize` / `capabilities`, plus one lease operation generic over a mode identifier. The six modes today are raw mode, the alternate screen, cursor visibility, synchronized output, bracketed paste and the Kitty protocol.
-2. Build `terminal/node/`, which wraps the streams handed to `MountOptions` on entry. Outside that directory, Runtime operates the terminal only through the backend; the accepted `useStdin` escape hatch may still return the borrowed input stream by identity.
-3. Route the five writers through the backend and make `exitAlternativeScreen` one release path paired with the one enter site.
-4. Move decoded input framing and partial UTF-8 state from `terminal/stdin-ingress.ts` to `input/shared-input-ingress.ts`; `session/` keeps the controller that joins dispatcher demand and delivery to the backend.
-5. Replace `StdinController`'s seven callbacks with one backend reference.
-6. Move capability answers off `process.env` and `isTTY` sniffing in core and onto the backend.
-7. Add a test backend that records bytes and answers a fixed size, so suites that only need a terminal stop constructing fake streams.
-
-**Done when.** One `TerminalBackend` interface has node and test implementations; `exitAlternativeScreen` has one write site; only `terminal/node/` imports `node:*` and `process` for values; `input/` owns byte framing through delivery, while `session/` owns the controller that joins input demand to the backend.
-
-**Verify.** `grep -rn 'from "node:' packages/runtime/src` and `grep -rn 'process\.' packages/runtime/src` list nothing outside `terminal/node/`, with the type-only `node:stream` imports in `api/` and `vue/` as the recorded exception. The PTY suites cover this layer's behaviour.
-
-**Watch for.** A block of dedicated acquisition and release bookkeeping per mode reproduces the scattered ownership this task exists to remove; the lease is [generic over the mode](./architecture.md#mode-leases) for that reason. Task 8 moves the corresponding bytes behind it. `MountOptions.stdout` remains a Node `Writable` by accepted decision, and `useStdin` still hands the caller the exact `Readable` passed to `MountOptions.stdin` — the boundary governs operating the device, not stream identity.
+The Kitty pop is written whenever stdout is writable, including after stdin is gone; the push needs a readable stdin for the reply.
 
 ## 6. Make paint return a frame
 

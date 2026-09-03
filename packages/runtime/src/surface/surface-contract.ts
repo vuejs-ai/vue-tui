@@ -1,3 +1,4 @@
+import type { TerminalBackend, TerminalOutput } from "../terminal/backend.ts";
 import type { FrameWriter } from "./frame-writer.ts";
 import type { ResolvedLiveSurface } from "./surface-types.ts";
 
@@ -15,16 +16,22 @@ export interface SurfacePresentation {
   readonly onHistoryPrepared?: () => void;
 }
 
-/** Runtime operations used by surfaces to write to Node streams. */
+/** Runtime operations a surface needs while it writes through the terminal boundary. */
 export interface SurfaceRuntime {
-  readonly stdout: NodeJS.WriteStream;
+  readonly terminal: TerminalBackend;
+  readonly stdout: TerminalOutput;
   readonly isResumeInProgress: boolean;
   readonly isStdoutTty: boolean;
   readonly isStdoutWritable: boolean;
   readonly viewportColumns: number;
   readonly viewportRows: number | null;
-  write(stream: NodeJS.WriteStream, data: string, onHandoff?: () => void): boolean;
-  writeBestEffort(stream: NodeJS.WriteStream, data: string, sync: boolean): boolean;
+  write(output: TerminalOutput, data: string, onHandoff?: () => void): boolean;
+  writeBestEffort(
+    output: TerminalOutput,
+    data: string,
+    sync: boolean,
+    onHandoff?: () => void,
+  ): boolean;
   /** Track both a physical write attempt and its later confirmed handoff. */
   writeTerminal(data: string, onAccepted?: () => void, onAttempt?: () => void): boolean;
   runCoordinatedWrite(body: () => void, finalize: () => void): void;
@@ -68,7 +75,7 @@ export interface Surface {
   layoutHeight(viewportRows: number | null): SurfaceLayoutHeight;
   limitFrame(frame: string, viewportRows?: number): string;
   present(presentation: SurfacePresentation, runtime: SurfaceRuntime): boolean;
-  handoffHistory(stream: NodeJS.WriteStream, data: string, runtime: SurfaceRuntime): void;
+  handoffHistory(output: TerminalOutput, data: string, runtime: SurfaceRuntime): void;
   suspend(runtime: SurfaceRuntime): void;
   resume(runtime: SurfaceRuntime): boolean;
   dispose(runtime: SurfaceRuntime, options: SurfaceDisposeOptions): void;
@@ -144,7 +151,7 @@ export abstract class SurfaceBase implements Surface {
   abstract layoutHeight(viewportRows: number | null): SurfaceLayoutHeight;
   abstract limitFrame(frame: string, viewportRows?: number): string;
   abstract present(presentation: SurfacePresentation, runtime: SurfaceRuntime): boolean;
-  abstract handoffHistory(stream: NodeJS.WriteStream, data: string, runtime: SurfaceRuntime): void;
+  abstract handoffHistory(output: TerminalOutput, data: string, runtime: SurfaceRuntime): void;
   abstract suspend(runtime: SurfaceRuntime): void;
   abstract resume(runtime: SurfaceRuntime): boolean;
   abstract dispose(runtime: SurfaceRuntime, options: SurfaceDisposeOptions): void;

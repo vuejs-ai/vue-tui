@@ -9,18 +9,19 @@ import {
   nextTick,
 } from "vue";
 import { createRenderer } from "vue";
-import { writeSync as fsWriteSync } from "node:fs";
-import type { Readable, Writable } from "node:stream";
-import { onExit } from "signal-exit";
+import type { MountOptions } from "./api/mount-options.ts";
+import type { TerminalBackend, TerminalLease, TerminalOutput } from "./terminal/backend.ts";
+import { createNodeTerminalBackend } from "./terminal/node/backend.ts";
+import { createNodeProcessLifecycle } from "./terminal/node/lifecycle.ts";
 import {
   INTERNAL_KITTY_KEYBOARD,
   createKittyKeyboardController,
 } from "./terminal/kitty-keyboard.ts";
 import {
   createStdinController,
-  hasRawInputCapability,
+  type ManagedInputSession,
   type StdinController,
-} from "./terminal/stdin-controller.ts";
+} from "./session/stdin-controller.ts";
 import { createRoot, type TuiNode, type TuiRoot, type TuiStatic } from "./host/nodes.ts";
 import {
   runLayoutTransaction,
@@ -53,7 +54,10 @@ import {
   createMountedStreamLifecycle,
   type MountedStreamLifecycle,
 } from "./terminal/stream-lifecycle.ts";
-import { registerConsoleSink, type ConsoleSinkRegistration } from "./terminal/console-manager.ts";
+import {
+  registerConsoleSink,
+  type ConsoleSinkRegistration,
+} from "./terminal/node/console-manager.ts";
 import { nextLineEscape } from "./surface/cursor-helpers.ts";
 import { INTERNAL_RENDER_OBSERVER } from "./api/render-observer.ts";
 import { bsu, esu, shouldSynchronize } from "./terminal/write-synchronized.ts";
@@ -62,21 +66,14 @@ import { AppContextKey, StdinContextKey, type AppContext } from "./vue/context.t
 import {
   InternalRenderSessionKey,
   createLiveRenderSessionService,
-  needsTerminalSizeProbe,
   normalizeRequestedMode,
   resolveLiveDimensions,
   resolveLiveSurface,
   validateExitOnCtrlC,
   type InternalRenderSessionService,
   type ResolvedLiveDimensions,
-  type RenderMode,
 } from "./render-session.ts";
-import {
-  INTERNAL_TERMINAL_SIZE_PROBE,
-  probeControllingTerminalSize,
-  type TerminalSizeProbe,
-  type TerminalSizeProbeResult,
-} from "./terminal/node/terminal-size-probe.ts";
+import { INTERNAL_TERMINAL_SIZE_PROBE } from "./terminal/node/terminal-size-probe.ts";
 import {
   devState,
   DevStateKey,
@@ -111,7 +108,7 @@ import {
   getInternalMountOptions,
   type InternalMountOptions,
 } from "./api/internal-mount-options.ts";
-import { normalizeColorOption, type ColorProfile } from "./color-profile.ts";
+import { normalizeColorOption } from "./color-profile.ts";
 
 export {
   createInternalMountOptions,
@@ -119,45 +116,7 @@ export {
   type InternalMountOptionsInput,
 } from "./api/internal-mount-options.ts";
 
-export interface MountOptions {
-  readonly stdout?: Writable;
-  readonly stdin?: Readable;
-  readonly stderr?: Writable;
-  /**
-   * Select the terminal screen model requested by this application.
-   * Omission requests Inline. On a live TTY, an explicit Fullscreen request
-   * requires positive terminal dimensions and otherwise fails before setup or
-   * terminal mutation. On non-TTY stdout, Inline and Fullscreen select the same
-   * supported non-interactive document host.
-   *
-   * @default 'inline'
-   */
-  readonly mode?: RenderMode;
-  /**
-   * Select terminal styling for this application. Omission and `true` detect
-   * the selected stdout and honor process color controls. `false` emits no SGR
-   * styling; a named profile forces that capability, including for SGR already
-   * present in rendered text.
-   *
-   * @default true
-   */
-  readonly color?: boolean | ColorProfile;
-  /**
-   * Patch `console.*` methods to route output through the TUI frame
-   * coordinator (writeToStdout / writeToStderr) so that console.log
-   * calls don't corrupt the rendered UI.
-   *
-   * @default true
-   */
-  readonly patchConsole?: boolean;
-  /**
-   * Exit before delivering an exact Ctrl+C key. Omission leaves Ctrl+C as
-   * ordinary managed input; bracketed paste never triggers this option.
-   *
-   * @default false
-   */
-  readonly exitOnCtrlC?: boolean;
-}
+export type { MountOptions } from "./api/mount-options.ts";
 
 const acceptedMountOptionKeys = new Set<PropertyKey>([
   "stdout",
@@ -230,67 +189,23 @@ export function mountWithInternalOptions(
 
 type RootProps = Record<string, unknown>;
 
+function currentStdoutFacts(terminal: TerminalBackend, freshSize = false) {
+  const stdout = terminal.capabilities.stdout;
+  const size = freshSize ? terminal.refreshSize() : terminal.size;
+  return { isTTY: stdout.isTTY, canWrite: stdout.canWrite, ...size };
+}
+
 const FULLSCREEN_STATIC_ERROR =
   "[vue-tui] <Static> cannot render on an effective visual Fullscreen surface. Use Inline mode for terminal history, or keep history in application state (for example, ScrollBox).";
 
-// Module-level registry: maps each NodeJS.WriteStream to the one live TuiApp
-// that owns its renderer. Keyed weakly so closed/GC'd streams don't leak memory.
+// Module-level registry: maps each output owner to the one live TuiApp that
+// owns its renderer. Keyed weakly so closed hosts do not leak memory.
 // Only the app that successfully wired a renderer (mountedAsOwner=true) owns
 // the entry and removes it on teardown; a "no-op" second mount never touches it.
-const liveInstances = new WeakMap<NodeJS.WriteStream, TuiApp>();
+const liveInstances = new WeakMap<object, TuiApp>();
 
 // Error classification and fallback messages share one UI-independent source
 // with render-to-string so fatal settlement stays consistent across hosts.
-
-type MaybeWritableStream = NodeJS.WriteStream & {
-  writable?: boolean;
-  writableEnded?: boolean;
-  destroyed?: boolean;
-  writableLength?: number;
-  _writableState?: unknown;
-};
-
-function getWritableStreamState(stdout: MaybeWritableStream): {
-  canWriteToStdout: boolean;
-  hasWritableState: boolean;
-} {
-  return {
-    canWriteToStdout: !stdout.destroyed && !stdout.writableEnded && (stdout.writable ?? true),
-    hasWritableState: stdout._writableState !== undefined || stdout.writableLength !== undefined,
-  };
-}
-
-function assertReadableStream(value: unknown, option: "stdin"): asserts value is Readable {
-  if (
-    (typeof value !== "object" && typeof value !== "function") ||
-    value === null ||
-    typeof (value as Readable).on !== "function" ||
-    typeof (value as Readable).once !== "function" ||
-    typeof (value as Readable).off !== "function"
-  ) {
-    throw new TypeError(`Mount option "${option}" must be a Node Readable stream.`);
-  }
-}
-
-function assertWritableStream(
-  value: unknown,
-  option: "stdout" | "stderr",
-): asserts value is Writable {
-  if (
-    (typeof value !== "object" && typeof value !== "function") ||
-    value === null ||
-    typeof (value as Writable).write !== "function" ||
-    typeof (value as Writable).on !== "function" ||
-    typeof (value as Writable).once !== "function" ||
-    typeof (value as Writable).off !== "function"
-  ) {
-    throw new TypeError(`Mount option "${option}" must be a Node Writable stream.`);
-  }
-  const stream = value as MaybeWritableStream;
-  if (stream.destroyed || stream.writableEnded || stream.writable === false) {
-    throw new Error(`Mount option "${option}" must be writable when mount() begins.`);
-  }
-}
 
 function validatePatchConsole(value: unknown): boolean {
   if (value === undefined) return true;
@@ -298,21 +213,11 @@ function validatePatchConsole(value: unknown): boolean {
   throw new TypeError('Mount option "patchConsole" must be a boolean.');
 }
 
-function assertFullscreenCapability(
-  stdout: NodeJS.WriteStream,
-  terminalProbe: TerminalSizeProbeResult,
-): void {
+function assertFullscreenCapability(stdout: ReturnType<typeof currentStdoutFacts>): void {
   // Non-TTY stdout selects the supported secondary document host for either
   // mode; Fullscreen does not throw solely because no TTY exists.
-  if (stdout.isTTY !== true) return;
-  const dimensions = resolveLiveDimensions(
-    {
-      isTTY: true,
-      columns: stdout.columns,
-      rows: stdout.rows,
-    },
-    terminalProbe,
-  );
+  if (!stdout.isTTY) return;
+  const dimensions = resolveLiveDimensions(stdout);
   if (dimensions.terminal === null) {
     throw new Error("Fullscreen mode requires positive terminal columns and rows.");
   }
@@ -357,6 +262,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
   let mountedRoot: TuiRoot | null = null;
   let mountedStdinController: StdinController | null = null;
+  let mountedTerminal: TerminalBackend | null = null;
   let mountedAppContext: AppContext | null = null;
   let mountedResizeHandler: (() => void) | null = null;
   let mountedResizeRefresh: Promise<void> | null = null;
@@ -429,11 +335,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
   function acquireSynchronizedOutputLease(): () => void {
     const releases = mountedSynchronizedOutputReleases;
+    const lease: TerminalLease<"synchronized-output"> | undefined =
+      mountedTerminal?.acquire("synchronized-output");
     let active = true;
     const release = (): void => {
       if (!active) return;
       active = false;
       releases?.delete(release);
+      lease?.release();
     };
     releases?.add(release);
     return release;
@@ -442,8 +351,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   function closeOutstandingSynchronizedOutput(): void {
     const releases = mountedSynchronizedOutputReleases;
     if (!releases || releases.size === 0) return;
-    const appContext = mountedAppContext;
-    if (appContext) writeBestEffort(appContext.stdout, esu, true);
+    if (mountedTerminal) writeBestEffort("stdout", esu, true);
     for (const release of releases) release();
   }
 
@@ -581,10 +489,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
       return;
     }
-    const appContext = mountedAppContext;
-
-    const stdout = (appContext?.stdout ?? process.stdout) as MaybeWritableStream;
-
     const finish = () => {
       disposeMountedStreamLifecycle();
       if (pendingExitFailure) {
@@ -604,14 +508,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           recordTeardownError(error);
         }
         try {
-          await writeOutputBarrier(stdout);
+          await writeOutputBarrier("stdout");
         } catch (error) {
           recordTeardownError(error);
         }
         if (report) {
-          const stderr = appContext.stderr as MaybeWritableStream;
           try {
-            await writeOutputBarrier(stderr, report);
+            await writeOutputBarrier("stderr", report);
           } catch (error) {
             recordTeardownError(error);
           }
@@ -627,9 +530,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     })();
   }
 
-  async function writeOutputBarrier(stream: MaybeWritableStream, data = ""): Promise<void> {
-    const { canWriteToStdout, hasWritableState } = getWritableStreamState(stream);
-    if (!canWriteToStdout) {
+  async function writeOutputBarrier(output: TerminalOutput, data = ""): Promise<void> {
+    const terminal = mountedTerminal;
+    if (!terminal?.capabilities[output].canWrite) {
       throw new Error("Runtime output stream became unwritable before exit settlement.");
     }
 
@@ -641,9 +544,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           else resolve();
         };
         try {
-          if (hasWritableState) stream.write(data, done);
-          else stream.write(data);
-          if (!hasWritableState) setImmediate(done);
+          terminal.write(output, data, done);
         } catch (error) {
           reject(error);
         }
@@ -656,7 +557,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       let bodyRan = false;
       const result = coordinator.run(() => {
         bodyRan = true;
-        coordinator.write(stream, data);
+        coordinator.write(output, data);
       });
       if (result.status === "blocked") continue;
       if (!bodyRan) continue;
@@ -666,8 +567,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     }
   }
 
-  function writeBestEffort(stream: NodeJS.WriteStream, data: string, sync = false): boolean {
-    if (!getWritableStreamState(stream as MaybeWritableStream).canWriteToStdout) {
+  function writeBestEffort(
+    output: TerminalOutput,
+    data: string,
+    sync = false,
+    onHandoff?: () => void,
+  ): boolean {
+    const terminal = mountedTerminal;
+    if (!terminal?.capabilities[output].canWrite) {
       if (!sync) {
         requestRuntimeFailure(
           new Error("Runtime output stream became unwritable during terminal restoration."),
@@ -677,35 +584,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     }
     try {
       if (sync) {
-        // Signal exit re-raises the signal immediately after this callback
-        // returns (`{alwaysLast:false}`), so a
-        // bare async `stream.write()` can leave the restore bytes (show-cursor,
-        // leave-alt-screen, disable-kitty) buffered and unflushed when the
-        // process dies — the terminal stays corrupted. A synchronous fd write
-        // guarantees the bytes hit the fd before the re-raise. Restore output is
-        // tiny and this only runs on the rare abrupt-exit path. Fall back to fd
-        // 1 (stdout) when the stream has no numeric fd (e.g. some wrapped TTYs).
-        // The base WriteStream type doesn't declare `fd`; tty/fs streams do.
-        // Never guess fd 1 for an arbitrary custom stream: deterministic hosts
-        // and embedders may deliberately model a TTY without targeting the
-        // process terminal.
-        const streamFd = (stream as { fd?: number }).fd;
-        if (typeof streamFd === "number") {
-          fsWriteSync(streamFd, data);
-        } else if (stream === process.stdout) {
-          fsWriteSync(1, data);
-        } else if (stream === process.stderr) {
-          fsWriteSync(2, data);
-        } else {
-          stream.write(data);
-        }
+        terminal.writeSync(output, data);
+        onHandoff?.();
       } else if (mountedOutputCoordinator) {
         const result = mountedOutputCoordinator.continue(() => {
-          mountedOutputCoordinator?.write(stream, data);
+          mountedOutputCoordinator?.write(output, data, undefined, onHandoff);
         });
         if (result.status === "blocked") return false;
       } else {
-        stream.write(data);
+        terminal.write(output, data);
+        onHandoff?.();
       }
       return true;
     } catch (error) {
@@ -834,7 +722,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // synchronous restore path. Cleanup itself still runs exactly once.
       if (!teardownCompleted && sync) pendingTeardownSync = true;
       if (immediateTermination && teardownExecutionStarted && !teardownCompleted) {
-        // process.exit() and terminating signals do not return to the active
+        // A hard host exit and terminating signals do not return to the active
         // teardown stack. Release the terminal-owning subset right now; the
         // interrupted normal cleanup cannot reach its later restore steps.
         performEmergencyTerminalRestore();
@@ -924,8 +812,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       return;
     }
 
-    const stdout = mountedAppContext.stdout;
-    const stdoutWritable = getWritableStreamState(stdout as MaybeWritableStream).canWriteToStdout;
+    const stdoutWritable = mountedTerminal?.capabilities.stdout.canWrite === true;
     if (
       !sync &&
       !immediateTermination &&
@@ -975,8 +862,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
     const completeTeardown = (): void => {
       if (teardownCompleted) return;
-      if (mountedAsOwner && mountedAppContext) {
-        liveInstances.delete(mountedAppContext.stdout);
+      if (mountedAsOwner && mountedTerminal) {
+        liveInstances.delete(mountedTerminal.outputOwnerFor("stdout"));
         mountedAsOwner = false;
       }
       mountedCreateOutputStateRollback = null;
@@ -999,6 +886,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         disposeMountedStreamLifecycle();
         mountedOutputCoordinator = null;
         mountedAppContext = null;
+        mountedTerminal = null;
         mountedCommit = null;
         return;
       }
@@ -1077,7 +965,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // Leaving the token registered cannot double-run: the emitter latches
       // `emitted.exit` before dispatching, and the process is terminating
       // regardless. (Node's own EventEmitter clones its handler array before
-      // emitting, so the `process.on("exit")` path never had this hazard.) The
+      // emitting, so the native host-exit event path never had this hazard.) The
       // earlier claim that this call was a signal-path no-op held only for the
       // PROCESS signal listeners that `unload()` removes; the emitter's own
       // listener array stays live and mutable during the dispatch.
@@ -1145,25 +1033,19 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       mountedRoot = null;
       mountedHostYogaLedger = null;
       vueMountCompleted = false;
-      if (mountedResizeHandler && mountedAppContext) {
-        const resizeHandler = mountedResizeHandler;
-        runBestEffort(() => {
-          mountedAppContext?.stdout.off("resize", resizeHandler);
-        });
+      if (mountedResizeHandler) {
+        const unsubscribeResize = mountedResizeHandler;
+        runBestEffort(unsubscribeResize);
         mountedResizeHandler = null;
       }
       if (mountedExitListener) {
-        const exitListener = mountedExitListener;
-        runBestEffort(() => {
-          process.off("exit", exitListener);
-        });
+        const unsubscribeExit = mountedExitListener;
+        runBestEffort(unsubscribeExit);
         mountedExitListener = null;
       }
       if (mountedBeforeExitHandler) {
-        const beforeExitHandler = mountedBeforeExitHandler;
-        runBestEffort(() => {
-          process.off("beforeExit", beforeExitHandler);
-        });
+        const unsubscribeBeforeExit = mountedBeforeExitHandler;
+        runBestEffort(unsubscribeBeforeExit);
         mountedBeforeExitHandler = null;
       }
       if (mountedStdinController) {
@@ -1201,11 +1083,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // terminal surface. Redirected/non-TTY stdout selects the document host,
         // which must never emit cursor controls even when diagnostics still go
         // to the user's terminal.
-        const output = `${
-          appContext.stdout.isTTY && appContext.stderr.isTTY ? nextLineEscape : ""
-        }${report}`;
+        const terminalHasTtyOutput =
+          mountedTerminal !== null &&
+          mountedTerminal.capabilities.stdout.isTTY &&
+          mountedTerminal.capabilities.stderr.isTTY;
+        const output = `${terminalHasTtyOutput ? nextLineEscape : ""}${report}`;
         if (sync) {
-          writeBestEffort(appContext.stderr, output, true);
+          writeBestEffort("stderr", output, true);
         } else {
           pendingFatalReport = output;
         }
@@ -1226,6 +1110,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   const renderer = createRenderer<TuiNode, TuiNode>(
     buildNodeOps({
       onCommit: () => scheduledCommit(),
+      isProduction: () => mountedTerminal?.capabilities.environment.NODE_ENV === "production",
       hostYogaLifecycle: hostYogaLedger,
     }),
   );
@@ -1318,70 +1203,38 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     // The default keeps the render throttle active so sustained animation
     // updates are coalesced without requiring an option.
     const maxFps = internalOptions.maxFps ?? 30;
-    const resolvedStdout = options.stdout ?? process.stdout;
-    const resolvedStdin = options.stdin ?? process.stdin;
-    const resolvedStderr = options.stderr ?? process.stderr;
-    assertWritableStream(resolvedStdout, "stdout");
-    assertReadableStream(resolvedStdin, "stdin");
-    assertWritableStream(resolvedStderr, "stderr");
-    const stdout = resolvedStdout as NodeJS.WriteStream;
-    const stdin = resolvedStdin as NodeJS.ReadStream;
-    const stderr = resolvedStderr as NodeJS.WriteStream;
+    const terminal = createNodeTerminalBackend({
+      stdin: options.stdin,
+      stdout: options.stdout,
+      stderr: options.stderr,
+      sizeProbe: internalOptions[INTERNAL_TERMINAL_SIZE_PROBE],
+    });
+    const processLifecycle = createNodeProcessLifecycle();
+    if (liveInstances.has(terminal.outputOwnerFor("stdout"))) {
+      throw new Error("Cannot mount vue-tui: the selected stdout already has a live app.");
+    }
+    const stdoutFacts = currentStdoutFacts(terminal);
     const terminalStyle =
       color === true && internalOptions.terminalStyle !== undefined
         ? internalOptions.terminalStyle
         : color === true
-          ? resolveTerminalStyle({ color, stdout, environment: process.env })
+          ? resolveTerminalStyle({
+              color,
+              stdout: terminal.capabilities.stdout,
+              environment: terminal.capabilities.environment,
+            })
           : resolveTerminalStyle({ color });
-    if (liveInstances.has(stdout)) {
-      throw new Error("Cannot mount vue-tui: the selected stdout already has a live app.");
-    }
-
     // Internal deterministic-test observer. It observes the resolved session
     // and renderer content commits without selecting another output path.
     const renderObserver = internalOptions[INTERNAL_RENDER_OBSERVER];
     const kittyKeyboard = internalOptions[INTERNAL_KITTY_KEYBOARD];
-    const configuredTerminalSizeProbe = internalOptions[INTERNAL_TERMINAL_SIZE_PROBE];
     const suspensionHost = internalOptions[INTERNAL_SUSPENSION_HOST] ?? processSuspensionHost;
-    // Process-global fallbacks describe the process's controlling terminal, not
-    // an arbitrary custom WriteStream. A custom TTY must provide a complete
-    // columns/rows pair; deterministic hosts can supply the internal modeled
-    // probe explicitly.
-    const terminalSizeProbe: TerminalSizeProbe =
-      configuredTerminalSizeProbe ??
-      (stdout === process.stdout || stdout === process.stderr
-        ? probeControllingTerminalSize
-        : () => ({ kind: "unavailable" }));
-    const resumeTerminalSizeProbe: TerminalSizeProbe =
-      configuredTerminalSizeProbe ??
-      (stdout === process.stdout || stdout === process.stderr
-        ? () =>
-            probeControllingTerminalSize({
-              // process.stdout/process.stderr dimensions are refreshed by
-              // Node's pending SIGWINCH callback, which may run only after the
-              // SIGTSTP handler resumes. Query the controlling terminal first
-              // so continuation can repaint at the new size immediately.
-              stdout: undefined,
-              stderr: undefined,
-              env: {},
-            })
-        : () => ({ kind: "unavailable" }));
-
-    const stdoutFacts = {
-      isTTY: Boolean(stdout.isTTY),
-      columns: stdout.columns,
-      rows: stdout.rows,
-    } as const;
-    const terminalProbe: TerminalSizeProbeResult = needsTerminalSizeProbe(stdoutFacts)
-      ? terminalSizeProbe()
-      : { kind: "unavailable" };
     if (requestedMode === "fullscreen") {
-      assertFullscreenCapability(stdout, terminalProbe);
+      assertFullscreenCapability(stdoutFacts);
     }
     const resolvedSurface = resolveLiveSurface({
       requestedMode,
       stdout: stdoutFacts,
-      terminalProbe,
     });
     const outputSurface = createSurface(resolvedSurface.kind);
 
@@ -1392,37 +1245,19 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     mountAttemptConsumed = true;
     consumedMountInProgress = true;
     try {
+      mountedTerminal = terminal;
       mountedSurface = outputSurface;
       const renderSession = createLiveRenderSessionService(resolvedSurface, terminalStyle);
 
       function readCurrentDimensions(preferFreshProbe = false): ResolvedLiveDimensions | null {
-        const currentStdout = {
-          isTTY: Boolean(stdout.isTTY),
-          columns: stdout.columns,
-          rows: stdout.rows,
-        } as const;
-        const currentProbe = preferFreshProbe
-          ? resumeTerminalSizeProbe()
-          : needsTerminalSizeProbe(currentStdout)
-            ? terminalSizeProbe()
-            : ({ kind: "unavailable" } as const);
-        const dimensionsSource =
-          preferFreshProbe && currentProbe.kind === "detected"
-            ? {
-                isTTY: currentStdout.isTTY,
-                columns: currentProbe.size.columns,
-                rows: currentProbe.size.rows,
-              }
-            : currentStdout;
-        const next = resolveLiveDimensions(dimensionsSource, currentProbe);
+        const currentStdout = currentStdoutFacts(terminal, preferFreshProbe);
+        const next = resolveLiveDimensions(currentStdout);
         return next.terminal === null ? null : { ...next, layout: next.terminal };
       }
 
       let failureOutputCoordinator: OutputCoordinator | null = null;
       const streamLifecycle = createMountedStreamLifecycle({
-        stdin,
-        stdout,
-        stderr,
+        terminal,
         hasManagedInputDemand: () => mountedStdinController?.hasManagedInputDemand() ?? false,
         onFailure(error) {
           failureOutputCoordinator?.abort(error);
@@ -1431,7 +1266,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       });
       mountedStreamLifecycle = streamLifecycle;
       const outputCoordinator = createOutputCoordinator({
-        trackWrite: (stream) => streamLifecycle.trackWrite(stream),
+        terminal,
+        trackWrite: (output) => streamLifecycle.trackWrite(output),
         onDeferredError(error) {
           mountedAbandonPendingTerminalOutput?.({ physicalStateUncertain: true });
           // A prior BSU may already have been accepted while its matching ESU was
@@ -1475,14 +1311,14 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
 
       function writeRuntimeOutput(
-        stream: NodeJS.WriteStream,
+        output: TerminalOutput,
         data: string,
         callback?: () => void,
         onHandoff?: () => void,
       ): boolean {
         let writable = false;
         const result = outputCoordinator.continue(() => {
-          writable = outputCoordinator.write(stream, data, callback, onHandoff);
+          writable = outputCoordinator.write(output, data, callback, onHandoff);
         });
         if (result.status === "blocked") {
           throw new Error("Runtime output transaction is backpressured.");
@@ -1501,7 +1337,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         let result: CoordinatedWriteResult;
         try {
           result = outputCoordinator.continue(() => {
-            captured = outputCoordinator.write(stdout, data, undefined, onAccepted, onAttempt);
+            captured = outputCoordinator.write("stdout", data, undefined, onAccepted, onAttempt);
           });
         } catch (error) {
           mountedAbandonPendingTerminalOutput?.({ physicalStateUncertain: true });
@@ -1808,9 +1644,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         return runOutputTransaction(
           () => {
             runLifecycleTransaction(() => {
-              const outputData = stdout.isTTY ? sanitizeAnsiMultiline(data) : data;
+              const outputData = terminal.capabilities.stdout.isTTY
+                ? sanitizeAnsiMultiline(data)
+                : data;
               if (outputData === "") return;
-              outputSurface.handoffHistory(stdout, outputData, requireSurfaceRuntime());
+              outputSurface.handoffHistory("stdout", outputData, requireSurfaceRuntime());
             });
           },
           { onUnhandedFailure: rollback },
@@ -1825,9 +1663,11 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         return runOutputTransaction(
           () => {
             runLifecycleTransaction(() => {
-              const outputData = stderr.isTTY ? sanitizeAnsiMultiline(data) : data;
+              const outputData = terminal.capabilities.stderr.isTTY
+                ? sanitizeAnsiMultiline(data)
+                : data;
               if (outputData === "") return;
-              outputSurface.handoffHistory(stderr, outputData, requireSurfaceRuntime());
+              outputSurface.handoffHistory("stderr", outputData, requireSurfaceRuntime());
             });
           },
           { onUnhandedFailure: rollback },
@@ -1872,19 +1712,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             }
           });
         },
-        stdout,
-        stderr,
-        stdin,
-        // Document hosts may parse mounted stdin bytes but never own its raw mode.
-        isRawModeSupported: outputSurface.isLive && hasRawInputCapability(stdin),
-        setRawMode(mode: boolean) {
-          if (!outputSurface.isLive) return;
-          if (
-            typeof (stdin as { setRawMode?: (mode: boolean) => unknown }).setRawMode === "function"
-          ) {
-            (stdin as { setRawMode: (mode: boolean) => unknown }).setRawMode(mode);
-          }
-        },
         writeToStdout,
         writeToStderr,
       };
@@ -1892,7 +1719,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // Reserve the stream only after every mount option and session fact needed
       // above has been read successfully. From this point teardown can always
       // find mountedAppContext and release the reservation on a setup failure.
-      liveInstances.set(stdout, app);
+      liveInstances.set(terminal.outputOwnerFor("stdout"), app);
       mountedAsOwner = true;
       mountedRenderSession = renderSession;
       streamLifecycle.activate();
@@ -1905,21 +1732,19 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // Everything after stdout reservation is one mount transaction. Listener
       // registration happens before the first terminal acquisition, and any later
       // failure rolls back through the same complete teardown path.
-      // process.exit() never returns after the synchronous `exit` event. It
+      // A host exit never returns after its synchronous exit event. It
       // therefore cannot wait for an enclosing render transaction to unwind;
       // restore immediately and skip user-facing final rendering callbacks.
-      const exitListener = () => teardown(true, true);
-      process.on("exit", exitListener);
-      mountedExitListener = exitListener;
+      mountedExitListener = processLifecycle.onExit(() => teardown(true, true));
 
       // Termination cleanup is independent from output cadence. A final-output
       // app can still acquire raw, paste, or explicit Kitty state through
       // input composables, so every real mount gets the same idempotent handler.
       // signal-exit re-raises the terminating signal as soon as this callback
       // returns, so this path has the same non-returning cleanup requirement as
-      // process.exit().
+      // abrupt termination.
       mountedUnsubscribeExit = trackProcessListenerCleanup(
-        onExit(() => teardown(true, true), { alwaysLast: false }),
+        processLifecycle.onTermination(() => teardown(true, true)),
       );
 
       // Install job-control interception before raw mode, Kitty, cursor, or the
@@ -1938,25 +1763,35 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // Register beforeExit on successful reservation rather than waiting for a
       // caller to request the promise. This lets natural event-loop drain flush a
       // deferred final frame and its stream barrier before Node exits.
-      mountedBeforeExitHandler = () => app.unmount();
-      process.once("beforeExit", mountedBeforeExitHandler);
+      mountedBeforeExitHandler = processLifecycle.onBeforeExit(() => app.unmount());
 
       let kittyController: ReturnType<typeof createKittyKeyboardController> | undefined;
-      const stdinController = createStdinController(stdin, {
-        appCtx: appContext,
-        exitOnCtrlC,
-        beforeManagedInputAcquire: () => outputSurface.resume(requireSurfaceRuntime()),
-        isManagedInputSurfaceReady: () => !terminalSuspended && outputSurface.isInputReady,
-        isKittyKeyboardReady: () => kittyController?.isReady ?? true,
-        writeTerminalOutput,
+      const inputSession = {
+        prepareManagedInput: () => outputSurface.resume(requireSurfaceRuntime()),
+        get isManagedInputReady() {
+          return !terminalSuspended && outputSurface.isInputReady;
+        },
+        get isKittyKeyboardReady() {
+          return kittyController?.isReady ?? true;
+        },
+        acquireKittyKeyboard() {
+          return kittyController?.acquireDemand() ?? (() => {});
+        },
+        writeTerminal: writeTerminalOutput,
         requestTerminalReconcile,
         reportManagedInputFailure(error) {
           requestRuntimeFailure(error);
         },
-        acquireKittyKeyboardDemand() {
-          return kittyController?.acquireDemand() ?? (() => {});
+      } satisfies ManagedInputSession;
+      const stdinController = createStdinController(
+        terminal,
+        terminal.stdinForUseStdin,
+        inputSession,
+        {
+          exitOnCtrlC,
+          exit: () => appContext.exit(),
         },
-      });
+      );
       mountedStdinController = stdinController;
 
       // These pre-mount steps can throw SYNCHRONOUSLY on a hostile/broken
@@ -1973,8 +1808,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       let tuiRoot: ReturnType<typeof createRoot>;
       try {
         kittyController = createKittyKeyboardController(
-          stdin,
-          stdout,
+          terminal,
           stdinController.startKittyQueryResponseDetection,
           kittyKeyboard,
           writeTerminalOutput,
@@ -2025,8 +1859,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         throw err;
       }
 
-      const writer = createFrameWriter(stdout, {
-        write: (data) => writeRuntimeOutput(stdout, data),
+      const writer = createFrameWriter(terminal, {
+        output: "stdout",
+        write: (data) => writeRuntimeOutput("stdout", data),
       });
       outputSurface.attachWriter(writer);
 
@@ -2035,7 +1870,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
       mountedCreateOutputStateRollback = createOutputStateRollback;
 
-      const synchronize = shouldSynchronize(stdout);
+      const synchronize = shouldSynchronize(terminal);
 
       function runSynchronizedOutput(body: () => void): void {
         if (!synchronize) {
@@ -2046,7 +1881,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         let error: unknown;
         let releaseSynchronizedOutput: (() => void) | undefined;
         try {
-          writeRuntimeOutput(stdout, bsu, undefined, () => {
+          writeRuntimeOutput("stdout", bsu, undefined, () => {
             releaseSynchronizedOutput ??= acquireSynchronizedOutputLease();
           });
           body();
@@ -2054,7 +1889,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           error = caught;
         } finally {
           try {
-            writeRuntimeOutput(stdout, esu, undefined, () => {
+            writeRuntimeOutput("stdout", esu, undefined, () => {
               releaseSynchronizedOutput?.();
               releaseSynchronizedOutput = undefined;
             });
@@ -2072,7 +1907,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         let releaseSynchronizedOutput: (() => void) | undefined;
         try {
           if (synchronize) {
-            writeRuntimeOutput(stdout, bsu, undefined, () => {
+            writeRuntimeOutput("stdout", bsu, undefined, () => {
               releaseSynchronizedOutput ??= acquireSynchronizedOutputLease();
             });
             syncStarted = true;
@@ -2091,7 +1926,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           }
           if (syncStarted) {
             try {
-              writeRuntimeOutput(stdout, esu, undefined, () => {
+              writeRuntimeOutput("stdout", esu, undefined, () => {
                 releaseSynchronizedOutput?.();
                 releaseSynchronizedOutput = undefined;
               });
@@ -2104,15 +1939,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
 
       surfaceRuntime = {
-        stdout,
+        terminal,
+        stdout: "stdout",
         get isResumeInProgress() {
           return terminalResumeInProgress;
         },
         get isStdoutTty() {
-          return stdout.isTTY === true;
+          return terminal.capabilities.stdout.isTTY;
         },
         get isStdoutWritable() {
-          return getWritableStreamState(stdout as MaybeWritableStream).canWriteToStdout;
+          return terminal.capabilities.stdout.canWrite;
         },
         get viewportColumns() {
           return renderSession.session.dimensions.layout.columns;
@@ -2120,8 +1956,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         get viewportRows() {
           return renderSession.session.dimensions.layout.rows;
         },
-        write(stream, data, onHandoff) {
-          return writeRuntimeOutput(stream, data, undefined, onHandoff);
+        write(output, data, onHandoff) {
+          return writeRuntimeOutput(output, data, undefined, onHandoff);
         },
         writeBestEffort,
         writeTerminal: writeTerminalOutput,
@@ -2142,7 +1978,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         chunk: string,
         onHandoff?: () => void,
       ): void {
-        writeRuntimeOutput(stdout, chunk, undefined, () => {
+        writeRuntimeOutput("stdout", chunk, undefined, () => {
           onHandoff?.();
           prepared.accept(guardAcceptedStaticCleanup);
         });
@@ -2701,8 +2537,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           requestPendingResizeRefresh();
         };
         prepareResumeSurface = () => prepareDimensionUpdate(true, true);
-        stdout.on("resize", onResize);
-        mountedResizeHandler = onResize;
+        mountedResizeHandler = terminal.onResize(onResize);
       }
 
       const leaveLifecycleTransaction = leaveMountLifecycleTransaction;
@@ -2758,7 +2593,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
       return;
     }
-    const stream = mountedAppContext.stdout as MaybeWritableStream;
+    const terminal = mountedTerminal;
     const coordinator = mountedOutputCoordinator;
 
     // A blocked commit resolves its scheduler turn immediately, then registers
@@ -2781,9 +2616,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         }
       }
 
-      const { canWriteToStdout } = getWritableStreamState(stream);
       if (mountedScheduler) {
-        if (canWriteToStdout) await mountedScheduler.flush();
+        if (terminal?.capabilities.stdout.canWrite) await mountedScheduler.flush();
         else mountedScheduler.cancel();
       }
 
@@ -2791,7 +2625,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     }
 
     try {
-      await writeOutputBarrier(stream);
+      await writeOutputBarrier("stdout");
     } catch (error) {
       requestRuntimeFailure(error);
       await exitPromise.catch(() => {});

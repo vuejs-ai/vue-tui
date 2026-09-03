@@ -1,35 +1,24 @@
-import EventEmitter from "node:events";
 import { describe, expect, test, vi } from "vite-plus/test";
 import {
   createKittyKeyboardController,
   type StartKittyQueryResponseDetection,
   type WriteKittyOutput,
 } from "../../src/terminal/kitty-keyboard.ts";
+import {
+  createTestTerminalBackend,
+  type TestTerminalBackend,
+} from "../../src/terminal/test/backend.ts";
 
 const noQueryDetection: StartKittyQueryResponseDetection = () => () => {};
 
-function createFakeStdout(): { stdout: NodeJS.WriteStream; written: string[] } {
-  const stdout = new EventEmitter() as unknown as NodeJS.WriteStream;
-  stdout.columns = 100;
-  (stdout as { isTTY?: boolean }).isTTY = true;
-  const written: string[] = [];
-  stdout.write = ((data: string) => {
-    written.push(data);
-    return true;
-  }) as typeof stdout.write;
-  return { stdout, written };
-}
-
-function createFakeStdin(): NodeJS.ReadStream {
-  const stdin = new EventEmitter() as unknown as NodeJS.ReadStream;
-  (stdin as { isTTY?: boolean }).isTTY = true;
-  return stdin;
+function terminalWrites(terminal: TestTerminalBackend): string[] {
+  return terminal.writes.map(({ data }) => data);
 }
 
 function createEnabledController(writeOutput?: WriteKittyOutput, onStateChange?: () => void) {
+  const terminal = createTestTerminalBackend();
   return createKittyKeyboardController(
-    createFakeStdin(),
-    createFakeStdout().stdout,
+    terminal,
     noQueryDetection,
     { mode: "enabled" },
     writeOutput,
@@ -40,9 +29,9 @@ function createEnabledController(writeOutput?: WriteKittyOutput, onStateChange?:
 describe("Kitty keyboard output handoff", () => {
   test("discards an unresolved query detector when the application is disposed", () => {
     const cancel = vi.fn();
+    const terminal = createTestTerminalBackend();
     const controller = createKittyKeyboardController(
-      createFakeStdin(),
-      createFakeStdout().stdout,
+      terminal,
       () => cancel,
       { mode: "auto" },
       (_data, onHandoff) => {
@@ -81,22 +70,44 @@ describe("Kitty keyboard output handoff", () => {
     controller.dispose();
   });
 
+  test("pops a PUSH whose physical write may have succeeded before throwing", () => {
+    const writes: string[] = [];
+    const terminal = createTestTerminalBackend();
+    const controller = createKittyKeyboardController(
+      terminal,
+      noQueryDetection,
+      { mode: "enabled" },
+      (data, onHandoff, onAttempt) => {
+        writes.push(data);
+        onAttempt?.();
+        if (data === "\x1b[>1u") throw new Error("accepted then threw");
+        onHandoff?.();
+        return true;
+      },
+    );
+
+    expect(() => controller.acquireDemand()).toThrow("accepted then threw");
+
+    expect(writes).toEqual(["\x1b[>1u", "\x1b[<u"]);
+    expect(controller.isEnabled).toBe(false);
+    expect(terminal.isModeHeld("kitty-keyboard")).toBe(false);
+    controller.dispose(true);
+  });
+
   test("treats a direct Writable false as an accepted handoff", () => {
-    const { stdout, written } = createFakeStdout();
-    stdout.write = ((data: string) => {
-      written.push(data);
-      return false;
-    }) as typeof stdout.write;
-    const controller = createKittyKeyboardController(createFakeStdin(), stdout, noQueryDetection, {
+    const terminal = createTestTerminalBackend({ writeResults: { stdout: [false] } });
+    const controller = createKittyKeyboardController(terminal, noQueryDetection, {
       mode: "enabled",
     });
 
     controller.acquireDemand();
 
-    expect(written).toEqual(["\x1b[>1u"]);
+    expect(terminalWrites(terminal)).toEqual(["\x1b[>1u"]);
     expect(controller.isEnabled).toBe(true);
     expect(controller.isReady).toBe(true);
+    expect(terminal.isModeHeld("kitty-keyboard")).toBe(true);
     controller.dispose();
+    expect(terminal.isModeHeld("kitty-keyboard")).toBe(false);
   });
 
   test("retains blocked demand and reconciles it after the gate accepts writes", async () => {
@@ -133,9 +144,9 @@ describe("Kitty keyboard output handoff", () => {
 
   test("publishes auto readiness only after the query handoff", () => {
     let queryHandoff: (() => void) | undefined;
+    const terminal = createTestTerminalBackend();
     const controller = createKittyKeyboardController(
-      createFakeStdin(),
-      createFakeStdout().stdout,
+      terminal,
       noQueryDetection,
       { mode: "auto" },
       (data, onHandoff) => {
@@ -175,13 +186,12 @@ describe("Kitty keyboard output handoff", () => {
   });
 
   test("preserves a synchronous suspend requested while PUSH is handed off", () => {
-    const { stdout, written } = createFakeStdout();
+    const terminal = createTestTerminalBackend();
     const writes: string[] = [];
     let suspendDuringPush = true;
     let controller!: ReturnType<typeof createKittyKeyboardController>;
     controller = createKittyKeyboardController(
-      createFakeStdin(),
-      stdout,
+      terminal,
       noQueryDetection,
       { mode: "enabled" },
       (data, onHandoff) => {
@@ -198,18 +208,17 @@ describe("Kitty keyboard output handoff", () => {
     controller.acquireDemand();
 
     expect(writes).toEqual(["\x1b[>1u"]);
-    expect(written).toEqual(["\x1b[<u"]);
+    expect(terminalWrites(terminal)).toEqual(["\x1b[<u"]);
     expect(controller.isEnabled).toBe(false);
     controller.dispose();
   });
 
   test("preserves synchronous suspend while a captured PUSH waits for handoff", () => {
-    const { stdout, written } = createFakeStdout();
+    const terminal = createTestTerminalBackend();
     const writes: string[] = [];
     let pushHandoff: (() => void) | undefined;
     const controller = createKittyKeyboardController(
-      createFakeStdin(),
-      stdout,
+      terminal,
       noQueryDetection,
       { mode: "enabled" },
       (data, onHandoff) => {
@@ -221,11 +230,11 @@ describe("Kitty keyboard output handoff", () => {
 
     controller.acquireDemand();
     controller.suspend(true);
-    expect(written).toEqual([]);
+    expect(terminalWrites(terminal)).toEqual([]);
 
     pushHandoff?.();
     expect(writes).toEqual(["\x1b[>1u"]);
-    expect(written).toEqual(["\x1b[<u"]);
+    expect(terminalWrites(terminal)).toEqual(["\x1b[<u"]);
     expect(controller.isEnabled).toBe(false);
     controller.dispose();
   });
@@ -239,9 +248,9 @@ describe("Kitty keyboard output handoff", () => {
     const writes: string[] = [];
     let queryHandoff: (() => void) | undefined;
     let pushHandoff: (() => void) | undefined;
+    const terminal = createTestTerminalBackend();
     const controller = createKittyKeyboardController(
-      createFakeStdin(),
-      createFakeStdout().stdout,
+      terminal,
       detection,
       { mode: "auto" },
       (data, onHandoff) => {

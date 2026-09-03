@@ -1,3 +1,5 @@
+import type { TerminalBackend, TerminalOutput } from "./backend.ts";
+
 /**
  * Result of one Runtime-coordinated side-output transaction.
  *
@@ -22,7 +24,7 @@ export type CoordinatedWriteResult =
     };
 
 interface PendingWrite {
-  readonly stream: NodeJS.WriteStream;
+  readonly output: TerminalOutput;
   data: string;
   readonly callback?: () => void;
   onHandoff?: () => void;
@@ -73,19 +75,19 @@ export interface OutputCoordinator {
   readonly continue: (body: () => void) => CoordinatedWriteResult;
   /**
    * Capture one ordered segment inside the current building transaction.
-   * `onAttempt` runs immediately before `stream.write()`, including when that
+   * `onAttempt` runs immediately before the backend write, including when that
    * call throws; `onHandoff` runs only after the call returns.
    */
   readonly write: (
-    stream: NodeJS.WriteStream,
+    output: TerminalOutput,
     data: string,
     callback?: () => void,
     onHandoff?: () => void,
     onAttempt?: () => void,
   ) => boolean;
   /**
-   * Hand every captured segment to its stream now. Returns false only when a
-   * prior segment backpressured and later cross-stream segments remain.
+   * Hand every captured segment to its output now. Returns false only when a
+   * prior segment backpressured and later cross-output segments remain.
    */
   readonly handoff: () => boolean;
   /** Drop an owned transaction before an emergency synchronous terminal transition. */
@@ -101,14 +103,15 @@ const acceptedWritable = Object.freeze({
  * Coordinate one application's Runtime-owned stdout and stderr traffic.
  *
  * A transaction first captures all logical chunks. Adjacent chunks for the
- * same stream are combined, so ordinary stdout-only frames are handed to Node
- * with one physical `write()`. Cross-stream order is retained as a small
+ * same destination are combined, so ordinary stdout-only frames are handed to the backend
+ * with one physical `write()`. Cross-output order is retained as a small
  * segment list. Once any segment returns false, no later segment is handed
  * until `drain`.
  */
-export function createOutputCoordinator(options?: {
+export function createOutputCoordinator(options: {
+  readonly terminal: TerminalBackend;
   readonly onDeferredError?: (error: unknown) => void;
-  readonly trackWrite?: (stream: NodeJS.WriteStream) => (error?: unknown) => void;
+  readonly trackWrite?: (output: TerminalOutput) => (error?: unknown) => void;
 }): OutputCoordinator {
   type State = "idle" | "building" | "backpressured";
   let state: State = "idle";
@@ -163,7 +166,7 @@ export function createOutputCoordinator(options?: {
     state = "idle";
     if (cleanup.failed) {
       current.rejectReady(cleanup.error);
-      options?.onDeferredError?.(cleanup.error);
+      options.onDeferredError?.(cleanup.error);
     } else {
       current.resolveReady();
     }
@@ -185,11 +188,11 @@ export function createOutputCoordinator(options?: {
     transaction = null;
     state = "idle";
     current.rejectReady(failure);
-    if (deferred) options?.onDeferredError?.(failure);
+    if (deferred) options.onDeferredError?.(failure);
   }
 
   function callWrite(write: PendingWrite): boolean {
-    const settleTrackedWrite = options?.trackWrite?.(write.stream);
+    const settleTrackedWrite = options.trackWrite?.(write.output);
     let settled = false;
     const complete = (error?: Error | null): void => {
       if (settled) return;
@@ -200,10 +203,11 @@ export function createOutputCoordinator(options?: {
     let writable: boolean;
     try {
       write.onAttempt?.();
-      writable =
-        write.callback || settleTrackedWrite
-          ? write.stream.write(write.data, complete)
-          : write.stream.write(write.data);
+      writable = options.terminal.write(
+        write.output,
+        write.data,
+        write.callback || settleTrackedWrite ? complete : undefined,
+      );
     } catch (error) {
       if (!settled) {
         settled = true;
@@ -221,8 +225,12 @@ export function createOutputCoordinator(options?: {
     current.onFullyHanded?.();
   }
 
-  function waitForDrain(current: TransactionState, stream: NodeJS.WriteStream): void {
+  function waitForDrain(current: TransactionState, output: TerminalOutput): void {
     let active = true;
+    let removeDrain: () => void = () => {};
+    let removeClose: () => void = () => {};
+    let removeFinish: () => void = () => {};
+    let removeError: () => void = () => {};
     const cleanup = (): ListenerCleanupResult => {
       if (!active) return { failed: false };
       active = false;
@@ -238,10 +246,10 @@ export function createOutputCoordinator(options?: {
           }
         }
       };
-      runCleanup(() => stream.off("drain", onDrain));
-      runCleanup(() => stream.off("close", onClose));
-      runCleanup(() => stream.off("finish", onFinish));
-      runCleanup(() => stream.off("error", onError));
+      runCleanup(removeDrain);
+      runCleanup(removeClose);
+      runCleanup(removeFinish);
+      runCleanup(removeError);
       return failed ? { failed: true, error: firstError } : { failed: false };
     };
     const onDrain = () => {
@@ -272,10 +280,10 @@ export function createOutputCoordinator(options?: {
       removeWaitListeners = null;
       fail(current, error, true);
     };
-    stream.once("drain", onDrain);
-    stream.once("close", onClose);
-    stream.once("finish", onFinish);
-    stream.once("error", onError);
+    removeDrain = options.terminal.onOutputEvent(output, "drain", onDrain);
+    removeClose = options.terminal.onOutputEvent(output, "close", onClose);
+    removeFinish = options.terminal.onOutputEvent(output, "finish", onFinish);
+    removeError = options.terminal.onOutputEvent(output, "error", onError);
     removeWaitListeners = cleanup;
   }
 
@@ -291,7 +299,7 @@ export function createOutputCoordinator(options?: {
           state = "backpressured";
           current.fullyHanded = current.pending.length === 0;
           if (current.fullyHanded) reportFullyHanded(current);
-          waitForDrain(current, write.stream);
+          waitForDrain(current, write.output);
           return current.fullyHanded;
         }
       }
@@ -317,7 +325,7 @@ export function createOutputCoordinator(options?: {
   }
 
   function capture(
-    stream: NodeJS.WriteStream,
+    output: TerminalOutput,
     data: string,
     callback?: () => void,
     onHandoff?: () => void,
@@ -330,7 +338,7 @@ export function createOutputCoordinator(options?: {
     const previous = current.pending.at(-1);
     if (
       previous &&
-      previous.stream === stream &&
+      previous.output === output &&
       previous.callback === undefined &&
       callback === undefined &&
       previous.onHandoff === undefined &&
@@ -340,7 +348,7 @@ export function createOutputCoordinator(options?: {
       previous.data += data;
       previous.onHandoff = onHandoff;
     } else {
-      current.pending.push({ stream, data, callback, onHandoff, onAttempt });
+      current.pending.push({ output, data, callback, onHandoff, onAttempt });
     }
     // Capture itself never means backpressure. Runtime helpers use the boolean
     // only for Writable compatibility while the transaction owns handoff.
