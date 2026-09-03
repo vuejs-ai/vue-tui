@@ -21,6 +21,10 @@ export function setTestEventSink(sink: TestEventSink): void {
   sharedTestEventState().sink = sink;
 }
 
+export function hasTestEventSink(): boolean {
+  return sharedTestEventState().sink !== undefined;
+}
+
 /**
  * Events the runtime itself reports. Named here rather than written as string
  * literals on both sides: renaming one used to type-check cleanly and turn every

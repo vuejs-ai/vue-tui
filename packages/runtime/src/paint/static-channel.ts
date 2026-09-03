@@ -1,7 +1,8 @@
 import type { LayoutTransactionResult } from "../layout/layout-transaction.ts";
 import type { TuiNode, TuiStatic } from "../host/nodes.ts";
+import type { Frame } from "../frame/frame.ts";
 import { paintStaticLayout } from "./paint.ts";
-import type { TerminalStyle } from "./terminal-style.ts";
+import type { TerminalStyle } from "../text/terminal-style.ts";
 
 export function findStatics(root: TuiNode, out: TuiStatic[] = []): TuiStatic[] {
   if (root.type === "tui-static") out.push(root);
@@ -14,7 +15,7 @@ export function findStatics(root: TuiNode, out: TuiStatic[] = []): TuiStatic[] {
 
 interface PreparedStaticBatch {
   readonly stat: TuiStatic;
-  readonly frame: string;
+  readonly frame: Frame | undefined;
 }
 
 /**
@@ -24,8 +25,8 @@ interface PreparedStaticBatch {
  * throwing write.
  */
 export interface PreparedStaticOutput {
-  /** Combined open Static bytes, including each non-empty frame's trailing newline. */
-  readonly output: string;
+  /** Open Static pictures in their terminal-history order. */
+  readonly frames: readonly Frame[];
   /**
    * Confirm every non-empty block represented in this prepared transaction.
    * A preparation hook may return a finalizer that runs after every component
@@ -44,14 +45,21 @@ export function prepareStaticOutput(
   const batches = layout.staticLayouts.map(
     ({ stat, region }): PreparedStaticBatch => ({
       stat,
-      frame: region ? paintStaticLayout(region, layout.computed, terminalStyle) : "",
+      frame: region ? paintStaticLayout(region, layout.computed, terminalStyle) : undefined,
     }),
   );
   // An output-free instance is still a producer: it remains open until a later
   // eligible render produces bytes, or ordinary Vue unmount removes it. Only
   // blocks represented in this transaction may be accepted or abandoned.
-  const committableBatches = batches.filter(({ frame }) => frame.length > 0);
-  const output = committableBatches.map(({ frame }) => frame + "\n").join("");
+  // "Produced output" is what makes a block committable, and blank rows are
+  // output: a block of them advances the cursor and occupies history, so its
+  // instance must settle rather than stay open forever, retaining its subtree
+  // and repainting on every later commit. Rows past the first contribute their
+  // newlines even when no cell in them is inked; a single blank row encodes to
+  // nothing and leaves the producer open, as an empty block does.
+  const committableBatches = batches.filter(
+    ({ frame }) => frame !== undefined && (frame.hasContent() || frame.height > 1),
+  );
   let state: "pending" | "accepted" | "abandoned" = "pending";
 
   const settle = (next: "accepted" | "abandoned"): TuiStatic[] => {
@@ -67,7 +75,7 @@ export function prepareStaticOutput(
   };
 
   return {
-    output,
+    frames: committableBatches.map(({ frame }) => frame!),
     accept(beforeNotify) {
       const accepted = settle("accepted");
 

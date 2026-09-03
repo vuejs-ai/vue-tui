@@ -1,6 +1,8 @@
 import ansiEscapes from "ansi-escapes";
+import { Frame } from "../frame/frame.ts";
 import type { TerminalLease, TerminalOutput } from "../terminal/backend.ts";
 import { hideCursorEscape, showCursorEscape } from "./cursor-helpers.ts";
+import { encodeFrame, encodeFrameRow } from "./frame-encoder.ts";
 import {
   SurfaceBase,
   type SurfaceDisposeOptions,
@@ -40,17 +42,18 @@ export class FullscreenSurface extends SurfaceBase {
     return viewportRows === null ? { mode: "unbounded" } : { mode: "exact", rows: viewportRows };
   }
 
-  limitFrame(frame: string): string {
-    return frame;
-  }
-
   present(presentation: SurfacePresentation, runtime: SurfaceRuntime): boolean {
-    return this.repaint(presentation.frame, runtime);
+    return this.repaint(
+      presentation.frame,
+      runtime,
+      presentation.encoded === undefined ? {} : { encoded: presentation.encoded },
+    );
   }
 
   handoffHistory(output: TerminalOutput, data: string, runtime: SurfaceRuntime): void {
     if (data === "") return;
-    this.repaint(this.lastFrame, runtime, {
+    const frame = this.previousFrame;
+    this.repaint(frame, runtime, {
       forceFull: true,
       writeBefore: () => runtime.write(output, data),
     });
@@ -245,9 +248,10 @@ export class FullscreenSurface extends SurfaceBase {
   }
 
   private repaint(
-    output: string,
+    frame: Frame | undefined,
     runtime: SurfaceRuntime,
     options: {
+      readonly encoded?: string;
       readonly forceFull?: boolean;
       readonly writeBefore?: () => void;
     } = {},
@@ -255,26 +259,33 @@ export class FullscreenSurface extends SurfaceBase {
     const dimensionsMatch =
       this.baselineColumns === runtime.viewportColumns &&
       this.baselineRows === runtime.viewportRows;
+    const difference = frame ? Frame.diff(this.previousFrame, frame) : undefined;
     if (
       options.writeBefore === undefined &&
       this.baselineValid &&
       dimensionsMatch &&
-      output === this.lastFrame
+      difference !== undefined &&
+      !difference.sizeChanged &&
+      difference.rows.length === 0
     ) {
       return false;
     }
 
     runtime.runLifecycleTransaction(() => {
       this.ensureTerminalLease(runtime);
-      const previousRows = this.lastFrame.split("\n");
-      const nextRows = output.split("\n");
+      const previousFrame = this.previousFrame;
       const canDiff =
+        frame !== undefined &&
+        previousFrame !== undefined &&
         options.forceFull !== true &&
         this.baselineValid &&
         dimensionsMatch &&
         runtime.viewportRows !== null &&
-        previousRows.length === runtime.viewportRows &&
-        nextRows.length === runtime.viewportRows;
+        frame.width === runtime.viewportColumns &&
+        previousFrame.width === runtime.viewportColumns &&
+        frame.height === runtime.viewportRows &&
+        previousFrame.height === runtime.viewportRows &&
+        !difference!.sizeChanged;
 
       runtime.runCoordinatedWrite(
         () => {
@@ -284,12 +295,11 @@ export class FullscreenSurface extends SurfaceBase {
         () => {
           if (canDiff) {
             const changedRows: string[] = [];
-            for (let row = 0; row < runtime.viewportRows!; row++) {
-              if (previousRows[row] === nextRows[row]) continue;
+            for (const row of difference!.rows) {
               changedRows.push(
                 ansiEscapes.cursorTo(0, row),
                 "\x1b[0m",
-                nextRows[row]!,
+                encodeFrameRow(frame!, row),
                 "\x1b[0m",
                 ansiEscapes.eraseEndLine,
               );
@@ -297,13 +307,13 @@ export class FullscreenSurface extends SurfaceBase {
             changedRows.push(ansiEscapes.cursorTo(0, Math.max(0, runtime.viewportRows! - 1)));
             runtime.write(runtime.stdout, changedRows.join(""));
           } else {
-            runtime.write(runtime.stdout, ansiEscapes.clearViewport + output);
+            const encoded = options.encoded ?? (frame ? encodeFrame(frame) : "");
+            runtime.write(runtime.stdout, ansiEscapes.clearViewport + encoded);
           }
-          this.getWriter().sync(output);
         },
       );
 
-      this.rememberFrame(output);
+      this.rememberFrame(frame);
       this.baselineValid = true;
       this.baselineColumns = runtime.viewportColumns;
       this.baselineRows = runtime.viewportRows;

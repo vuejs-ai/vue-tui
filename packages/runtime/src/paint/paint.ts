@@ -1,8 +1,18 @@
 import stringWidth from "string-width";
 import cliBoxes from "cli-boxes";
-import type { StyledChar } from "@alcalzone/ansi-tokenize";
-import { applyChalk, applyColor } from "./text-style.ts";
-import type { TerminalStyle } from "./terminal-style.ts";
+import { type AnsiCode, type StyledChar } from "@alcalzone/ansi-tokenize";
+import { blankCell, type Cell, type Hyperlink } from "../frame/cell.ts";
+import { Frame } from "../frame/frame.ts";
+import {
+  defaultColor,
+  defaultStyle,
+  StyleAttribute,
+  type Color,
+  type SgrPair,
+  type Style,
+} from "../frame/style.ts";
+import { applyChalk, applyColor } from "../text/text-style.ts";
+import type { TerminalStyle } from "../text/terminal-style.ts";
 import { sanitizeAnsi, sanitizeAnsiMultiline } from "../text/sanitize-ansi.ts";
 import type {
   TuiNode,
@@ -18,7 +28,6 @@ import {
   safeSliceEnd,
   sliceAnsiPreservingIntensity,
   styledGraphemesFromAnsi,
-  styledGraphemesToString,
   styleMeasuredTextLines,
 } from "../text/text-measure.ts";
 import type {
@@ -26,7 +35,7 @@ import type {
   ComputedNodeLayout,
   StaticLayoutRegion,
 } from "../layout/layout-transaction.ts";
-import type { InternalGeometryPaintFrame } from "../session/geometry-service.ts";
+import type { PaintGeometryFrame } from "./geometry.ts";
 import { assertPaintSurfaceSize } from "./surface-limits.ts";
 
 interface ClipRect {
@@ -63,6 +72,121 @@ interface UnclipOp {
 }
 
 type Op = WriteOp | ClipOp | UnclipOp;
+
+interface CellVisual {
+  readonly style: Style;
+  readonly link: Hyperlink | undefined;
+}
+
+const attributeBySgrCode = new Map<number, number>([
+  [1, StyleAttribute.bold],
+  [2, StyleAttribute.dim],
+  [3, StyleAttribute.italic],
+  [4, StyleAttribute.underline],
+  [5, StyleAttribute.blink],
+  [6, StyleAttribute.rapidBlink],
+  [7, StyleAttribute.inverse],
+  [8, StyleAttribute.conceal],
+  [9, StyleAttribute.strikethrough],
+  [53, StyleAttribute.overline],
+]);
+
+function osc8Link(code: string): Hyperlink | undefined {
+  if (!code.startsWith("\x1b]8;")) return undefined;
+  const parametersEnd = code.indexOf(";", 4);
+  if (parametersEnd === -1) return undefined;
+  const parameters = code.slice(4, parametersEnd);
+  let target = code.slice(parametersEnd + 1);
+  if (target.endsWith("\x1b\\")) target = target.slice(0, -2);
+  else if (target.endsWith("\x07") || target.endsWith("\x9c")) target = target.slice(0, -1);
+  return target === "" ? undefined : { parameters, target };
+}
+
+function sgrByte(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isInteger(value) || value < 0 || value > 255) return undefined;
+  return value;
+}
+
+function sgrColor(
+  code: string,
+): { readonly channel: "foreground" | "background"; readonly color: Color } | undefined {
+  if (!code.startsWith("\x1b[") || !code.endsWith("m")) return undefined;
+  const parameters = code.slice(2, -1).split(";").map(Number);
+  const first = parameters[0];
+  if (first === undefined) return undefined;
+  if (first >= 30 && first <= 37) {
+    return { channel: "foreground", color: { kind: "ansi16", index: first - 30 } };
+  }
+  if (first >= 90 && first <= 97) {
+    return { channel: "foreground", color: { kind: "ansi16", index: first - 90 + 8 } };
+  }
+  if (first >= 40 && first <= 47) {
+    return { channel: "background", color: { kind: "ansi16", index: first - 40 } };
+  }
+  if (first >= 100 && first <= 107) {
+    return { channel: "background", color: { kind: "ansi16", index: first - 100 + 8 } };
+  }
+  if ((first !== 38 && first !== 48) || parameters.length < 3) return undefined;
+  const channel = first === 38 ? "foreground" : "background";
+  if (parameters[1] === 5) {
+    const index = sgrByte(parameters[2]);
+    return index === undefined ? undefined : { channel, color: { kind: "ansi256", index } };
+  }
+  if (parameters[1] === 2) {
+    const red = sgrByte(parameters[2]);
+    const green = sgrByte(parameters[3]);
+    const blue = sgrByte(parameters[4]);
+    if (red === undefined || green === undefined || blue === undefined) return undefined;
+    return {
+      channel,
+      color: {
+        kind: "rgb",
+        red,
+        green,
+        blue,
+      },
+    };
+  }
+  return undefined;
+}
+
+function cellVisualFromAnsiCodes(codes: readonly AnsiCode[]): CellVisual {
+  let foreground = defaultColor;
+  let background = defaultColor;
+  let attrs = 0;
+  const extraSgr: SgrPair[] = [];
+  let link: Hyperlink | undefined;
+
+  for (const { code, endCode } of codes) {
+    const nextLink = osc8Link(code);
+    if (nextLink !== undefined) {
+      link = nextLink;
+      continue;
+    }
+    const color = sgrColor(code);
+    if (color) {
+      if (color.channel === "foreground") foreground = color.color;
+      else background = color.color;
+      continue;
+    }
+    if (!code.startsWith("\x1b[") || !code.endsWith("m")) continue;
+    const attribute = attributeBySgrCode.get(Number(code.slice(2, -1)));
+    if (attribute !== undefined) {
+      attrs |= attribute;
+    } else {
+      extraSgr.push({ code, endCode });
+    }
+  }
+
+  const style =
+    foreground === defaultColor &&
+    background === defaultColor &&
+    attrs === 0 &&
+    extraSgr.length === 0
+      ? defaultStyle
+      : { foreground, background, attrs, extraSgr };
+  return { style, link };
+}
 
 interface OutputCacheLimits {
   readonly styledEntries: number;
@@ -125,6 +249,7 @@ class BoundedLruCache<Value> {
 export class OutputCaches {
   private readonly widths: BoundedLruCache<number>;
   private readonly styledCharsCache: BoundedLruCache<StyledChar[]>;
+  private readonly cellVisuals: BoundedLruCache<CellVisual>;
 
   constructor(limits: Partial<OutputCacheLimits> = {}) {
     const resolved = { ...defaultOutputCacheLimits, ...limits };
@@ -137,6 +262,11 @@ export class OutputCaches {
       resolved.styledEntries,
       resolved.styledUnits,
       (line, characters) => Math.max(line.length, characters.length),
+    );
+    this.cellVisuals = new BoundedLruCache(
+      resolved.styledEntries,
+      resolved.styledUnits,
+      (key) => key.length,
     );
   }
 
@@ -158,6 +288,16 @@ export class OutputCaches {
     return cached;
   }
 
+  getCellVisual(codes: readonly AnsiCode[]): CellVisual {
+    const key = codes.map(({ code }) => code).join("\0");
+    let cached = this.cellVisuals.get(key);
+    if (cached === undefined) {
+      cached = cellVisualFromAnsiCodes(codes);
+      this.cellVisuals.set(key, cached);
+    }
+    return cached;
+  }
+
   getSliceStart(text: string, requestedStart: number): number {
     let column = 0;
 
@@ -172,6 +312,7 @@ export class OutputCaches {
   clear(): void {
     this.widths.clear();
     this.styledCharsCache.clear();
+    this.cellVisuals.clear();
   }
 }
 
@@ -224,20 +365,10 @@ class Output {
     this.ops.push({ type: "unclip" });
   }
 
-  get(): { output: string; height: number } {
-    // Blank cells are immutable in practice: every paint change replaces the
-    // array slot with another StyledChar. Share one baseline cell
-    // instead of allocating an object and an empty styles array per terminal
-    // cell on every frame.
-    const blankCell: StyledChar = {
-      type: "char",
-      value: " ",
-      fullWidth: false,
-      styles: [],
-    };
-    const output: StyledChar[][] = Array.from({ length: this.height }, () =>
-      Array.from({ length: this.width }, () => blankCell),
-    );
+  get(): Frame {
+    const frameWidth = this.frameWidth();
+    assertPaintSurfaceSize(frameWidth, this.height);
+    const frame = new Frame(frameWidth, this.height);
 
     const clips: ClipRect[] = [];
 
@@ -301,10 +432,11 @@ class Output {
         // C0/DEL and unsafe terminal controls before width calculation or
         // clipping so the measured grid and emitted bytes stay identical.
         line = sanitizeAnsi(line, { singleLine: true, terminalStyle: this.terminalStyle });
-        const currentLine = output[y + offsetY];
+        const row = y + offsetY;
 
-        // Line can be missing if text is taller than pre-initialized output
-        if (!currentLine) {
+        // Line can be outside the pre-initialized picture if text is taller
+        // than the computed layout. Keep the frame size fixed for this pass.
+        if (row < 0 || row >= frame.height) {
           continue;
         }
 
@@ -341,23 +473,24 @@ class Output {
         }
 
         // Wide characters (e.g. CJK) occupy two cells: a leading cell with
-        // the character and a trailing placeholder with value ''. When an
+        // the character and a trailing placeholder with an empty grapheme. When an
         // overlapping write lands in the middle of a wide character, the
         // boundary cells need cleanup so the terminal never renders a
         // half-visible wide character.
+        const currentCell = this.cellAt(frame, offsetX, row);
         if (
-          currentLine[offsetX]?.value === "" &&
+          currentCell?.grapheme === "" &&
           offsetX > 0 &&
-          this.caches.getStringWidth(currentLine[offsetX - 1]?.value ?? "") > 1
+          this.caches.getStringWidth(this.cellAt(frame, offsetX - 1, row)?.grapheme ?? "") > 1
         ) {
-          currentLine[offsetX - 1] = blankCell;
+          this.setCell(frame, offsetX - 1, row, blankCell);
         }
 
         // Normal relative output has no x-bounds check here. A wide character
         // whose leading cell is in bounds but whose trailing cell exceeds the
         // width still renders its leading cell and overflows the row; the
-        // past-width placeholder is dropped later as a sparse hole by
-        // `line.filter(item => item !== undefined)` + `.trimEnd()` (see below).
+        // past-width placeholder remains outside this row's original width,
+        // while the Frame expands only enough to retain the leading glyph.
         // A whole-glyph width guard would drop the character, including its valid
         // leading cell, when only its trailing cell exceeds the edge. Box-level
         // overflow:hidden clipping is handled separately above (the clipH sliceAnsi
@@ -376,35 +509,104 @@ class Output {
             continue;
           }
 
-          currentLine[offsetX] = character;
+          const cell = this.cellFromStyledCharacter(character, characterWidth);
+          this.setCell(frame, offsetX, row, cell);
 
           if (characterWidth > 1) {
             for (let i = 1; i < characterWidth; i++) {
-              currentLine[offsetX + i] = {
-                type: "char",
-                value: "",
-                fullWidth: false,
-                styles: character.styles,
-              };
+              this.setCell(frame, offsetX + i, row, {
+                grapheme: "",
+                width: 0,
+                style: cell.style,
+                link: cell.link,
+              });
             }
           }
 
           offsetX += characterWidth;
         }
 
-        if (currentLine[offsetX]?.value === "") {
-          currentLine[offsetX] = blankCell;
+        if (this.cellAt(frame, offsetX, row)?.grapheme === "") {
+          this.setCell(frame, offsetX, row, blankCell);
         }
 
         offsetY++;
       }
     }
 
+    return frame;
+  }
+
+  private frameWidth(): number {
+    if (this.hardClip) return this.width;
+    let width = this.width;
+    const clips: ClipRect[] = [];
+
+    for (const op of this.ops) {
+      if (op.type === "clip") {
+        clips.push(op.clip);
+        continue;
+      }
+      if (op.type === "unclip") {
+        clips.pop();
+        continue;
+      }
+
+      const stackedClip = clips.reduce<ClipRect | undefined>(
+        (current, next) => intersectClipRects(current, next),
+        undefined,
+      );
+      const clipH =
+        stackedClip && typeof stackedClip.x1 === "number" && typeof stackedClip.x2 === "number"
+          ? { x1: stackedClip.x1, x2: stackedClip.x2 }
+          : undefined;
+      const clipV =
+        stackedClip && typeof stackedClip.y1 === "number" && typeof stackedClip.y2 === "number"
+          ? { y1: stackedClip.y1, y2: stackedClip.y2 }
+          : undefined;
+
+      if (clipH && op.x > clipH.x2) continue;
+      for (let offset = 0; offset < op.lines.length; offset++) {
+        const row = op.y + offset;
+        if (row < 0 || row >= this.height) continue;
+        if (clipV && (row < clipV.y1 || row >= clipV.y2)) continue;
+
+        const rawLine = op.lines[offset]!;
+        const line = sanitizeAnsi(rawLine, {
+          singleLine: true,
+          terminalStyle: this.terminalStyle,
+        });
+        const lineWidth = this.caches
+          .getStyledChars(line)
+          .reduce(
+            (total, character) => total + Math.max(1, this.caches.getStringWidth(character.value)),
+            0,
+          );
+        if (clipH && op.x + lineWidth < clipH.x1) continue;
+        const rightEdge = clipH ? Math.min(op.x + lineWidth, clipH.x2) : op.x + lineWidth;
+        width = Math.max(width, Math.ceil(rightEdge));
+      }
+    }
+    return Math.max(1, width);
+  }
+
+  private cellAt(frame: Frame, x: number, y: number): Cell | undefined {
+    if (x < 0 || x >= frame.width || y < 0 || y >= frame.height) return undefined;
+    return frame.get(x, y);
+  }
+
+  private setCell(frame: Frame, x: number, y: number, cell: Cell): void {
+    if (x < 0 || x >= frame.width || y < 0 || y >= frame.height) return;
+    frame.set(x, y, cell);
+  }
+
+  private cellFromStyledCharacter(character: StyledChar, width: number): Cell {
+    const visual = this.caches.getCellVisual(character.styles);
     return {
-      output: output
-        .map((line) => styledGraphemesToString(line.filter((item) => item !== undefined)).trimEnd())
-        .join("\n"),
-      height: output.length,
+      grapheme: character.value,
+      width,
+      style: visual.style,
+      link: visual.link,
     };
   }
 }
@@ -641,9 +843,9 @@ function drawBorder(
     // applyChalk would emit the channels in the wrong order for borders.
     let styled = s;
     if (edgeColor) {
-      styled = applyColor(terminalStyle, terminalStyle.chalk, edgeColor, false)(styled);
+      styled = applyColor(terminalStyle, edgeColor, false)(styled);
     }
-    if (edgeBg) styled = applyColor(terminalStyle, terminalStyle.chalk, edgeBg, true)(styled);
+    if (edgeBg) styled = applyColor(terminalStyle, edgeBg, true)(styled);
     if (edgeDim) styled = terminalStyle.chalk.dim(styled);
     return styled;
   }
@@ -800,7 +1002,7 @@ export interface PaintOptions {
   /** Text styling capability resolved for this render session. */
   readonly terminalStyle: TerminalStyle;
   /** Private frame-local geometry collector. Publication happens after paint succeeds. */
-  readonly geometry?: InternalGeometryPaintFrame;
+  readonly geometry?: PaintGeometryFrame;
   /**
    * Clip paint and semantic geometry to an app-owned viewport. Fullscreen
    * rendering uses this to keep off-screen layout from wrapping or scrolling
@@ -823,7 +1025,7 @@ function intersectPaintRect(rect: PaintRect, clip: PaintRect | undefined): Paint
 function recordZeroContentGeometry(
   node: TuiNode,
   layout: ComputedLayout,
-  geometry: InternalGeometryPaintFrame | undefined,
+  geometry: PaintGeometryFrame | undefined,
 ): void {
   if (!geometry?.hasObservedSubtree(node)) return;
   if (node.type === "tui-static") {
@@ -842,7 +1044,7 @@ function recordZeroContentGeometry(
   for (const child of node.children) recordZeroContentGeometry(child, layout, geometry);
 }
 
-export function paint(root: TuiNode, options: PaintOptions): string {
+export function paint(root: TuiNode, options: PaintOptions): Frame {
   if (root.type !== "root") throw new Error("paint expects TuiRoot");
   const rootLayout = options.layout.get(root);
   if (!rootLayout) throw new Error("paint requires the root ComputedLayout");
@@ -867,7 +1069,7 @@ export function paint(root: TuiNode, options: PaintOptions): string {
     viewportClip,
     options.geometry,
   );
-  return out.get().output;
+  return out.get();
 }
 
 function paintNode(
@@ -879,7 +1081,7 @@ function paintNode(
   y0: number,
   inheritedBg?: string,
   clip?: PaintRect,
-  geometry?: InternalGeometryPaintFrame,
+  geometry?: PaintGeometryFrame,
 ): void {
   // Box-size collection is demand-driven. Once no observed target exists in
   // this subtree, keep ordinary paint on its pre-measurement path.
@@ -1071,7 +1273,7 @@ export function paintContainer(
   container: TuiContainer,
   layout: ComputedLayout,
   terminalStyle: TerminalStyle,
-): string {
+): Frame {
   // Used by Static channel and tests.
   if (container.type === "root") return paint(container, { layout, terminalStyle });
   throw new Error("paintContainer currently only supports root");
@@ -1081,10 +1283,10 @@ export function paintStaticLayout(
   region: StaticLayoutRegion,
   layout: ComputedLayout,
   terminalStyle: TerminalStyle,
-): string {
+): Frame {
   const out = new Output(region.width, region.height, terminalStyle);
   for (const child of region.children) {
     paintNode(child, layout, out, terminalStyle, region.offsetX, region.offsetY);
   }
-  return out.get().output;
+  return out.get();
 }

@@ -42,6 +42,120 @@ test("preserve OSC hyperlink sequences in text", async () => {
   expect(stripAnsi(frame)).toBe("link");
 });
 
+test.each([
+  ["ST opener and BEL closer", `${ESC}\\`, BEL],
+  ["BEL opener and ST closer", BEL, `${ESC}\\`],
+] as const)(
+  "close an OSC hyperlink with a different valid terminator: %s",
+  (_name, open, close) => {
+    const output = renderToString(
+      defineComponent(() => () => (
+        <Text>{`${ESC}]8;;https://example.com${open}A${ESC}]8;;${close}B`}</Text>
+      )),
+      { color: "truecolor", width: 100 },
+    );
+
+    expect(output).toBe(`${ESC}]8;;https://example.com${BEL}A${ESC}]8;;${BEL}B`);
+  },
+);
+
+test("preserve every paired SGR attribute written in Text content", () => {
+  const content = [
+    "\x1b[1mbold\x1b[22m",
+    "\x1b[2mdim\x1b[22m",
+    "\x1b[3mitalic\x1b[23m",
+    "\x1b[4munderline\x1b[24m",
+    "\x1b[5mblink\x1b[25m",
+    "\x1b[6mrapid-blink\x1b[25m",
+    "\x1b[7minverse\x1b[27m",
+    "\x1b[8mconceal\x1b[28m",
+    "\x1b[9mstrike\x1b[29m",
+    "\x1b[53moverline\x1b[55m",
+  ].join(" ");
+  const output = renderToString(
+    defineComponent(() => () => <Text>{content}</Text>),
+    { color: "truecolor", width: 100 },
+  );
+
+  expect(output).toBe(content);
+});
+
+test.each([
+  ["framed", `${ESC}[51m`, `${ESC}[0m`],
+  ["superscript", `${ESC}[73m`, `${ESC}[0m`],
+  ["alternate font", `${ESC}[11m`, `${ESC}[0m`],
+  ["ideogram underline", `${ESC}[60m`, `${ESC}[0m`],
+  ["underline color", `${ESC}[58:2::255:0:0m`, `${ESC}[59m`],
+  ["semicolon underline color", `${ESC}[58;2;255;0;0m`, `${ESC}[59m`],
+] as const)("preserve authored %s SGR through a frame", (text, open, close) => {
+  const content = `${open}${text}${close}`;
+  const output = renderToString(
+    defineComponent(() => () => <Text>{content}</Text>),
+    { color: "truecolor", width: 100 },
+  );
+
+  expect(output).toBe(content);
+});
+
+test("preserve colon underline styles through the frame fallback", () => {
+  const render = (content: string) =>
+    renderToString(
+      defineComponent(() => () => <Text>{content}</Text>),
+      { color: "truecolor", width: 40 },
+    );
+
+  expect(render(`${ESC}[4:3mcurly${ESC}[24m x`)).toBe(`${ESC}[4:3mcurly${ESC}[24m x`);
+  expect(render(`${ESC}[4:1mone${ESC}[4:0m x`)).toBe(`${ESC}[4:1mone${ESC}[24m x`);
+  expect(render(`${ESC}[4:2mtwo${ESC}[24m x`)).toBe(`${ESC}[4:2mtwo${ESC}[24m x`);
+  expect(render(`${ESC}[1;4:3mbold${ESC}[0m x`)).toBe(
+    `${ESC}[1m${ESC}[4:3mbold${ESC}[24m${ESC}[22m x`,
+  );
+});
+
+test("preserve fallback SGR on every wrapped frame row", () => {
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Box width={3}>
+        <Text wrap="wrap">{`${ESC}[51mabcdef${ESC}[0m`}</Text>
+      </Box>
+    )),
+    { color: "truecolor", width: 3 },
+  );
+
+  expect(output).toBe(`${ESC}[51mabc${ESC}[0m\n${ESC}[51mdef${ESC}[0m`);
+});
+
+test("preserve coexisting fallback SGR that share the generic reset", () => {
+  const content = `${ESC}[51m${ESC}[73mcombined${ESC}[0m`;
+  const output = renderToString(
+    defineComponent(() => () => <Text>{content}</Text>),
+    { color: "truecolor", width: 100 },
+  );
+
+  expect(output).toBe(content);
+});
+
+test.each([
+  ["truecolor", "\x1b[38;2;300;100;0mcolor\x1b[39m", "\x1b[38;2;300;100;0m"],
+  ["indexed color", "\x1b[38;5;300mcolor\x1b[39m", "\x1b[38;5;300m"],
+] as const)("preserve authored out-of-range %s as fallback SGR", (_name, content, open) => {
+  const output = renderToString(
+    defineComponent(() => () => <Text>{content}</Text>),
+    { color: "truecolor", width: 100 },
+  );
+
+  expect(output).toBe(`${open}color\x1b[39m`);
+});
+
+test("switches from slow to rapid blink without clearing the fallback first", () => {
+  const output = renderToString(
+    defineComponent(() => () => <Text>{"\x1b[5mA\x1b[6mB\x1b[0mC"}</Text>),
+    { color: "truecolor", width: 100 },
+  );
+
+  expect(output).toBe("\x1b[5mA\x1b[6mB\x1b[25mC");
+});
+
 // ESC#8 (DECALN) is an Fe-type sequence with an intermediate byte that sanitizeAnsi
 // strips at PAINT time. This is a WIDTH mis-measure: raw string-width("A\x1b#8BC") is
 // 2, but paint strips ESC#8 and emits the 3-column "ABC". Measuring the raw string

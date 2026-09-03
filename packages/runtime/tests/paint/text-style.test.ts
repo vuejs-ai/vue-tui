@@ -5,8 +5,8 @@ import {
   assertValidForegroundColor,
   isInvalidBackgroundColor,
   isInvalidForegroundColor,
-} from "../../src/paint/text-style.ts";
-import { createTerminalStyle } from "../../src/paint/terminal-style.ts";
+} from "../../src/text/text-style.ts";
+import { createTerminalStyle } from "../../src/text/terminal-style.ts";
 
 const terminalStyle = createTerminalStyle(1);
 const plainStyle = createTerminalStyle(0);

@@ -1,4 +1,5 @@
 import { type RendererOptions } from "vue";
+import type { AppContext } from "./context.ts";
 import {
   createBox,
   createComment as createCommentNode,
@@ -476,7 +477,9 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     if (!parent) return;
     const root = findRoot(child);
     try {
-      if (root) getRenderedTargetController(root.appContext)?.invalidateSubtree(child);
+      if (root) {
+        getRenderedTargetController(root.appContext as AppContext)?.invalidateSubtree(child);
+      }
     } catch {
       // Every target adapter already received its cleanup turn. A failing
       // disposer must not prevent Vue from detaching and freeing the host tree.

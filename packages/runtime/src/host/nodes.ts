@@ -1,5 +1,3 @@
-import type { AppContext } from "../vue/context.ts";
-
 export const NESTED_STATIC_ERROR = "<Static> cannot be nested inside another <Static>";
 
 export interface BoxProps {
@@ -32,7 +30,8 @@ export interface TuiRoot extends NodeBase {
   type: "root";
   parent: null;
   children: TuiNode[];
-  appContext: AppContext;
+  /** Opaque Vue-facing application identity, interpreted at the renderer edge. */
+  appContext: object;
 }
 
 export interface TuiBox extends NodeBase {
@@ -94,6 +93,27 @@ export type TuiInlineNode = TuiVirtualText | TuiTextLeaf | TuiComment;
 export type TuiContainer = TuiRoot | TuiBox | TuiStatic | TuiText | TuiVirtualText;
 export type TuiNode = TuiContainer | TuiTextLeaf | TuiComment;
 
+/**
+ * Collect the visible source text beneath one text host without interpreting
+ * it. A caller-owned normalizer can preserve text-boundary semantics without
+ * making host depend on text processing.
+ */
+export function flattenTextLeaves(
+  node: TuiText | TuiVirtualText,
+  normalize: (text: string) => string = (text) => text,
+): string {
+  if (node.style.display === "none") return "";
+  let output = "";
+  for (const child of node.children) {
+    if (child.type === "text-leaf") {
+      output += child.value;
+    } else if (child.type === "tui-virtual-text") {
+      output += flattenTextLeaves(child, normalize);
+    }
+  }
+  return normalize(output);
+}
+
 // Host identity is nominal inside one runtime instance. Structural checks such
 // as `typeof value.type === "string"` can mistake an ordinary Vue component's
 // public prop for a renderer node, while this registry also recognizes direct
@@ -112,7 +132,7 @@ export function isTuiNode(value: unknown): value is TuiNode {
 // Constructors take the bare minimum. `layout/` keeps their engine state in a
 // private node-to-engine map, so host identity remains engine-independent.
 
-export function createRoot(appContext: AppContext): TuiRoot {
+export function createRoot(appContext: object): TuiRoot {
   return trackTuiNode({
     type: "root",
     parent: null,

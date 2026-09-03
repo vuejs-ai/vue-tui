@@ -1,5 +1,5 @@
 import { inject, readonly, shallowReactive, type DeepReadonly, type InjectionKey } from "vue";
-import type { TerminalStyle } from "./paint/terminal-style.ts";
+import type { TerminalStyle } from "./text/terminal-style.ts";
 import { MAX_LAYOUT_VALUE } from "./layout/numeric-limits.ts";
 import type {
   ResolvedLiveDimensions,

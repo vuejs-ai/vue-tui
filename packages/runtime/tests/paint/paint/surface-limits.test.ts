@@ -8,7 +8,7 @@ import {
   assertPaintSurfaceSize,
 } from "../../../src/paint/surface-limits.ts";
 import { paint, releasePaintCaches } from "../../../src/paint/paint.ts";
-import { createTerminalStyle } from "../../../src/paint/terminal-style.ts";
+import { createTerminalStyle } from "../../../src/text/terminal-style.ts";
 
 const terminalStyle = createTerminalStyle(3);
 

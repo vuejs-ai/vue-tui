@@ -36,8 +36,9 @@ import {
 } from "./layout/yoga-allocation-ledger.ts";
 import { createCommitScheduler } from "./session/scheduler.ts";
 import { paint, releasePaintCaches } from "./paint/paint.ts";
+import type { Frame } from "./frame/frame.ts";
 import { sanitizeAnsiMultiline } from "./text/sanitize-ansi.ts";
-import { resolveTerminalStyle } from "./paint/terminal-style.ts";
+import { resolveTerminalStyle } from "./text/terminal-style.ts";
 import {
   findStatics,
   prepareStaticOutput,
@@ -45,6 +46,7 @@ import {
 } from "./paint/static-channel.ts";
 import { createFrameWriter } from "./surface/frame-writer.ts";
 import { createSurface, type Surface, type SurfaceRuntime } from "./surface/surface.ts";
+import { encodeFrame } from "./surface/frame-encoder.ts";
 import {
   createOutputCoordinator,
   type CoordinatedWriteResult,
@@ -61,7 +63,7 @@ import {
 import { nextLineEscape } from "./surface/cursor-helpers.ts";
 import { INTERNAL_RENDER_OBSERVER } from "./api/render-observer.ts";
 import { bsu, esu, shouldSynchronize } from "./terminal/write-synchronized.ts";
-import { emitTestEvent, RUNTIME_TEST_EVENT } from "./api/test-events.ts";
+import { emitTestEvent, hasTestEventSink, RUNTIME_TEST_EVENT } from "./api/test-events.ts";
 import { AppContextKey, StdinContextKey, type AppContext } from "./vue/context.ts";
 import {
   InternalRenderSessionKey,
@@ -108,7 +110,7 @@ import {
   getInternalMountOptions,
   type InternalMountOptions,
 } from "./api/internal-mount-options.ts";
-import { normalizeColorOption } from "./color-profile.ts";
+import { normalizeColorOption } from "./frame/color-profile.ts";
 
 export {
   createInternalMountOptions,
@@ -1985,17 +1987,19 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       }
 
       function presentFrame(
-        output: string,
+        frame: Frame | undefined,
+        encoded: string | undefined,
+        staticOutput: string,
         preparedStatic: PreparedStaticOutput,
         staticHooks?: {
           readonly onHandoff: () => void;
           readonly onPrepared: () => void;
         },
       ): boolean {
-        const staticOutput = preparedStatic.output;
         return outputSurface.present(
           {
-            frame: output,
+            frame,
+            ...(encoded === undefined ? {} : { encoded }),
             history: {
               output: staticOutput,
               handoff(onHandoff) {
@@ -2016,16 +2020,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         width: number,
         viewportRows?: number,
         geometry?: InternalGeometryPaintFrame,
-      ): string {
-        const output = paint(tuiRoot, {
+      ): Frame | undefined {
+        const frame = paint(tuiRoot, {
           layout,
           terminalStyle: renderSession.terminalStyle,
           viewport: viewportRows === undefined ? undefined : { width, height: viewportRows },
           geometry,
         });
-        // Keep bounded output within the rows its surface protocol can safely
-        // address even if a paint implementation returns excess rows.
-        return outputSurface.limitFrame(output, viewportRows);
+        // `Frame` cannot have zero rows. Still paint to collect geometry, then
+        // omit that synthetic one-row frame from an empty at-most viewport.
+        return viewportRows === 0 ? undefined : frame;
       }
 
       let blockedFrameRetryPending = false;
@@ -2051,8 +2055,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           accept: () => void,
           abandon: (options: { readonly physicalFailure: boolean }) => void,
         ) => void;
-        readonly markStaticHanded: (frame: string) => void;
-        readonly markFrameWritten: (frame: string) => void;
+        readonly markStaticHanded: (frame: Frame | undefined, encoded?: string) => void;
+        readonly markFrameWritten: (frame: Frame | undefined, encoded?: string) => void;
         readonly capturePostStaticRollback: () => void;
       }
 
@@ -2113,7 +2117,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // too (Vite's own diagnostics among it), and Fullscreen commits by line
         // diff, so "the last synchronized block" is neither reliably the app's
         // frame nor reliably a whole one.
-        let committedFrame = "";
+        let committedFrame: Frame | undefined;
+        let committedFrameEncoding: string | undefined;
         const initialRollback = createOutputStateRollback();
         let postStaticRollback: (() => void) | undefined;
 
@@ -2129,14 +2134,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
                 acceptCommit = accept;
                 abandonCommit = abandon;
               },
-              markStaticHanded(frame) {
+              markStaticHanded(frame, encoded) {
                 staticHanded = true;
                 frameWritten = true;
                 committedFrame = frame;
+                committedFrameEncoding = encoded;
               },
-              markFrameWritten(frame) {
+              markFrameWritten(frame, encoded) {
                 frameWritten = true;
                 committedFrame = frame;
+                committedFrameEncoding = encoded;
               },
               capturePostStaticRollback() {
                 postStaticRollback ??= createOutputStateRollback();
@@ -2149,7 +2156,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               acceptCommit();
               if (frameWritten) {
                 if (!terminalResumeInProgress) reportTerminalAcquired();
-                emitTestEvent(RUNTIME_TEST_EVENT.paintCommitted, { frame: committedFrame });
+                if (hasTestEventSink()) {
+                  emitTestEvent(RUNTIME_TEST_EVENT.paintCommitted, {
+                    frame:
+                      committedFrameEncoding ??
+                      (committedFrame === undefined ? "" : encodeFrame(committedFrame)),
+                  });
+                }
               }
               options.onAccepted?.();
             },
@@ -2226,8 +2239,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         try {
           mountedFocusController?.reconcileAfterLayout();
           preparedStatic = prepareStaticOutput(layout, renderSession.terminalStyle);
-          const staticOutput = preparedStatic.output;
-          const hasStaticOutput = staticOutput !== "" && staticOutput !== "\n";
+          const staticOutput = outputSurface.encodeHistory(preparedStatic.frames);
+          const hasStaticOutput = staticOutput !== "";
           const paintViewportRows =
             dynamicHeight.mode === "exact"
               ? dynamicHeight.rows
@@ -2237,11 +2250,15 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
           geometryFrame = mountedGeometry?.beginFrame();
           const frame = renderFrame(layout.computed, w, paintViewportRows, geometryFrame);
-          renderObserver?.onCommit?.({
-            dynamic: frame,
-            staticOutput: hasStaticOutput ? staticOutput : "",
-            phase: teardownStarted ? "teardown" : "update",
-          });
+          let encodedFrame: string | undefined;
+          if (renderObserver?.onCommit) {
+            encodedFrame = frame === undefined ? "" : encodeFrame(frame);
+            renderObserver.onCommit({
+              dynamic: encodedFrame,
+              staticOutput: hasStaticOutput ? staticOutput : "",
+              phase: teardownStarted ? "teardown" : "update",
+            });
+          }
           if (!outputSurface.isInputReady) {
             // A setup-owned managed-input demand may already own the physical
             // surface. Otherwise this idempotent acquisition happens only after
@@ -2251,12 +2268,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
           if (onRender) onRender({ renderTime: performance.now() - start });
           if (
-            presentFrame(frame, preparedStatic, {
-              onHandoff: () => hooks.markStaticHanded(frame),
+            presentFrame(frame, encodedFrame, staticOutput, preparedStatic, {
+              onHandoff: () => hooks.markStaticHanded(frame, encodedFrame),
               onPrepared: hooks.capturePostStaticRollback,
             })
           ) {
-            hooks.markFrameWritten(frame);
+            hooks.markFrameWritten(frame, encodedFrame);
           }
         } finally {
           layout.dispose();

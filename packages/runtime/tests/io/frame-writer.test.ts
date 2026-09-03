@@ -11,25 +11,19 @@ function chunks(terminal: ReturnType<typeof createTestTerminalBackend>): string[
 }
 
 describe("standard log updates", () => {
-  test("renders, replaces, and deduplicates frames", () => {
+  test("renders and replaces every requested frame", () => {
     const terminal = createTestTerminalBackend();
     const render = logUpdate.create(terminal, { showCursor: true });
 
     expect(render("Hello\n")).toBe(true);
-    expect(render("Hello\n")).toBe(false);
+    expect(render("Hello\n")).toBe(true);
     expect(render("World\n")).toBe(true);
 
-    expect(chunks(terminal)).toEqual(["Hello\n", ansiEscapes.eraseLines(2) + "World\n"]);
-  });
-
-  test("sync changes the physical baseline without writing", () => {
-    const terminal = createTestTerminalBackend();
-    const render = logUpdate.create(terminal, { showCursor: true });
-
-    render.sync("already visible\n");
-    expect(chunks(terminal)).toEqual([]);
-    expect(render.willRender("already visible\n")).toBe(false);
-    expect(render.willRender("changed\n")).toBe(true);
+    expect(chunks(terminal)).toEqual([
+      "Hello\n",
+      ansiEscapes.eraseLines(2) + "Hello\n",
+      ansiEscapes.eraseLines(2) + "World\n",
+    ]);
   });
 
   test("clear erases the current frame and reset only forgets it", () => {
@@ -98,14 +92,14 @@ describe("terminal cursor ownership", () => {
 });
 
 describe("frame writer", () => {
-  test("deduplicates and allows the same frame after clear or reset", () => {
+  test("writes each requested frame and resets its physical region", () => {
     const terminal = createTestTerminalBackend();
     const writer = createFrameWriter(terminal);
 
     writer.write("Hello\n");
     const afterFirst = chunks(terminal).length;
     writer.write("Hello\n");
-    expect(chunks(terminal)).toHaveLength(afterFirst);
+    expect(chunks(terminal).length).toBeGreaterThan(afterFirst);
 
     writer.clear();
     const afterClear = chunks(terminal).length;
@@ -116,20 +110,6 @@ describe("frame writer", () => {
     const afterReset = chunks(terminal).length;
     writer.write("Hello\n");
     expect(chunks(terminal).length).toBeGreaterThan(afterReset);
-  });
-
-  test("sync aligns both dedup layers without writing", () => {
-    const terminal = createTestTerminalBackend();
-    const writer = createFrameWriter(terminal);
-
-    writer.write("A\n");
-    const count = chunks(terminal).length;
-    writer.sync("B\n");
-    expect(chunks(terminal)).toHaveLength(count);
-    expect(writer.willRender("B\n")).toBe(false);
-
-    writer.write("A\n");
-    expect(chunks(terminal).length).toBeGreaterThan(count);
   });
 
   test("retries a write that throws", () => {
@@ -149,14 +129,12 @@ describe("frame writer", () => {
 
     writer.write("OLD\n");
     expect(() => writer.write("NEXT\n")).toThrow("injected write failure");
-    expect(writer.willRender("NEXT\n")).toBe(true);
 
     writer.write("NEXT\n");
     expect(chunksWritten.at(-1)).toContain("NEXT");
-    expect(writer.willRender("NEXT\n")).toBe(false);
   });
 
-  test("a transaction rollback restores the accepted baseline", () => {
+  test("a transaction rollback restores the previous region height", () => {
     const terminal = createTestTerminalBackend();
     const writer = createFrameWriter(terminal);
 
@@ -165,8 +143,8 @@ describe("frame writer", () => {
     writer.write("NEXT\n");
     rollback();
     rollback();
+    writer.write("FINAL\n");
 
-    expect(writer.willRender("OLD\n")).toBe(false);
-    expect(writer.willRender("NEXT\n")).toBe(true);
+    expect(chunks(terminal).at(-1)).toBe(ansiEscapes.eraseLines(2) + "FINAL\n");
   });
 });

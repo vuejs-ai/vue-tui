@@ -1,5 +1,5 @@
 import { tokenizeAnsi, hasAnsiControlCharacters, type AnsiToken } from "./ansi-tokenizer.ts";
-import type { TerminalStyle } from "../paint/terminal-style.ts";
+import type { TerminalStyle } from "./terminal-style.ts";
 
 const sgrParametersRegex = /^[\d:;]*$/;
 const singleLineControlCharactersRegex = /[\u0000-\u001f\u007f]/g;

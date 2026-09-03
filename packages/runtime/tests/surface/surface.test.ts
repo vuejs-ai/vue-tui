@@ -1,4 +1,6 @@
 import { expect, test } from "vite-plus/test";
+import { blankCell } from "../../src/frame/cell.ts";
+import { Frame } from "../../src/frame/frame.ts";
 import { createSurface, type Surface } from "../../src/surface/surface.ts";
 import type { FrameWriter } from "../../src/surface/frame-writer.ts";
 import type { SurfaceHistory, SurfaceRuntime } from "../../src/surface/surface-contract.ts";
@@ -6,6 +8,21 @@ import {
   createTestTerminalBackend,
   type TestTerminalBackend,
 } from "../../src/terminal/test/backend.ts";
+
+function frame(text: string): Frame {
+  const lines = text.split("\n");
+  const picture = new Frame(
+    Math.max(1, ...lines.map((line) => line.length)),
+    Math.max(1, lines.length),
+  );
+  for (let row = 0; row < lines.length; row++) {
+    const line = lines[row]!;
+    for (let column = 0; column < line.length; column++) {
+      picture.set(column, row, { ...blankCell, grapheme: line[column]! });
+    }
+  }
+  return picture;
+}
 
 function createRuntime(): {
   readonly runtime: SurfaceRuntime;
@@ -73,14 +90,8 @@ function createWriter(): { readonly frames: string[]; readonly writer: FrameWrit
       done() {},
       clear() {},
       reset() {},
-      sync(frame) {
-        frames.push(frame);
-      },
       isCursorHidden() {
         return false;
-      },
-      willRender() {
-        return true;
       },
       createRollback() {
         return () => {};
@@ -113,7 +124,7 @@ test.each([
   expect(surface.acceptsHistory).toBe(expected.history);
 });
 
-test("each surface supplies its own layout and frame bounds", () => {
+test("each surface supplies its own layout height", () => {
   const inline = createSurface("inline-terminal");
   const fullscreen = createSurface("fullscreen-terminal");
   const document = createSurface("final-stream");
@@ -121,9 +132,6 @@ test("each surface supplies its own layout and frame bounds", () => {
   expect(inline.layoutHeight(2)).toEqual({ mode: "at-most", rows: 2 });
   expect(fullscreen.layoutHeight(2)).toEqual({ mode: "exact", rows: 2 });
   expect(document.layoutHeight(2)).toEqual({ mode: "at-most", rows: 2 });
-  expect(inline.limitFrame("one\ntwo\nthree", 2)).toBe("one\ntwo");
-  expect(fullscreen.limitFrame("one\ntwo\nthree", 2)).toBe("one\ntwo\nthree");
-  expect(document.limitFrame("one\ntwo\nthree", 2)).toBe("one\ntwo");
 });
 
 test("Inline owns a bounded writer region and restores it around history", () => {
@@ -133,9 +141,9 @@ test("Inline owns a bounded writer region and restores it around history", () =>
   const { history: staticHistory } = history();
   surface.attachWriter(writer);
 
-  expect(surface.present({ frame: "screen", history: staticHistory }, runtime)).toBe(true);
-  expect(surface.present({ frame: "screen", history: staticHistory }, runtime)).toBe(false);
-  surface.handoffHistory(runtime.stdout, "note", runtime);
+  expect(surface.present({ frame: frame("screen"), history: staticHistory }, runtime)).toBe(true);
+  expect(surface.present({ frame: frame("screen"), history: staticHistory }, runtime)).toBe(false);
+  surface.handoffHistory("stdout", "note", runtime);
 
   expect(writes.map(({ data }) => data)).toEqual(["\x1bE", "note", "\x1bE"]);
   expect(frames).toEqual(["screen\n", "screen\n"]);
@@ -148,14 +156,16 @@ test("Fullscreen owns its terminal lease and fixed-viewport presentation", () =>
   const { history: staticHistory } = history();
   surface.attachWriter(writer);
 
-  expect(surface.present({ frame: "top\nbottom", history: staticHistory }, runtime)).toBe(true);
+  expect(surface.present({ frame: frame("top\nbottom"), history: staticHistory }, runtime)).toBe(
+    true,
+  );
 
   expect(surface.isInputReady).toBe(true);
   expect(terminal.isModeHeld("alternate-screen")).toBe(true);
   expect(terminal.isModeHeld("cursor-visibility")).toBe(true);
   expect(terminalWrites).toEqual(["\x1b[?1049h\x1b[H", "\x1b[?25l"]);
   expect(writes.at(-1)?.data).toContain("\x1b[2J");
-  expect(frames).toEqual(["top\nbottom"]);
+  expect(frames).toEqual([]);
 
   surface.dispose(runtime, { cleanExit: true, sync: true });
   expect(terminal.isModeHeld("alternate-screen")).toBe(false);
@@ -228,7 +238,7 @@ test.each([
     };
 
     expect(() =>
-      surface.present({ frame: "top\nbottom", history: history().history }, failingRuntime),
+      surface.present({ frame: frame("top\nbottom"), history: history().history }, failingRuntime),
     ).toThrow("terminal write failed after handoff");
     surface.abandonPendingOutput({ physicalStateUncertain: true });
     surface.dispose(failingRuntime, { cleanExit: false, sync: true });
@@ -244,7 +254,7 @@ test("Document hands history off immediately and writes one final clean frame", 
   const { history: staticHistory, handed } = history("past\n");
   surface.attachWriter(writer);
 
-  expect(surface.present({ frame: "latest", history: staticHistory }, runtime)).toBe(true);
+  expect(surface.present({ frame: frame("latest"), history: staticHistory }, runtime)).toBe(true);
   surface.dispose(runtime, { cleanExit: true, sync: false });
 
   expect(handed).toEqual(["past\n"]);
@@ -269,7 +279,7 @@ test("Fullscreen retains handed leases across output rollback", () => {
   };
 
   const rollback = surface.createRollback();
-  surface.present({ frame: "a", history: history().history }, pendingRuntime);
+  surface.present({ frame: frame("a"), history: history().history }, pendingRuntime);
   for (const write of terminalWrites) {
     write.attempt?.();
     write.accept?.();
@@ -298,7 +308,7 @@ test("Fullscreen restores only the lease whose handoff started", () => {
     },
   };
 
-  surface.present({ frame: "a", history: history().history }, pendingRuntime);
+  surface.present({ frame: frame("a"), history: history().history }, pendingRuntime);
   // The alternate-screen segment started stream.write(); the captured cursor
   // segment did not. Only the former can have changed caller-owned TTY state.
   attempts[0]?.();
@@ -320,7 +330,7 @@ test("Fullscreen restores the screen when the writer throws on release", () => {
     },
   });
 
-  surface.present({ frame: "a", history: history().history }, runtime);
+  surface.present({ frame: frame("a"), history: history().history }, runtime);
   // One failing release must not cost the terminal its main screen or cursor,
   // and must still reach the caller as the teardown failure it is.
   expect(() => surface.dispose(runtime, { cleanExit: true, sync: false })).toThrow(

@@ -5,7 +5,7 @@ import type { TextProps } from "../vue/components/text-props.ts";
 export { createApp, type TuiApp } from "../render.ts";
 export type { MountOptions } from "./mount-options.ts";
 export { renderToString, type RenderToStringOptions } from "../render-to-string.ts";
-export type { ColorProfile } from "../color-profile.ts";
+export type { ColorProfile } from "../frame/color-profile.ts";
 
 // Publish only the stable author-facing constructor shape. Exposing the SFC's
 // generated `DefineComponent` type bakes the build-time Vue patch release's
