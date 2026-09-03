@@ -1,5 +1,5 @@
 import type { Readable, Writable } from "node:stream";
-import type { ColorProfile } from "../color-profile.ts";
+import type { ColorProfile } from "../frame/color-profile.ts";
 import type { RenderMode } from "../render-session.ts";
 
 /** Options for mounting one terminal application. */

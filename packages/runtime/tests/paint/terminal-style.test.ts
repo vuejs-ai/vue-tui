@@ -1,6 +1,6 @@
 import { expect, test } from "vite-plus/test";
-import { createTerminalStyle, resolveTerminalStyle } from "../../src/paint/terminal-style.ts";
-import { applyChalk } from "../../src/paint/text-style.ts";
+import { createTerminalStyle, resolveTerminalStyle } from "../../src/text/terminal-style.ts";
+import { applyChalk } from "../../src/text/text-style.ts";
 
 function ttyWithDepth(depth: number) {
   return {

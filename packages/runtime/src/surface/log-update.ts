@@ -13,9 +13,7 @@ export type LogUpdate = {
   clear: () => void;
   done: () => void;
   reset: (options?: ResetOptions) => void;
-  sync: (str: string) => void;
   isCursorHidden: () => boolean;
-  willRender: (str: string) => boolean;
   /** Restore bookkeeping when a captured transaction was not handed off. */
   createRollback: () => () => void;
   (str: string): boolean;
@@ -84,48 +82,35 @@ const createStandard = (
   }: { showCursor?: boolean; write?: LogUpdateWrite } = {},
 ): LogUpdate => {
   let previousLineCount = 0;
-  let previousOutput = "";
   const cursor = createCursorOwnership(terminal, output, write, showCursorOption);
 
   const render = (str: string) => {
     cursor.hideForRender();
-    if (str === previousOutput) return false;
     const lines = str.split("\n");
     write(ansiEscapes.eraseLines(previousLineCount) + str);
-    previousOutput = str;
     previousLineCount = lines.length;
     return true;
   };
 
   render.clear = () => {
     write(ansiEscapes.eraseLines(previousLineCount));
-    previousOutput = "";
     previousLineCount = 0;
   };
 
   render.done = () => {
-    previousOutput = "";
     previousLineCount = 0;
     cursor.done();
   };
 
   render.reset = (options?: ResetOptions) => {
-    previousOutput = "";
     previousLineCount = 0;
     cursor.reset(options?.cursorHidden);
   };
 
-  render.sync = (str: string) => {
-    previousOutput = str;
-    previousLineCount = str.split("\n").length;
-  };
-
   render.isCursorHidden = cursor.isHidden;
-  render.willRender = (str: string) => str !== previousOutput;
   render.createRollback = () => {
     const snapshot = {
       previousLineCount,
-      previousOutput,
       cursorHidden: cursor.isHidden(),
     };
     let active = true;
@@ -133,7 +118,6 @@ const createStandard = (
       if (!active) return;
       active = false;
       previousLineCount = snapshot.previousLineCount;
-      previousOutput = snapshot.previousOutput;
       cursor.reset(snapshot.cursorHidden);
     };
   };

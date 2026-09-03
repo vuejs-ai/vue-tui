@@ -1,4 +1,5 @@
 import type { TerminalOutput } from "../terminal/backend.ts";
+import { encodeFrame } from "./frame-encoder.ts";
 import {
   SurfaceBase,
   type SurfaceDisposeOptions,
@@ -15,10 +16,6 @@ export class DocumentSurface extends SurfaceBase {
 
   layoutHeight(viewportRows: number | null): SurfaceLayoutHeight {
     return viewportRows === null ? { mode: "unbounded" } : { mode: "at-most", rows: viewportRows };
-  }
-
-  limitFrame(frame: string, viewportRows?: number): string {
-    return viewportRows === undefined ? frame : frame.split("\n").slice(0, viewportRows).join("\n");
   }
 
   present(presentation: SurfacePresentation, _runtime: SurfaceRuntime): boolean {
@@ -55,7 +52,10 @@ export class DocumentSurface extends SurfaceBase {
   }
 
   private finalFrame(): string | undefined {
-    const frame = this.lastFrame;
-    return frame === "" || frame.endsWith("\n") ? frame : `${frame}\n`;
+    const frame = this.previousFrame;
+    if (!frame) return undefined;
+    const output = encodeFrame(frame);
+    if (output === "") return undefined;
+    return output.endsWith("\n") ? output : `${output}\n`;
   }
 }

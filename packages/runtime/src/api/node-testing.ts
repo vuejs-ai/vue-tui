@@ -1,6 +1,7 @@
-import { createTerminalStyle, type TerminalStyle } from "../paint/terminal-style.ts";
+import type { TerminalStyle } from "../text/terminal-style.ts";
 import { createNodeTerminalBackend } from "../terminal/node/backend.ts";
 import { getSharedInputIngress } from "../input/shared-input-ingress.ts";
+import { createTerminalStyle } from "../text/terminal-style.ts";
 
 /** Node-backed facts needed by Runtime's deterministic test-host bridge. */
 export interface NodeTestHostMountFacts {

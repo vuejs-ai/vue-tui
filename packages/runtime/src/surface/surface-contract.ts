@@ -1,6 +1,8 @@
+import type { Frame } from "../frame/frame.ts";
 import type { TerminalBackend, TerminalOutput } from "../terminal/backend.ts";
 import type { FrameWriter } from "./frame-writer.ts";
 import type { ResolvedLiveSurface } from "./surface-types.ts";
+import { encodeFrameHistory } from "./frame-encoder.ts";
 
 /** Static/history output already prepared by Runtime's host tree. */
 export interface SurfaceHistory {
@@ -10,7 +12,9 @@ export interface SurfaceHistory {
 
 /** One dynamic frame plus any history that must be handed off beside it. */
 export interface SurfacePresentation {
-  readonly frame: string;
+  readonly frame: Frame | undefined;
+  /** Complete encoding already requested by an optional observer. */
+  readonly encoded?: string;
   readonly history: SurfaceHistory;
   readonly onHistoryHandoff?: () => void;
   readonly onHistoryPrepared?: () => void;
@@ -73,7 +77,7 @@ export interface Surface {
   readonly isInputReady: boolean;
   attachWriter(writer: FrameWriter): void;
   layoutHeight(viewportRows: number | null): SurfaceLayoutHeight;
-  limitFrame(frame: string, viewportRows?: number): string;
+  encodeHistory(frames: readonly Frame[]): string;
   present(presentation: SurfacePresentation, runtime: SurfaceRuntime): boolean;
   handoffHistory(output: TerminalOutput, data: string, runtime: SurfaceRuntime): void;
   suspend(runtime: SurfaceRuntime): void;
@@ -94,10 +98,15 @@ export abstract class SurfaceBase implements Surface {
 
   private writer: FrameWriter | undefined;
 
-  private frame = "";
+  private frame: Frame | undefined;
+  private frameNeedsTerminalLineAdvance = false;
 
-  protected get lastFrame(): string {
+  protected get previousFrame(): Frame | undefined {
     return this.frame;
+  }
+
+  protected get needsTerminalLineAdvance(): boolean {
+    return this.frameNeedsTerminalLineAdvance;
   }
 
   get isInputReady(): boolean {
@@ -118,21 +127,26 @@ export abstract class SurfaceBase implements Surface {
     return this.writer;
   }
 
-  protected rememberFrame(frame: string): void {
+  protected rememberFrame(frame: Frame | undefined, needsTerminalLineAdvance = false): void {
     this.frame = frame;
+    this.frameNeedsTerminalLineAdvance = needsTerminalLineAdvance;
   }
 
   protected forgetFrame(): void {
-    this.rememberFrame("");
+    this.rememberFrame(undefined);
   }
 
   protected createFrameRollback(): () => void {
-    const frame = this.frame;
+    const snapshot = {
+      frame: this.frame,
+      frameNeedsTerminalLineAdvance: this.frameNeedsTerminalLineAdvance,
+    };
     let active = true;
     return () => {
       if (!active) return;
       active = false;
-      this.frame = frame;
+      this.frame = snapshot.frame;
+      this.frameNeedsTerminalLineAdvance = snapshot.frameNeedsTerminalLineAdvance;
     };
   }
 
@@ -149,7 +163,11 @@ export abstract class SurfaceBase implements Surface {
   }
 
   abstract layoutHeight(viewportRows: number | null): SurfaceLayoutHeight;
-  abstract limitFrame(frame: string, viewportRows?: number): string;
+
+  encodeHistory(frames: readonly Frame[]): string {
+    return encodeFrameHistory(frames);
+  }
+
   abstract present(presentation: SurfacePresentation, runtime: SurfaceRuntime): boolean;
   abstract handoffHistory(output: TerminalOutput, data: string, runtime: SurfaceRuntime): void;
   abstract suspend(runtime: SurfaceRuntime): void;

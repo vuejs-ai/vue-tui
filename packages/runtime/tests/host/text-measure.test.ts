@@ -2,9 +2,13 @@ import { defineComponent, h } from "vue";
 import { expect, test } from "vite-plus/test";
 import stringWidth from "string-width";
 import wrapAnsi from "wrap-ansi";
-import { createText, createTextLeaf, createVirtualText } from "../../src/host/nodes.ts";
 import {
-  flattenLeaves,
+  createText,
+  createTextLeaf,
+  createVirtualText,
+  flattenTextLeaves,
+} from "../../src/host/nodes.ts";
+import {
   measureTextNatural,
   safeSliceEnd,
   sliceAnsiPreservingIntensity,
@@ -21,17 +25,17 @@ function stripAnsi(s: string): string {
   return s.replace(/\x1B\[[0-9;]*[A-Za-z]/g, "");
 }
 
-test("flattenLeaves concatenates a flat text node", () => {
+test("flattenTextLeaves concatenates a flat text node", () => {
   const t = createText();
   const a = createTextLeaf("hello ");
   const b = createTextLeaf("world");
   a.parent = t;
   b.parent = t;
   t.children = [a, b];
-  expect(flattenLeaves(t)).toBe("hello world");
+  expect(flattenTextLeaves(t)).toBe("hello world");
 });
 
-test("flattenLeaves recurses into virtual-text", () => {
+test("flattenTextLeaves recurses into virtual-text", () => {
   const t = createText();
   const v = createVirtualText();
   const a = createTextLeaf("a");
@@ -41,7 +45,7 @@ test("flattenLeaves recurses into virtual-text", () => {
   v.parent = t;
   t.children = [a, v];
   a.parent = t;
-  expect(flattenLeaves(t)).toBe("ab");
+  expect(flattenTextLeaves(t)).toBe("ab");
 });
 
 test("wrapText splits on width", () => {
@@ -369,4 +373,20 @@ test("terminal-viewport empty write does not corrupt existing wide characters", 
 
   const output = renderToString(App, { width: 4 });
   expect(stripAnsi(output)).toBe("あい");
+});
+
+test("renderToString retains colon-form colors and OSC 8 parameters", () => {
+  const App = defineComponent(
+    () => () =>
+      h(
+        Text,
+        null,
+        () =>
+          "\x1b[38:2::1:2:3mcolon\x1b[39m \x1b]8;id=report;https://example.com\x07link\x1b]8;;\x07",
+      ),
+  );
+
+  expect(renderToString(App, { color: "truecolor" })).toBe(
+    "\x1b[38;2;1;2;3mcolon\x1b[39m \x1b]8;id=report;https://example.com\x07link\x1b]8;;\x07",
+  );
 });

@@ -1,6 +1,7 @@
 import { shallowRef, type ShallowRef } from "vue";
 import type { AppContext } from "../vue/context.ts";
 import type { TuiBox, TuiNode } from "../host/nodes.ts";
+import type { PaintGeometryFrame } from "../paint/geometry.ts";
 import type { RenderedTargetTransactionHost } from "./rendered-target.ts";
 
 export type InternalBoxSizeState =
@@ -23,11 +24,7 @@ export interface InternalBoxSizeBinding {
   dispose(): void;
 }
 
-export interface InternalGeometryPaintFrame {
-  /** True when this target or one of its descendants was observed at frame start. */
-  hasObservedSubtree(target: TuiNode): boolean;
-  record(target: TuiBox, width: number, height: number, left: number, top: number): void;
-  recordSubtree(target: TuiNode, status: "hidden" | "unavailable"): void;
+export interface InternalGeometryPaintFrame extends PaintGeometryFrame {
   commit(): void;
   discard(): void;
 }

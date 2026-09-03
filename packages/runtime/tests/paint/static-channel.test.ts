@@ -8,7 +8,8 @@ import {
   findStatics,
   prepareStaticOutput as prepareStaticOutputForStyle,
 } from "../../src/paint/static-channel.ts";
-import { createTerminalStyle } from "../../src/paint/terminal-style.ts";
+import { createTerminalStyle } from "../../src/text/terminal-style.ts";
+import { encodeFrameHistory } from "../../src/surface/frame-encoder.ts";
 
 const terminalStyle = createTerminalStyle(3);
 const prepareStaticOutput = (root: Parameters<typeof findStatics>[0], columns: number) => {
@@ -30,6 +31,9 @@ const prepareStaticOutput = (root: Parameters<typeof findStatics>[0], columns: n
     detachYoga(dynamicRoot);
   }
 };
+
+const output = (prepared: ReturnType<typeof prepareStaticOutputForStyle>): string =>
+  encodeFrameHistory(prepared.frames);
 
 const ops = buildNodeOps({ onCommit: () => {} });
 
@@ -62,7 +66,7 @@ test("accepting an output-free Static batch leaves its producer open", () => {
 
   const prepared = prepareStaticOutput(stat, 80);
 
-  expect(prepared.output).toBe("");
+  expect(output(prepared)).toBe("");
   expect(stat.commitState).toBe("open");
   expect(accepted).toBe(0);
 
@@ -87,13 +91,13 @@ test("a later non-empty preparation accepts an output-free Static producer once"
 
   try {
     const first = prepareStaticOutput(stat, 80);
-    expect(first.output).toBe("");
+    expect(output(first)).toBe("");
     expect(stat.commitState).toBe("open");
 
     ops.remove(anchor);
     addText(stat, "later");
     const retry = prepareStaticOutput(stat, 80);
-    expect(retry.output).toBe("later\n");
+    expect(output(retry)).toBe("later\n");
     retry.accept();
     expect(stat.commitState).toBe("accepted");
     expect(accepted).toBe(1);
@@ -122,7 +126,7 @@ test("an output-free preparation cannot abandon content produced later", () => {
 
     expect(stat.commitState).toBe("open");
     const readyAttempt = prepareStaticOutput(stat, 80);
-    expect(readyAttempt.output).toBe("ready\n");
+    expect(output(readyAttempt)).toBe("ready\n");
     readyAttempt.accept();
     expect(stat.commitState).toBe("accepted");
     expect(accepted).toBe(1);
@@ -141,7 +145,7 @@ test("an indeterminate write abandons the whole instance, including later child 
 
   try {
     const attempted = prepareStaticOutput(stat, 80);
-    expect(attempted.output).toBe("first\n");
+    expect(output(attempted)).toBe("first\n");
     ops.remove(original);
     addText(stat, "replacement");
     attempted.abandon();
@@ -150,7 +154,7 @@ test("an indeterminate write abandons the whole instance, including later child 
     expect(accepted).toBe(0);
 
     const later = prepareStaticOutput(stat, 80);
-    expect(later.output).toBe("");
+    expect(output(later)).toBe("");
     later.accept();
     expect(stat.commitState).toBe("abandoned");
     expect(accepted).toBe(0);
@@ -186,7 +190,7 @@ test("a non-empty sibling commits without consuming an output-free Static produc
 
   try {
     const first = prepareStaticOutput(root, 80);
-    expect(first.output).toBe("ready\n");
+    expect(output(first)).toBe("ready\n");
     first.accept();
     expect(ready.commitState).toBe("accepted");
     expect(pending.commitState).toBe("open");
@@ -194,7 +198,7 @@ test("a non-empty sibling commits without consuming an output-free Static produc
     ops.remove(pendingAnchor);
     addText(pending, "later");
     const second = prepareStaticOutput(root, 80);
-    expect(second.output).toBe("later\n");
+    expect(output(second)).toBe("later\n");
     second.accept();
     expect(pending.commitState).toBe("accepted");
   } finally {
@@ -228,7 +232,7 @@ test("acceptance seals every Static region before any callback and continues aft
 
   try {
     const prepared = prepareStaticOutput(root, 80);
-    expect(prepared.output).toBe("first\nsecond\n");
+    expect(output(prepared)).toBe("first\nsecond\n");
     expect(() =>
       prepared.accept(() => {
         events.push("before");
@@ -244,4 +248,26 @@ test("acceptance seals every Static region before any callback and continues aft
     disposeStatic(first);
     disposeStatic(second);
   }
+});
+
+test("a blank multi-row Static batch commits its producer", () => {
+  const stat = ops.createElement("tui-static") as ReturnType<typeof createStatic>;
+  const anchor = ops.createComment("");
+  ops.insert(anchor, stat, null);
+  addText(stat, " \n ");
+  let accepted = 0;
+  stat.onAccepted = () => {
+    accepted++;
+  };
+
+  const prepared = prepareStaticOutput(stat, 80);
+
+  // Blank rows are still output: they advance the cursor and occupy history, so
+  // the producer must settle rather than stay open and repaint forever.
+  expect(output(prepared)).not.toBe("");
+  prepared.accept();
+  expect(stat.commitState).toBe("accepted");
+  expect(accepted).toBe(1);
+
+  disposeStatic(stat);
 });

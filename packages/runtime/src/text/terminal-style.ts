@@ -1,14 +1,14 @@
 import { Chalk, type ChalkInstance } from "chalk";
-import type { ColorProfile } from "../color-profile.ts";
+import type { ColorProfile } from "../frame/color-profile.ts";
 
 export type ColorLevel = 0 | 1 | 2 | 3;
 
 /** Resolved, session-owned text styling capability. */
 export interface TerminalStyle {
-  /** Maximum color capability. May be zero while non-color attributes remain enabled. */
+  /** Maximum color capability. Non-color SGR may remain available at zero. */
   readonly colorLevel: ColorLevel;
   readonly chalk: ChalkInstance;
-  /** Stable identity for paint caches whose bytes depend on this capability. */
+  /** Stable identity for caches whose cells depend on this capability. */
   readonly cacheKey: string;
 }
 

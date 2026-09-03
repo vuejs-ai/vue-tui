@@ -55,20 +55,9 @@ The Kitty pop is written whenever stdout is writable, including after stdin is g
 
 ## 6. Make paint return a frame
 
-**Today.** `paint()` returns a `string`. `Output.get()` in `paint/paint.ts` builds a `StyledChar[][]`, fills it, joins it with newlines and discards it; the shared `blankCell` at `paint/paint.ts:317` exists to avoid one object per cell. `StyledChar` carries its style as `AnsiCode[]` — an array of `{ code, endCode }` objects. Four separate stores hold "the previous frame": `SurfaceBase`'s `frame` in `surface/surface-contract.ts`, `FrameWriter`'s `lastFrame`, `log-update`'s `previousOutput`, and the Fullscreen baseline fields. `FrameWriter.sync()`'s comment records the defect two of them produced by drifting apart. Inline compares whole strings; Fullscreen splits on newlines and compares rows.
+`paint()` returns a compact `Frame` whose parallel arrays hold graphemes, display widths, structured colours and attributes, ordered fallback SGR pairs, and OSC 8 links. `Frame.diff` is the only rendered-picture comparison. The encoder lives in `surface/`, and each surface retains one previous frame.
 
-**Steps.**
-
-1. Add coverage for every SGR attribute the current pipeline preserves before changing its representation, including numeric attributes without a dedicated off code and colon-form styles.
-2. Create `frame/` — `Cell`, `Style`, `Frame`, `diff` — and port `Output` to fill it in the same step, with a temporary encoder so every caller still receives the string it expects. Common attributes use `attrs`; unmodelled authored attributes use the exact `extraSgr` fallback. Choose the memory layout against `benchmarks/runtime/renderer.bench.ts`.
-3. Move the encoder into `surface/` and have each surface encode its own diff. The temporary encoder goes away with this step.
-4. Collapse the four previous-frame stores into one per surface, and with them `FrameWriter.sync` and the desync it exists to prevent.
-
-**Done when.** `paint()` returns a `Frame` — plain data holding one picture's worth of cells, with structured style stored inline and exact fallback SGR retained — and `Frame.diff` is the only place that answers "what changed".
-
-**Verify.** `benchmarks/runtime/renderer.bench.ts` before and after: two frames are alive at once, so this is the step where a naive object grid would show up. The hyperlink and authored-SGR cases in `tests/paint/sanitize-ansi.test.ts` must pass. The PTY suites are the check that the screen is identical even where the bytes are not.
-
-**Watch for.** The screen stays the same only if `Cell` keeps [everything the current pipeline preserves](./architecture.md#cell--one-character-cell). `@alcalzone/ansi-tokenize` pairs 1–4, 7–9 and 53 with dedicated off codes and carries other numeric SGR with the generic reset, so `attrs` alone is insufficient; `extraSgr` preserves the remainder. `Cell.link` is required for OSC 8 for the same reason. Emitted bytes may change because the encoder regenerates style transitions, but the resulting screen and active attributes do not. Parsing ANSI out of user-supplied `<Text>` content stays.
+Authored SGR without a structured field remains in `extraSgr`, including complete colon-form underline styles and underline colours. The surface encoder uses each pair's terminator and restores structured attributes when a generic reset also clears them.
 
 ## 7. Turn the mount closure into a session object
 

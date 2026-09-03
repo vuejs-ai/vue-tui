@@ -1,5 +1,7 @@
 import { hideCursorEscape, nextLineEscape, showCursorEscape } from "./cursor-helpers.ts";
+import { Frame } from "../frame/frame.ts";
 import type { TerminalOutput } from "../terminal/backend.ts";
+import { encodeFrame } from "./frame-encoder.ts";
 import {
   SurfaceBase,
   type SurfaceDisposeOptions,
@@ -15,34 +17,44 @@ export class InlineSurface extends SurfaceBase {
   readonly isLive = true;
 
   private regionStarted = false;
-  private frameToRender = "";
-
-  private get needsTerminalLineAdvance(): boolean {
-    const frame = this.frameToRender;
-    return frame !== "" && !frame.endsWith("\n");
-  }
 
   layoutHeight(viewportRows: number | null): SurfaceLayoutHeight {
     return viewportRows === null ? { mode: "unbounded" } : { mode: "at-most", rows: viewportRows };
   }
 
-  limitFrame(frame: string, viewportRows?: number): string {
-    return viewportRows === undefined ? frame : frame.split("\n").slice(0, viewportRows).join("\n");
-  }
-
   present(presentation: SurfacePresentation, runtime: SurfaceRuntime): boolean {
     const writer = this.getWriter();
+    const frame = presentation.frame;
     const staticOutput = presentation.history.output;
     const hasStaticOutput = staticOutput !== "";
-    if (presentation.frame !== "" || hasStaticOutput) this.ensureRegionStart(runtime);
+    const previousFrame = this.previousFrame;
+    const difference = frame ? Frame.diff(previousFrame, frame) : undefined;
+    const frameChanged =
+      difference === undefined
+        ? previousFrame !== undefined
+        : difference.sizeChanged || difference.rows.length > 0;
+    const hasOutput = frame !== undefined && (frame.hasContent() || frame.height > 1);
+    const hadOutput =
+      previousFrame !== undefined && (previousFrame.hasContent() || previousFrame.height > 1);
+
+    if (!hasStaticOutput && !frameChanged) return false;
+    if (!hasStaticOutput && !hasOutput && !hadOutput) {
+      this.rememberFrame(frame);
+      return false;
+    }
+
+    const encoded = presentation.encoded ?? (frame ? encodeFrame(frame) : "");
+    if (encoded !== "" || hasStaticOutput) this.ensureRegionStart(runtime);
 
     // A frame that fills the viewport gets no trailing newline. A non-TTY
     // stream always receives one so its output remains ordinary line history.
     const fillsViewport =
       runtime.isStdoutTty &&
       runtime.viewportRows !== null &&
-      this.frameHeight(presentation.frame) >= runtime.viewportRows;
-    const frameToRender = fillsViewport ? presentation.frame : `${presentation.frame}\n`;
+      frame !== undefined &&
+      hasOutput &&
+      frame.height >= runtime.viewportRows;
+    const frameToRender = fillsViewport ? encoded : `${encoded}\n`;
 
     let frameWritten = hasStaticOutput;
     if (hasStaticOutput) {
@@ -53,17 +65,11 @@ export class InlineSurface extends SurfaceBase {
         writer.write(frameToRender);
       });
     } else {
-      // Compare the logical frame so the initial empty render does not acquire
-      // a cursor lease merely because log-update has an internal sentinel.
-      const willRender = writer.willRender(frameToRender);
-      if (presentation.frame !== this.lastFrame) {
-        frameWritten = true;
-        if (willRender) runtime.runSynchronizedOutput(() => writer.write(frameToRender));
-        else writer.write(frameToRender);
-      }
+      frameWritten = true;
+      runtime.runSynchronizedOutput(() => writer.write(frameToRender));
     }
 
-    this.rememberInlineFrame(presentation.frame, frameToRender);
+    this.rememberFrame(frame, frameToRender !== "" && !frameToRender.endsWith("\n"));
     return frameWritten;
   }
 
@@ -104,7 +110,7 @@ export class InlineSurface extends SurfaceBase {
       // Suspension must release the remaining resources even if writer state is
       // already unusable after an interrupted stream transaction.
     }
-    this.forgetInlineFrame();
+    this.forgetFrame();
     this.regionStarted = false;
     runtime.reportTerminalReleased();
   }
@@ -140,27 +146,25 @@ export class InlineSurface extends SurfaceBase {
         if (resize.currentRows === null) return;
         runtime.write(runtime.stdout, `\u001b[${resize.currentRows}B${nextLineEscape}`);
         writer.reset();
-        this.forgetInlineFrame();
+        this.forgetFrame();
       });
       return;
     }
     if (resize.currentColumns < resize.previousColumns) {
       writer.clear();
-      this.forgetInlineFrame();
+      this.forgetFrame();
     }
   }
 
   override createRollback(): () => void {
     const rollbackBase = super.createRollback();
     const previousRegionStarted = this.regionStarted;
-    const previousFrameToRender = this.frameToRender;
     let active = true;
     return () => {
       if (!active) return;
       active = false;
       rollbackBase();
       this.regionStarted = previousRegionStarted;
-      this.frameToRender = previousFrameToRender;
     };
   }
 
@@ -174,21 +178,14 @@ export class InlineSurface extends SurfaceBase {
   }
 
   private restoreLastOutput(): void {
-    // `||` deliberately treats the empty initial physical baseline as absent.
-    this.getWriter().write(this.frameToRender || `${this.lastFrame}\n`);
-  }
-
-  private rememberInlineFrame(frame: string, frameToRender: string): void {
-    this.rememberFrame(frame);
-    this.frameToRender = frameToRender;
-  }
-
-  private forgetInlineFrame(): void {
-    this.forgetFrame();
-    this.frameToRender = "";
-  }
-
-  private frameHeight(frame: string): number {
-    return frame === "" ? 0 : frame.split("\n").length;
+    const frame = this.previousFrame;
+    const output = frame ? encodeFrame(frame) : "";
+    if (output === "") {
+      this.getWriter().write("\n");
+      return;
+    }
+    this.getWriter().write(
+      this.needsTerminalLineAdvance || output.endsWith("\n") ? output : `${output}\n`,
+    );
   }
 }

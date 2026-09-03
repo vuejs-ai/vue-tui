@@ -8,7 +8,7 @@ import {
   resolveLiveSurface,
   type LiveHostInput,
 } from "../src/render-session.ts";
-import { createTerminalStyle } from "../src/paint/terminal-style.ts";
+import { createTerminalStyle } from "../src/text/terminal-style.ts";
 
 const terminalStyle = createTerminalStyle(3);
 

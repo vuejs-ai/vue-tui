@@ -17,7 +17,9 @@ import type {
   TuiText,
   TextProps,
 } from "../host/nodes.ts";
-import { flattenLeaves, measureTextNatural, wrapText } from "../text/text-measure.ts";
+import { flattenTextLeaves } from "../host/nodes.ts";
+import { measureTextNatural, wrapText } from "../text/text-measure.ts";
+import { sanitizeAnsiMultiline } from "../text/sanitize-ansi.ts";
 
 export type YogaCarrier = TuiRoot | TuiBox | TuiText | TuiStatic;
 
@@ -698,7 +700,7 @@ export function bindTextMeasure(text: TuiText): void {
     ) {
       return state.cache.result;
     }
-    const raw = flattenLeaves(text);
+    const raw = flattenTextLeaves(text, sanitizeAnsiMultiline);
 
     const remember = (result: TextMeasureResult): TextMeasureResult => {
       state.cache = {
@@ -792,7 +794,7 @@ export function getComputedTextMeasure(text: TuiText): ComputedTextMeasure {
     return { wrapWidth, wrappedLines: cached.result.wrappedLines };
   }
 
-  const raw = flattenLeaves(text);
+  const raw = flattenTextLeaves(text, sanitizeAnsiMultiline);
   if (raw === "") return { wrapWidth: 0, wrappedLines: [] };
   const natural = measureTextNatural(raw);
   const wrappedLines =

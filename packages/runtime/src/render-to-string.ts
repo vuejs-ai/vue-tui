@@ -6,6 +6,7 @@ import { buildNodeOps } from "./vue/node-ops.ts";
 import { createHostYogaAllocationLedger } from "./layout/yoga-allocation-ledger.ts";
 import { paint } from "./paint/paint.ts";
 import { findStatics, prepareStaticOutput } from "./paint/static-channel.ts";
+import { encodeFrame, encodeFrameHistory } from "./surface/frame-encoder.ts";
 import { AppContextKey, StdinContextKey } from "./vue/context.ts";
 import {
   createRenderedTargetController,
@@ -20,8 +21,8 @@ import {
   type InternalStringRenderSessionService,
 } from "./render-session.ts";
 import { MAX_LAYOUT_VALUE } from "./layout/numeric-limits.ts";
-import { resolveTerminalStyle } from "./paint/terminal-style.ts";
-import { normalizeColorOption, type ColorProfile } from "./color-profile.ts";
+import { resolveTerminalStyle } from "./text/terminal-style.ts";
+import { normalizeColorOption, type ColorProfile } from "./frame/color-profile.ts";
 import { createNodeStringContexts, type NodeStringContexts } from "./session/string-context.ts";
 import { getDefaultNodeTerminalStyleFacts, isNodeProduction } from "./terminal/node/backend.ts";
 
@@ -190,13 +191,15 @@ function renderStringDocument(
       // available. Acceptance follows transaction disposal below so callbacks
       // cannot observe temporary Yoga parentage.
       preparedStatic = prepareStaticOutput(layout, renderSession.terminalStyle);
-      capturedStaticOutput = preparedStatic.output;
+      capturedStaticOutput = encodeFrameHistory(preparedStatic.frames);
 
       // Paint the computed layout without manufacturing a hard paint viewport for
       // short documents. Yoga already applied a finite height bound when content
       // exceeded it; shorter output stays unpadded. Clip only by line count so
       // ordinary horizontal overflow behavior matches the previous unbounded paint.
-      output = paint(root, { layout: layout.computed, terminalStyle: renderSession.terminalStyle });
+      output = encodeFrame(
+        paint(root, { layout: layout.computed, terminalStyle: renderSession.terminalStyle }),
+      );
       if (options.height !== null && output !== "") {
         const lines = output.split("\n");
         if (lines.length > options.height) {

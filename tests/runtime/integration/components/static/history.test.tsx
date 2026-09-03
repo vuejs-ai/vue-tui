@@ -83,13 +83,13 @@ test("changing the Vue key remounts Static and commits a new block", async () =>
   expect(staticTranscript(result.frames)).toBe("first\nsecond\n");
 });
 
-test("an output-free Static stays open until its first later non-empty output", async () => {
+test("a visually blank Static stays open until its first later non-empty output", async () => {
   const ready = shallowRef(false);
   const value = shallowRef("first");
   const unmounted: string[] = [];
   const Deferred = defineComponent(() => {
     onUnmounted(() => unmounted.push("deferred"));
-    return () => <Text>{ready.value ? value.value : ""}</Text>;
+    return () => <Text>{ready.value ? value.value : "\u00a0"}</Text>;
   });
   const App = defineComponent(() => () => (
     <Box flexDirection="column">

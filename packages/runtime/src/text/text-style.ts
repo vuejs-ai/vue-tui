@@ -1,6 +1,17 @@
 import { Chalk, type ChalkInstance } from "chalk";
-import type { TextProps } from "../host/nodes.ts";
 import type { TerminalStyle } from "./terminal-style.ts";
+
+/** The Text prop subset that contributes visual cell style. */
+export interface TextStyleProps {
+  readonly color?: unknown;
+  readonly backgroundColor?: unknown;
+  readonly dimColor?: boolean;
+  readonly bold?: boolean;
+  readonly italic?: boolean;
+  readonly underline?: boolean;
+  readonly strikethrough?: boolean;
+  readonly inverse?: boolean;
+}
 
 // Validation is grammar-only. It must not inherit the process's terminal or
 // color environment just because Chalk was imported in this module.
@@ -36,32 +47,28 @@ function resetBackground(text: string, style: TerminalStyle): string {
   return style.colorLevel > 0 ? `\x1b[49m${text}\x1b[49m` : text;
 }
 
-export function applyColor(
-  style: TerminalStyle,
-  c: ChalkInstance,
-  color: unknown,
-  bg: boolean,
-): ChalkInstance {
-  if (style.colorLevel === 0) return c;
-  if (typeof color !== "string") return c;
+export function applyColor(style: TerminalStyle, color: unknown, bg: boolean): ChalkInstance {
+  const chalk = style.chalk;
+  if (style.colorLevel === 0) return chalk;
+  if (typeof color !== "string") return chalk;
   // Apply a named Chalk method when present; otherwise leave the text bare.
   const key = bg ? bgKey(color) : color;
-  const named = chalkProperty(c, key);
+  const named = chalkProperty(chalk, key);
   if (typeof named === "function") return named as ChalkInstance;
-  if (color.startsWith("#")) return bg ? c.bgHex(color) : c.hex(color);
+  if (color.startsWith("#")) return bg ? chalk.bgHex(color) : chalk.hex(color);
   if (color.startsWith("ansi256")) {
     const m = ansi256Regex.exec(color);
-    if (!m) return c;
+    if (!m) return chalk;
     const n = Number(m[1]);
-    return bg ? c.bgAnsi256(n) : c.ansi256(n);
+    return bg ? chalk.bgAnsi256(n) : chalk.ansi256(n);
   }
   if (color.startsWith("rgb")) {
     const m = rgbRegex.exec(color);
-    if (!m) return c;
+    if (!m) return chalk;
     const [r, g, b] = [Number(m[1]), Number(m[2]), Number(m[3])];
-    return bg ? c.bgRgb(r, g, b) : c.rgb(r, g, b);
+    return bg ? chalk.bgRgb(r, g, b) : chalk.rgb(r, g, b);
   }
-  return c;
+  return chalk;
 }
 
 function bgKey(name: string): string {
@@ -134,7 +141,7 @@ export function assertValidForegroundColor(color: unknown, label = "color"): voi
   }
 }
 
-export function applyChalk(style: TerminalStyle, text: string, props: TextProps): string {
+export function applyChalk(style: TerminalStyle, text: string, props: TextStyleProps): string {
   // Apply each enabled style as its own nested Chalk call, in the order
   // dim -> color -> backgroundColor -> bold -> italic -> underline ->
   // strikethrough -> inverse. This produces individually-balanced open/close
@@ -146,12 +153,12 @@ export function applyChalk(style: TerminalStyle, text: string, props: TextProps)
   if (props.color) {
     s = isForegroundResetColor(props.color)
       ? resetForeground(s, style)
-      : applyColor(style, chalk, props.color, false)(s);
+      : applyColor(style, props.color, false)(s);
   }
   if (props.backgroundColor) {
     s = isBackgroundResetColor(props.backgroundColor)
       ? resetBackground(s, style)
-      : applyColor(style, chalk, props.backgroundColor, true)(s);
+      : applyColor(style, props.backgroundColor, true)(s);
   }
   if (props.bold) s = chalk.bold(s);
   if (props.italic) s = chalk.italic(s);

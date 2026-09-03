@@ -4,64 +4,15 @@ import stringWidth from "string-width";
 import wrapAnsi from "wrap-ansi";
 import {
   ansiCodesToString,
-  diffAnsiCodes,
   styledCharsFromTokens,
   tokenize as tokenizeStyledAnsi,
+  type AnsiCode,
   type StyledChar,
+  type Token,
 } from "@alcalzone/ansi-tokenize";
 import { hasAnsiControlCharacters, tokenizeAnsi } from "./ansi-tokenizer.ts";
-import { sanitizeAnsiMultiline } from "./sanitize-ansi.ts";
-import type { TextProps, TuiNode, TuiText, TuiVirtualText } from "../host/nodes.ts";
 
-export function flattenLeaves(node: TuiText | TuiVirtualText): string {
-  if (node.style.display === "none") return "";
-  if (!node.children || node.children.length === 0) return "";
-  let out = "";
-  for (const child of node.children) {
-    out += squashInlineChild(child);
-  }
-  // Sanitize the measured string so measure and wrap operate on the same visible
-  // text that paint emits. Without this, raw measurement can disagree with paint
-  // in two distinct ways, depending on whether a stripped control sequence has a
-  // visible width:
-  //
-  //   * WIDTH mis-measure (e.g. ESC#8/DECALN): string-width("A\x1b#8BC") is 2, but
-  //     paint strips ESC#8 and emits the 3-column "ABC". A raw measure UNDER-sizes
-  //     the yoga cell, so at a tight width the trailing visible char is clipped
-  //     (vue rendered "AB" for "A\x1b#8BC" at width 3).
-  //   * WRAP-step break (e.g. erase-line CSI \x1b[2K): here raw and sanitized
-  //     string-width are EQUAL (both count \x1b[2K as zero), so width is fine — but
-  //     wrap-ansi doesn't recognise the \x1b[2K CSI and returns "abCD\x1b[2Kef"
-  //     un-wrapped on one line, so at width 4 the trailing "ef" overflows the
-  //     single-line cell and is clipped. Feeding the sanitized "abCDef" instead
-  //     wraps correctly to "abCD" / "ef".
-  //
-  // Sanitizing the squash output here fixes BOTH for the same reason: measure and
-  // wrap then see the identical stripped string paint emits. This is the measure
-  // twin of paint's renderTextWithInlineStyles (which also ends in sanitizeAnsi);
-  // because flattenLeaves recurses into nested <Text> children, the sanitize runs
-  // at every nesting level. sanitizeAnsi is idempotent, so the nested pass is
-  // harmless. The sanitized output feeds measureTextNatural, bindTextMeasure,
-  // and wrapText.
-  // Geometry-safe sanitization preserves OSC 8 hyperlinks, which wrap-ansi
-  // understands, and drops other OSC commands before measurement and wrapping.
-  return sanitizeAnsiMultiline(out);
-}
-
-// Squash a single child into measured text. Text leaves contribute their raw
-// value; nested text / virtual-text recurse via flattenLeaves. Comments, boxes,
-// and other non-text nodes contribute nothing.
-function squashInlineChild(child: TuiNode): string {
-  if (child.type === "text-leaf") {
-    return child.value;
-  }
-  if (child.type === "tui-virtual-text" || child.type === "tui-text") {
-    return flattenLeaves(child);
-  }
-  return "";
-}
-
-export type WrapMode = NonNullable<TextProps["wrap"]>;
+export type WrapMode = "wrap" | "hard" | "truncate" | "truncate-middle" | "truncate-start";
 
 const boldOpen = "\u001B[1m";
 const dimOpen = "\u001B[2m";
@@ -76,7 +27,7 @@ function firstStyledCharacterInSlice(
   end: number,
 ): StyledChar | undefined {
   let column = 0;
-  for (const character of styledCharsFromTokens(tokenizeStyledAnsi(text))) {
+  for (const character of styledGraphemesFromAnsi(text)) {
     const width = Math.max(1, stringWidth(character.value));
     if (column >= start && column < end) return character;
     column += width;
@@ -85,22 +36,19 @@ function firstStyledCharacterInSlice(
 }
 
 /**
- * Preserve the complete intensity state at the first retained grapheme.
+ * Preserve the complete style state at the first retained grapheme.
  *
- * `slice-ansi` drops an initial bold or dim open when both are active and a
- * later SGR 22 closes only one logical channel. Prefix any missing intensity
- * from the source cell after the library has selected the requested graphemes.
+ * `slice-ansi` can omit a shared intensity channel or an SGR form it does not
+ * parse. Prefix any missing active pair after it selects the requested graphemes.
  */
 export function sliceAnsiPreservingIntensity(text: string, start: number, end: number): string {
   const sliced = sliceAnsi(text, start, end);
   const expected = firstStyledCharacterInSlice(text, start, end);
   if (!expected) return sliced;
 
-  const actual = styledCharsFromTokens(tokenizeStyledAnsi(sliced))[0];
+  const actual = styledGraphemesFromAnsi(sliced)[0];
   const actualCodes = new Set(actual?.styles.map((style) => style.code) ?? []);
-  const missing = expected.styles.filter(
-    (style) => isIntensityStyle(style) && !actualCodes.has(style.code),
-  );
+  const missing = expected.styles.filter((style) => !actualCodes.has(style.code));
   return missing.length === 0 ? sliced : ansiCodesToString(missing) + sliced;
 }
 
@@ -141,6 +89,203 @@ function stripAnsi(text: string): string {
   return out;
 }
 
+// The SGR attribute each parameter switches off, for a sequence the tokenizer
+// cannot parse. A colon sub-parameter form carries its own family's terminator,
+// so a later `24m` or `39m` in the source closes the span it opened.
+const sgrOffCodes = new Map<number, string>([
+  [1, "\u001b[22m"],
+  [2, "\u001b[22m"],
+  [3, "\u001b[23m"],
+  [4, "\u001b[24m"],
+  [5, "\u001b[25m"],
+  [6, "\u001b[25m"],
+  [7, "\u001b[27m"],
+  [8, "\u001b[28m"],
+  [9, "\u001b[29m"],
+  [21, "\u001b[24m"],
+  [53, "\u001b[55m"],
+  [38, "\u001b[39m"],
+  [48, "\u001b[49m"],
+  [58, "\u001b[59m"],
+]);
+
+function sgrOffCodeFor(sequence: string): string {
+  const first = Number.parseInt(sequence.slice(2), 10);
+  return sgrOffCodes.get(first) ?? "\u001b[0m";
+}
+
+function normalizeColonColorParameter(parameter: string): string {
+  const parts = parameter.split(":");
+  const channel = parts[0];
+  const mode = parts[1];
+  if ((channel !== "38" && channel !== "48") || (mode !== "2" && mode !== "5")) {
+    return parameter;
+  }
+
+  if (mode === "5") {
+    const index = parts.at(-1);
+    return index !== undefined && /^\d+$/.test(index) ? `${channel};5;${index}` : parameter;
+  }
+
+  const [red, green, blue] = parts.slice(-3);
+  return red !== undefined &&
+    green !== undefined &&
+    blue !== undefined &&
+    /^\d+$/.test(red) &&
+    /^\d+$/.test(green) &&
+    /^\d+$/.test(blue)
+    ? `${channel};2;${red};${green};${blue}`
+    : parameter;
+}
+
+function sgrPair(code: string, endCode = sgrOffCodeFor(code)): AnsiCode {
+  return { type: "ansi", code, endCode };
+}
+
+function tokenizeSgrParameters(parameterString: string): Token[] {
+  if (parameterString === "") return tokenizeStyledAnsi("\x1b[0m");
+
+  const parameters = parameterString.split(";");
+  const tokens: Token[] = [];
+  for (let index = 0; index < parameters.length; index++) {
+    const parameter = parameters[index]!;
+    const channel = parameter.split(":", 1)[0];
+    const mode = parameters[index + 1];
+
+    if (
+      !parameter.includes(":") &&
+      (channel === "38" || channel === "48" || channel === "58") &&
+      (mode === "2" || mode === "5")
+    ) {
+      const count = mode === "2" ? 5 : 3;
+      const grouped = parameters.slice(index, index + count).join(";");
+      const code = `\x1b[${grouped}m`;
+      if (channel === "58") tokens.push(sgrPair(code, "\x1b[59m"));
+      else tokens.push(...tokenizeStyledAnsi(code));
+      index += count - 1;
+      continue;
+    }
+
+    if (parameter === "4:0") {
+      tokens.push(sgrPair("\x1b[24m", "\x1b[24m"));
+      continue;
+    }
+    if (parameter === "5" || parameter === "6") {
+      tokens.push(sgrPair(`\x1b[${parameter}m`, "\x1b[25m"));
+      continue;
+    }
+    if (parameter === "21") {
+      tokens.push(sgrPair("\x1b[21m", "\x1b[24m"));
+      continue;
+    }
+    if (parameter === "25") {
+      tokens.push(sgrPair("\x1b[25m", "\x1b[25m"));
+      continue;
+    }
+    if (parameter === "59") {
+      tokens.push(sgrPair("\x1b[59m", "\x1b[59m"));
+      continue;
+    }
+    if (parameter.startsWith("58:")) {
+      tokens.push(sgrPair(`\x1b[${parameter}m`, "\x1b[59m"));
+      continue;
+    }
+
+    const normalizedColor = normalizeColonColorParameter(parameter);
+    if (normalizedColor !== parameter) {
+      tokens.push(...tokenizeStyledAnsi(`\x1b[${normalizedColor}m`));
+      continue;
+    }
+    if (parameter.includes(":")) {
+      const code = `\x1b[${parameter}m`;
+      tokens.push(sgrPair(code));
+      continue;
+    }
+    tokens.push(...tokenizeStyledAnsi(`\x1b[${parameter}m`));
+  }
+  return tokens;
+}
+
+function reduceStyledCodes(active: readonly AnsiCode[], next: readonly AnsiCode[]): AnsiCode[] {
+  let result = [...active];
+  for (const pair of next) {
+    if (pair.code === "\x1b[0m") {
+      result = [];
+    } else if (pair.code === pair.endCode) {
+      result = result.filter((candidate) => candidate.endCode !== pair.code);
+    } else if (isIntensityStyle(pair) || pair.endCode === "\x1b[0m") {
+      if (!result.some((candidate) => candidate.code === pair.code)) result.push(pair);
+    } else {
+      result = result.filter((candidate) => candidate.endCode !== pair.endCode);
+      result.push(pair);
+    }
+  }
+  return result;
+}
+
+function styledCharactersFromTokens(tokens: readonly Token[]): StyledChar[] {
+  let styles: AnsiCode[] = [];
+  const characters: StyledChar[] = [];
+  for (const token of tokens) {
+    if (token.type === "ansi") styles = reduceStyledCodes(styles, [token]);
+    else if (token.type === "char") characters.push({ ...token, styles: [...styles] });
+  }
+  return characters;
+}
+
+function sameStyledCodes(left: readonly AnsiCode[], right: readonly AnsiCode[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (pair, index) => pair.code === right[index]!.code && pair.endCode === right[index]!.endCode,
+    )
+  );
+}
+
+function styledCodeDifference(from: readonly AnsiCode[], to: readonly AnsiCode[]): AnsiCode[] {
+  const endCodesInTarget = new Set(to.map((pair) => pair.endCode));
+  const codesInTarget = new Set(to.map((pair) => pair.code));
+  const codesInSource = new Set(from.map((pair) => pair.code));
+  const closesBeforeReplacement = new Set(["\x1b[0m"]);
+  const removed = reduceStyledCodes(
+    [],
+    from.filter((pair) =>
+      isIntensityStyle(pair)
+        ? !codesInTarget.has(pair.code)
+        : !endCodesInTarget.has(pair.endCode) ||
+          (closesBeforeReplacement.has(pair.endCode) && !codesInTarget.has(pair.code)),
+    ),
+  )
+    .reverse()
+    .map((pair) => ({ ...pair, code: pair.endCode }));
+  return [...removed, ...to.filter((pair) => !codesInSource.has(pair.code))];
+}
+
+function styledTransition(from: readonly AnsiCode[], to: readonly AnsiCode[]): string {
+  let current = reduceStyledCodes([], from);
+  const target = reduceStyledCodes([], to);
+  let output = "";
+  const maxRepairs = current.length + target.length + 2;
+
+  for (let attempt = 0; attempt < maxRepairs; attempt++) {
+    if (sameStyledCodes(current, target)) return output;
+    const difference = styledCodeDifference(current, target);
+    if (difference.length === 0) break;
+    output += ansiCodesToString(difference);
+    const next = reduceStyledCodes(current, difference);
+    if (sameStyledCodes(current, next)) break;
+    current = next;
+  }
+
+  return output + "\x1b[0m" + ansiCodesToString(target);
+}
+
+function normalizeOscForStyledCharacters(value: string): string {
+  const escaped = value.startsWith("\x9d") ? `\x1b]${value.slice(1)}` : value;
+  if (escaped.endsWith("\x1b\\")) return `${escaped.slice(0, -2)}\x07`;
+  return escaped.endsWith("\x9c") ? `${escaped.slice(0, -1)}\x07` : escaped;
+}
+
 /**
  * Normalize ANSI-tokenized code points into terminal paint graphemes once.
  *
@@ -151,12 +296,24 @@ export function styledGraphemesFromAnsi(text: string): StyledChar[] {
   if (!hasAnsiControlCharacters(text)) return styledCharsFromTokens(tokenizeStyledAnsi(text));
 
   const tokens = tokenizeAnsi(text).flatMap((token) => {
-    if (token.type === "text" || token.type === "csi" || token.type === "osc") {
-      return tokenizeStyledAnsi(token.value);
+    if (token.type === "text") return tokenizeStyledAnsi(token.value);
+    if (token.type === "csi") {
+      if (token.finalCharacter !== "m" || token.intermediateString !== "") return [];
+      return tokenizeSgrParameters(token.parameterString);
     }
+    if (token.type === "osc")
+      return tokenizeStyledAnsi(normalizeOscForStyledCharacters(token.value));
     return [];
   });
-  const characters = styledCharsFromTokens(tokens);
+  // The tokenizer pairs `21m` with the generic reset; `24m` ends both underline
+  // forms, so double underline must leave with it rather than outlive it.
+  const characters = styledCharactersFromTokens(
+    tokens.map((token) =>
+      token.type === "ansi" && token.code === "\u001b[21m"
+        ? { ...token, endCode: "\u001b[24m" }
+        : token,
+    ),
+  );
   if (characters.length < 2) return characters;
 
   const plain = characters.map((character) => character.value).join("");
@@ -197,20 +354,12 @@ export function styledGraphemesToString(characters: StyledChar[]): string {
   let previousStyles: StyledChar["styles"] = [];
 
   for (const character of characters) {
-    let transition = diffAnsiCodes(previousStyles, character.styles);
-    const targetCodes = new Set(character.styles.map((style) => style.code));
-    const removesIntensity = previousStyles.some(
-      (style) => isIntensityStyle(style) && !targetCodes.has(style.code),
-    );
-    if (removesIntensity) {
-      transition = [...transition, ...character.styles.filter((style) => isIntensityStyle(style))];
-    }
-    result += ansiCodesToString(transition);
+    result += styledTransition(previousStyles, character.styles);
     result += character.value;
     previousStyles = character.styles;
   }
 
-  return result + ansiCodesToString(diffAnsiCodes(previousStyles, []));
+  return result + styledTransition(previousStyles, []);
 }
 
 /**
@@ -348,7 +497,7 @@ export function wrapText(text: string, width: number, mode: WrapMode = "wrap"): 
 /**
  * Apply terminal styling to line structure which layout has already chosen.
  *
- * `wrappedLines` comes from `wrapText(flattenLeaves(...))` during the Yoga
+ * `wrappedLines` comes from `wrapText()` during the Yoga
  * measure pass. Paint must not call `wrapText` again: the layout result is the
  * one authoritative whole-cell budget for this frame. ANSI styling is added
  * after measuring, so project the styled source over that existing structure

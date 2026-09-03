@@ -427,7 +427,7 @@ test("text with dimmed color", async () => {
     )),
     { columns: 100 },
   );
-  expect(lastFrame()).toBe(chalk.green.dim("Test"));
+  expect(lastFrame()).toBe("\x1b[2m\x1b[32mTest\x1b[39m\x1b[22m");
 });
 
 test("text with hex color", async () => {

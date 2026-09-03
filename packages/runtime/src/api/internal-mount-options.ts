@@ -4,7 +4,7 @@ import {
   type InternalKittyKeyboardMountOptions,
 } from "../terminal/kitty-keyboard.ts";
 import { INTERNAL_RENDER_OBSERVER, type InternalRenderObserver } from "./render-observer.ts";
-import type { TerminalStyle } from "../paint/terminal-style.ts";
+import type { TerminalStyle } from "../text/terminal-style.ts";
 import {
   INTERNAL_TERMINAL_SIZE_PROBE,
   type TerminalSizeProbe,
