@@ -1,5 +1,6 @@
 import { type InjectionKey, shallowRef, type ShallowRef } from "vue";
-import { emitTestEvent, RUNTIME_TEST_EVENT } from "../api/test-events.ts";
+import { emitTestEvent, RUNTIME_TEST_EVENT } from "../session/test-events.ts";
+import { DevSession } from "./session.ts";
 
 export interface DevErrorInfo {
   message: string;
@@ -15,7 +16,7 @@ export type DevState =
 
 export const DevStateKey: InjectionKey<ShallowRef<DevState>> = Symbol("DevState");
 
-// Shared across Runtime module copies so the overlay (provided from createApp) and
+// Shared across Runtime module copies so the overlay (provided by the development app factory) and
 // HMR handlers (wired by connectDevtools) observe the same status ref.
 const DEV_STATE_KEY = "__vue_tui_dev_state_ref__";
 function sharedDevState(): ShallowRef<DevState> {
@@ -69,18 +70,11 @@ const GLOBAL_KEY = "__vue_tui_devtools_bridge__";
 interface DevtoolsBridgeState {
   bridgedHot: HotContext | undefined;
   activeSessionId: string | undefined;
-  currentDevApp: DevAppLifecycle | undefined;
+  currentDevSession: DevSession | undefined;
   pendingResetTimer: ReturnType<typeof setTimeout> | undefined;
   devConnected: boolean;
   /** Bumped by any error source, so a batch can tell that one fired while it was open. */
   errorGeneration: number;
-}
-
-interface DevAppLifecycle {
-  /** Replace this app during a Vite full reload without settling application exit. */
-  replace(): void;
-  /** End this app because its owning Vite dev session is closing. */
-  close(): void | Promise<void>;
 }
 
 function bridge(): DevtoolsBridgeState {
@@ -90,7 +84,7 @@ function bridge(): DevtoolsBridgeState {
   const state = (g[GLOBAL_KEY] ??= {
     bridgedHot: undefined,
     activeSessionId: undefined,
-    currentDevApp: undefined,
+    currentDevSession: undefined,
     pendingResetTimer: undefined,
     devConnected: false,
     errorGeneration: 0,
@@ -110,20 +104,16 @@ function bridge(): DevtoolsBridgeState {
 // the same hot would double-fire every event). Process-global storage keeps this
 // correct when Runtime is externalized (published install and forced monorepo path).
 
-export function registerDevApp(app: DevAppLifecycle): void {
+/** Get the process-wide development owner that will build the next mounted Session. */
+export function acquireDevSession(): DevSession {
   const state = bridge();
-  if (state.currentDevApp !== undefined && state.currentDevApp !== app) {
-    throw new Error("[vue-tui] only one mounted app may use the active Vite dev session at a time");
-  }
-  state.currentDevApp = app;
+  return (state.currentDevSession ??= new DevSession());
 }
 
-export function unregisterDevApp(app: DevAppLifecycle): void {
-  // Identity-guard the clear: during a reload the old app's teardown runs and
-  // unregisters before the new app registers, so a stale teardown can never
-  // wipe a newer app's registration.
+/** Clear the active DevSession after normal application disposal; retain it while a full reload replaces its Runtime Session. */
+export function unregisterDevSession(session: DevSession): void {
   const state = bridge();
-  if (state.currentDevApp === app) state.currentDevApp = undefined;
+  if (state.currentDevSession === session) state.currentDevSession = undefined;
 }
 
 function clearPendingResetTimer(): void {
@@ -282,22 +272,19 @@ export function initHmrBridge(hot: HotContext | undefined = realHot): void {
 
   onCurrentHot("vite:beforeFullReload", () => {
     emitTestEvent(RUNTIME_TEST_EVENT.hmrUpdateReceived, { kind: "full-reload" });
-    // Unmount the current app before the module runner re-executes the entry, so
-    // the fresh createApp().mount() isn't blocked by the instance-reuse guard and
-    // the old renderer/timers don't leak. The runner auto-re-imports the entry on
-    // full reload (verified by run), so we do NOT re-import here. There is no
-    // separate vue-tui:request-reload event — nothing consumed it.
+    // The module runner re-imports the entry after a full reload. Release the
+    // current app first so its replacement can acquire the same terminal.
     clearPendingResetTimer();
     pendingUpdate = undefined;
     failedUpdateTimestamp = undefined;
-    const live = bridge();
-    const app = live.currentDevApp;
-    live.currentDevApp = undefined;
-    app?.replace();
+    // Keep the DevSession registered while Vite clears modules and imports the
+    // replacement entry. Its old Runtime Session is disposed here; the new
+    // entry calls acquireDevSession().build(...) after it evaluates.
+    bridge().currentDevSession?.replace();
   });
 }
 
-// Whether the dev integration has been connected. createApp() reads this to
+// Whether the dev integration has been connected. The development app factory reads this to
 // decide whether to install the dev overlay. Set by connectDevtools(), which
 // @vue-tui/vite calls (via an injected transformed module) with a LIVE
 // import.meta.hot — the runtime is externalized in dev, so its own import.meta.hot
@@ -370,7 +357,7 @@ export function connectDevtools(hot: HotContext, options?: ConnectDevtoolsOption
  * session when omitted). Identity-guarded and idempotent: a mismatched id is a
  * no-op; a second call after a successful disconnect is a no-op.
  *
- * Ends the mounted dev app and settles its exit, clears pending dev-status
+ * Ends the mounted development Session and settles its exit, clears pending dev-status
  * timers, and drops the hot bridge so a later sequential session can connect.
  */
 export function disconnectDevtools(sessionId?: string): void | Promise<void> {
@@ -384,7 +371,7 @@ export function disconnectDevtools(sessionId?: string): void | Promise<void> {
   }
   if (
     !state.devConnected &&
-    state.currentDevApp === undefined &&
+    state.currentDevSession === undefined &&
     state.bridgedHot === undefined &&
     state.pendingResetTimer === undefined &&
     state.activeSessionId === undefined
@@ -394,15 +381,15 @@ export function disconnectDevtools(sessionId?: string): void | Promise<void> {
 
   clearPendingResetTimer();
 
-  const app = state.currentDevApp;
-  state.currentDevApp = undefined;
+  const devSession = state.currentDevSession;
+  state.currentDevSession = undefined;
   // Disconnect the hot channel BEFORE normal app exit settles. Its exit-finally
   // notification then becomes a no-op instead of re-entering server.close().
   state.bridgedHot = undefined;
   state.devConnected = false;
   state.activeSessionId = undefined;
   devState.value = { type: "ok" };
-  return app?.close();
+  return devSession?.close();
 }
 
 // Signal the @vue-tui/vite dev plugin that the app has GENUINELY exited
@@ -417,12 +404,11 @@ export function notifyDevExit(): void {
 
 // Reset the shared dev status to "ok". `devState` is a module-global that a
 // PREVIOUS app in the same dev process may have left in an error/update state
-// (createApp() can run multiple times: two apps, unmount + re-create, a tool
+// (the app factory can run multiple times: two apps, unmount + re-create, a tool
 // that restarts the UI, a test run). Nothing else clears it on the create path,
 // so without this a freshly-mounted app injects the stale state and renders the
 // old "Build Error" / "[HMR] updated" overlay instead of its own content.
-// render()'s dev block calls this once per app setup via the isDevConnected()
-// gate. We don't touch `pendingResetTimer` here: its firing is guarded on
+// The development app factory calls this once per connected app setup. We don't touch `pendingResetTimer` here: its firing is guarded on
 // `type === "update"`, which this reset clears, and the vite:beforeUpdate handler
 // clears any prior timer before arming a new one — so a stale timer can't clobber
 // a later app. (disconnectDevtools clears the timer explicitly when the session ends.)

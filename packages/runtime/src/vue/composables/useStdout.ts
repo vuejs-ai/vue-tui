@@ -1,6 +1,5 @@
 import { inject } from "vue";
-import { AppContextKey } from "../context.ts";
-import type { CoordinatedWriteResult } from "../../terminal/output-coordinator.ts";
+import { AppContextKey, type CoordinatedWriteResult } from "../context.ts";
 
 /** Repository-only bridge for exercising Runtime's coordinated stdout mechanism. */
 export interface UseStdoutReturn {

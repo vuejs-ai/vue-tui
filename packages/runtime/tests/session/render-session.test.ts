@@ -1,0 +1,179 @@
+import { expect, test } from "vite-plus/test";
+import { MAX_LAYOUT_VALUE } from "../../src/layout/numeric-limits.ts";
+import {
+  createLiveRenderSessionService,
+  createStringRenderSessionService,
+  normalizeRequestedMode,
+  resolveLiveDimensions,
+  resolveLiveSurface,
+  type LiveHostInput,
+} from "../../src/session/render-session.ts";
+import { createTerminalStyle } from "../../src/text/terminal-style.ts";
+
+const terminalStyle = createTerminalStyle(3);
+
+function liveInput(overrides: Partial<LiveHostInput> = {}): LiveHostInput {
+  return {
+    requestedMode: "inline",
+    stdout: { isTTY: true, columns: 100, rows: 30 },
+    ...overrides,
+  };
+}
+
+test("normalizes the finite mount mode input", () => {
+  expect(normalizeRequestedMode({})).toBe("inline");
+  expect(normalizeRequestedMode({ mode: undefined })).toBe("inline");
+  expect(normalizeRequestedMode({ mode: "inline" })).toBe("inline");
+  expect(normalizeRequestedMode({ mode: "fullscreen" })).toBe("fullscreen");
+});
+
+test.each([null, false, true, "full-screen", 0, {}, [], () => {}, Symbol("mode"), 1n])(
+  "rejects invalid mode %#",
+  (mode) => {
+    expect(() => normalizeRequestedMode({ mode })).toThrow(
+      'Mount option "mode" must be "inline", "fullscreen", or undefined',
+    );
+  },
+);
+
+test("resolves one dimensions snapshot from backend facts", () => {
+  expect(resolveLiveDimensions({ isTTY: true, columns: 120, rows: 40 })).toEqual({
+    terminal: { columns: 120, rows: 40 },
+    layout: { columns: 120, rows: 40 },
+  });
+
+  expect(resolveLiveDimensions({ isTTY: true, columns: 120, rows: undefined })).toEqual({
+    terminal: null,
+    layout: { columns: 120, rows: 24 },
+  });
+
+  expect(resolveLiveDimensions({ isTTY: true, columns: 0, rows: Number.NaN })).toEqual({
+    terminal: null,
+    layout: { columns: 80, rows: 24 },
+  });
+
+  expect(resolveLiveDimensions({ isTTY: false, columns: 120, rows: 40 })).toEqual({
+    terminal: null,
+    layout: { columns: 80, rows: 24 },
+  });
+});
+
+test("rejects terminal axes outside Runtime's accepted layout range", () => {
+  const outsideLayoutRange = MAX_LAYOUT_VALUE + 1;
+
+  expect(resolveLiveDimensions({ isTTY: true, columns: outsideLayoutRange, rows: 24 })).toEqual({
+    terminal: null,
+    layout: { columns: 80, rows: 24 },
+  });
+  expect(resolveLiveDimensions({ isTTY: true, columns: 120, rows: outsideLayoutRange })).toEqual({
+    terminal: null,
+    layout: { columns: 120, rows: 24 },
+  });
+  expect(resolveLiveDimensions({ isTTY: false, columns: outsideLayoutRange, rows: 24 })).toEqual({
+    terminal: null,
+    layout: { columns: 80, rows: 24 },
+  });
+});
+
+test("accepts the maximum layout value on either terminal axis", () => {
+  expect(resolveLiveDimensions({ isTTY: true, columns: MAX_LAYOUT_VALUE, rows: 1 })).toEqual({
+    terminal: { columns: MAX_LAYOUT_VALUE, rows: 1 },
+    layout: { columns: MAX_LAYOUT_VALUE, rows: 1 },
+  });
+  expect(resolveLiveDimensions({ isTTY: true, columns: 1, rows: MAX_LAYOUT_VALUE })).toEqual({
+    terminal: { columns: 1, rows: MAX_LAYOUT_VALUE },
+    layout: { columns: 1, rows: MAX_LAYOUT_VALUE },
+  });
+});
+
+test("non-TTY Fullscreen and Inline select the same document host", () => {
+  for (const requestedMode of ["inline", "fullscreen"] as const) {
+    const surface = resolveLiveSurface(
+      liveInput({
+        requestedMode,
+        stdout: { isTTY: false, columns: 120, rows: 40 },
+      }),
+    );
+
+    expect(surface.kind).toBe("final-stream");
+    if (surface.kind !== "final-stream") throw new Error("expected final-stream");
+    expect(surface.reason).toBe("stdout-not-tty");
+    expect(surface.dimensions).toEqual({
+      terminal: null,
+      layout: { columns: 80, rows: 24 },
+    });
+  }
+});
+
+test("visual TTY without detected dimensions stays live with modeled layout", () => {
+  const surface = resolveLiveSurface(
+    liveInput({ stdout: { isTTY: true, columns: undefined, rows: undefined } }),
+  );
+
+  expect(surface.kind).toBe("inline-terminal");
+  expect(surface.dimensions).toEqual({
+    terminal: null,
+    layout: { columns: 80, rows: 24 },
+  });
+});
+
+test("visual Inline exposes terminal rows as a maximum layout bound", () => {
+  const surface = resolveLiveSurface(liveInput());
+
+  expect(surface.kind).toBe("inline-terminal");
+  expect(surface.dimensions).toEqual({
+    terminal: { columns: 100, rows: 30 },
+    layout: { columns: 100, rows: 30 },
+  });
+});
+
+test("visual Fullscreen owns an exact detected viewport", () => {
+  const surface = resolveLiveSurface(liveInput({ requestedMode: "fullscreen" }));
+
+  expect(surface.kind).toBe("fullscreen-terminal");
+  expect(surface.dimensions).toEqual({
+    terminal: { columns: 100, rows: 30 },
+    layout: { columns: 100, rows: 30 },
+  });
+});
+
+test("the reactive service keeps identity and replaces dimensions atomically", () => {
+  const initial = resolveLiveSurface(liveInput({ requestedMode: "fullscreen" }));
+  const service = createLiveRenderSessionService(initial, terminalStyle);
+  const session = service.session;
+
+  service.updateDimensions({
+    terminal: { columns: 70, rows: 20 },
+    layout: { columns: 70, rows: 20 },
+  });
+
+  expect(service.session).toBe(session);
+  expect(session.dimensions).toEqual({
+    terminal: { columns: 70, rows: 20 },
+    layout: { columns: 70, rows: 20 },
+  });
+
+  service.dispose();
+  service.updateDimensions({
+    terminal: { columns: 60, rows: 10 },
+    layout: { columns: 60, rows: 10 },
+  });
+  expect(session.dimensions.layout).toEqual({ columns: 70, rows: 20 });
+});
+
+test("string service exposes one fixed document snapshot", () => {
+  const service = createStringRenderSessionService({ columns: 37, rows: 24, terminalStyle });
+  const session = service.session;
+
+  expect(session).toEqual({
+    dimensions: { terminal: null, layout: { columns: 37, rows: 24 } },
+  });
+  service.dispose();
+  expect(service.session).toBe(session);
+  expect(session.dimensions.layout).toEqual({ columns: 37, rows: 24 });
+});
+
+test("string service maps unbounded height to private null rows", () => {
+  const service = createStringRenderSessionService({ columns: 80, rows: null, terminalStyle });
+  expect(service.session.dimensions.layout).toEqual({ columns: 80, rows: null });
+});

@@ -13,10 +13,8 @@ import {
   validateFocusComponentTarget,
 } from "../component-target.ts";
 import { InternalFocusControllerKey } from "../focus-context.ts";
-import {
-  useRenderedTargetRegistrationControl,
-  type RenderedTargetRegistrationControl,
-} from "../../session/rendered-target.ts";
+import { useRenderedTargetRegistrationControl } from "../rendered-target.ts";
+import type { RenderedTargetRegistrationControl } from "../../session/rendered-target.ts";
 
 /**
  * A Vue ref whose component boundary controls this focus handle's rendered

@@ -1,5 +1,5 @@
 import { computed, type Ref } from "vue";
-import { useInternalRenderSession } from "../../render-session.ts";
+import { useInternalRenderSession } from "../context.ts";
 
 /** Readonly reactive root-layout dimensions from one accepted snapshot. */
 export interface UseLayoutSizeReturn {

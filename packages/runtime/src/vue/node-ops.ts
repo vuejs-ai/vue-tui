@@ -1,5 +1,4 @@
 import { type RendererOptions } from "vue";
-import type { AppContext } from "./context.ts";
 import {
   createBox,
   createComment as createCommentNode,
@@ -12,11 +11,9 @@ import {
   type TuiBox,
   type TuiContainer,
   type TuiNode,
-  type TuiRoot,
   type TuiText,
   type TuiVirtualText,
 } from "../host/nodes.ts";
-import { getRenderedTargetController } from "../session/rendered-target.ts";
 import {
   insertYogaChild,
   removeYogaChild,
@@ -41,6 +38,8 @@ import {
 
 export interface TtyRendererOptions {
   onCommit: () => void;
+  /** Session invalidates ref-bound behavior before the renderer detaches a host subtree. */
+  invalidateRenderedSubtree?: (target: TuiNode) => void;
   /** Host policy supplied by the terminal/session boundary. */
   isProduction?: () => boolean;
   /**
@@ -117,16 +116,6 @@ const STYLE_PROPS = new Set([
   "paddingLeft",
   "paddingRight",
 ]);
-
-/** Walk up the DOM tree to find the root node. */
-function findRoot(node: TuiNode): TuiRoot | null {
-  let current: TuiNode | null = node;
-  while (current) {
-    if (current.type === "root") return current;
-    current = current.parent;
-  }
-  return null;
-}
 
 /**
  * Walk up the DOM tree to check if we're inside a text context. A bare-string
@@ -475,11 +464,8 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
   function remove(child: TuiNode): void {
     const parent = child.parent;
     if (!parent) return;
-    const root = findRoot(child);
     try {
-      if (root) {
-        getRenderedTargetController(root.appContext as AppContext)?.invalidateSubtree(child);
-      }
+      options.invalidateRenderedSubtree?.(child);
     } catch {
       // Every target adapter already received its cleanup turn. A failing
       // disposer must not prevent Vue from detaching and freeing the host tree.

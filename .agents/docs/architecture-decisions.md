@@ -1,6 +1,6 @@
 # Architecture decisions
 
-Judgments Yunfei actually expressed about the internal structure of `@vue-tui/runtime` — selections, acceptances, and rejections. A finished implementation, a passed review, resemblance to a peer, or silence is not acceptance. Never invent a rationale; where no reason was given, the entry says so. Entries record the act of judgment, not the structure itself; [Runtime architecture](./architecture.md) records the structure, with the concrete work in [TODOs — architecture](./todos-architecture.md). Edit entries in place; git keeps history.
+Judgments Yunfei actually expressed about the internal structure of `@vue-tui/runtime` — selections, acceptances, and rejections. A finished implementation, a passed review, resemblance to a peer, or silence is not acceptance. Never invent a rationale; where no reason was given, the entry says so. Entries record the act of judgment, not the structure itself; [Runtime architecture](./architecture.md) records the structure, with the remaining work in [TODOs — architecture](./todos-architecture.md). Edit entries in place; git keeps history.
 
 Judgments about the **public** surface belong in the [Runtime API decision ledger](./runtime-api-decisions.md) and are not duplicated here. Boundaries between packages are settled in [Package architecture](./package-architecture.md).
 
@@ -55,5 +55,5 @@ Entries without a stamp are drafts of judgments Yunfei expressed. A stamp alone 
 ### Which SGR attributes receive structured fields
 
 - **Question:** Which authored SGR attributes beyond the common 1–9 and 53 set deserve their own `Cell.attrs` bits rather than the exact `extraSgr` fallback.
-- **Stopgap:** The current string pipeline carries unmodelled numeric attributes through. The target `Cell` keeps that behavior through `extraSgr`, so introducing `Frame` does not decide this question by dropping an attribute.
+- **Stopgap:** `Cell.extraSgr` carries unmodelled numeric and colon-form attributes through the frame with their matching terminators.
 - **What would settle it:** A demonstrated consumer or terminal behavior that benefits from structured inspection, followed by Yunfei's judgment on that attribute's admission.
