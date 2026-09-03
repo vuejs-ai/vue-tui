@@ -12,7 +12,6 @@ import { createRenderer } from "vue";
 import { writeSync as fsWriteSync } from "node:fs";
 import type { Readable, Writable } from "node:stream";
 import { onExit } from "signal-exit";
-import ansiEscapes from "ansi-escapes";
 import {
   INTERNAL_KITTY_KEYBOARD,
   createKittyKeyboardController,
@@ -44,6 +43,7 @@ import {
   type PreparedStaticOutput,
 } from "./paint/static-channel.ts";
 import { createFrameWriter } from "./surface/frame-writer.ts";
+import { createSurface, type Surface, type SurfaceRuntime } from "./surface/surface.ts";
 import {
   createOutputCoordinator,
   type CoordinatedWriteResult,
@@ -54,7 +54,7 @@ import {
   type MountedStreamLifecycle,
 } from "./terminal/stream-lifecycle.ts";
 import { registerConsoleSink, type ConsoleSinkRegistration } from "./terminal/console-manager.ts";
-import { hideCursorEscape, nextLineEscape } from "./surface/cursor-helpers.ts";
+import { nextLineEscape } from "./surface/cursor-helpers.ts";
 import { INTERNAL_RENDER_OBSERVER } from "./api/render-observer.ts";
 import { bsu, esu, shouldSynchronize } from "./terminal/write-synchronized.ts";
 import { emitTestEvent, RUNTIME_TEST_EVENT } from "./api/test-events.ts";
@@ -356,7 +356,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let exitInitiated = false;
 
   let mountedRoot: TuiRoot | null = null;
-  let mountedWriter: ReturnType<typeof createFrameWriter> | null = null;
   let mountedStdinController: StdinController | null = null;
   let mountedAppContext: AppContext | null = null;
   let mountedResizeHandler: (() => void) | null = null;
@@ -367,7 +366,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedUnsubscribeExit: (() => void) | null = null;
   let mountedBeforeExitHandler: (() => void) | null = null;
   let mountedUnsubscribeSuspension: (() => void) | null = null;
-  let mountedDynamicUpdatesLive = true;
+  let mountedSurface: Surface | null = null;
   let mountedRenderSession: InternalRenderSessionService | null = null;
   let mountedRenderedTargets: ReturnType<typeof createRenderedTargetController> | null = null;
   let mountedGeometry: ReturnType<typeof createInternalGeometryService> | null = null;
@@ -380,8 +379,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     replace(): void;
     close(): Promise<void>;
   } | null = null;
-  let mountedGetLastOutput: (() => string) | null = null;
-  let mountedNeedsTerminalLineAdvance: (() => boolean) | null = null;
   let mountedConsoleSink: ConsoleSinkRegistration | null = null;
   let mountedHostYogaLedger: HostYogaAllocationLedger | null = null;
   let mountedScheduler: ReturnType<typeof createCommitScheduler> | null = null;
@@ -389,8 +386,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   let mountedStreamLifecycle: MountedStreamLifecycle | null = null;
   let mountedCommit: (() => CoordinatedWriteResult) | null = null;
   let mountedCreateOutputStateRollback: (() => () => void) | null = null;
-  let mountedAlternateScreen = false;
-  let mountedFullscreenCursorHidden = false;
+  let mountedSurfaceRuntime: SurfaceRuntime | null = null;
   let terminalEventOwnershipActive = false;
   let mountedKittyController: ReturnType<typeof createKittyKeyboardController> | null = null;
   let mountedEmergencyKittyController: ReturnType<typeof createKittyKeyboardController> | null =
@@ -418,16 +414,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
   // whether unmount()/teardown() have real work to do is derived from the
   // actually-wired state, never from a sticky "was ever guarded" flag.
   let mountedAsOwner = false;
-
-  function setAlternateScreenOwned(owned: boolean): void {
-    if (mountedAlternateScreen === owned) return;
-    mountedAlternateScreen = owned;
-  }
-
-  function setFullscreenCursorHidden(hidden: boolean): void {
-    if (mountedFullscreenCursorHidden === hidden) return;
-    mountedFullscreenCursorHidden = hidden;
-  }
 
   function reportTerminalAcquired(): void {
     if (terminalEventOwnershipActive) return;
@@ -776,23 +762,10 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       runBestEffort(() => emergencyStdinController.dispose(true));
     }
 
-    if (mountedWriter && mountedDynamicUpdatesLive && appContext) {
-      const writer = mountedWriter;
-      if (mountedNeedsTerminalLineAdvance?.()) {
-        writeBestEffort(appContext.stdout, nextLineEscape, true);
-      }
-      if (writer.isCursorHidden()) writeBestEffort(appContext.stdout, "\x1b[?25h", true);
-      writer.reset({ cursorHidden: false });
-    }
-    if (mountedAlternateScreen && appContext) {
-      if (writeBestEffort(appContext.stdout, ansiEscapes.exitAlternativeScreen, true)) {
-        setAlternateScreenOwned(false);
-      }
-    }
-    if (mountedFullscreenCursorHidden && appContext) {
-      if (writeBestEffort(appContext.stdout, "\x1b[?25h", true)) {
-        setFullscreenCursorHidden(false);
-      }
+    if (mountedSurface && mountedSurfaceRuntime && appContext) {
+      runBestEffort(() =>
+        mountedSurface?.dispose(mountedSurfaceRuntime!, { cleanExit: false, sync: true }),
+      );
     }
   }
 
@@ -961,7 +934,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       !pendingExitErrorIsSilent &&
       mountedCommit &&
       stdoutWritable &&
-      (mountedDynamicUpdatesLive || !pendingExitFailure)
+      (mountedSurface?.isLive !== false || !pendingExitFailure)
     ) {
       teardownFinalCommitCompleted = true;
       try {
@@ -1015,6 +988,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       mountedSynchronizedOutputReleases = null;
       teardownCompleted = true;
       reportTerminalReleased();
+      mountedSurface = null;
+      mountedSurfaceRuntime = null;
       if (abandonExitSettlement) {
         // A Vite full reload replaces this application without representing an
         // application exit. Release stream observers and retained host
@@ -1025,7 +1000,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         mountedOutputCoordinator = null;
         mountedAppContext = null;
         mountedCommit = null;
-        mountedGetLastOutput = null;
         return;
       }
       flushDeferredLifecycle();
@@ -1122,10 +1096,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         runBestEffort(unsubscribe);
       }
 
-      const stdout = mountedAppContext?.stdout;
-      const stdoutWritable = stdout
-        ? getWritableStreamState(stdout as MaybeWritableStream).canWriteToStdout
-        : false;
       if (mountedConsoleSink) {
         const consoleSink = mountedConsoleSink;
         mountedConsoleSink = null;
@@ -1157,44 +1127,13 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         mountedKittyController = null;
         runBestEffort(() => kittyController.dispose(sync));
       }
-      if (!mountedDynamicUpdatesLive && mountedAppContext && !pendingExitFailure) {
-        // The dynamic frame was deferred during rendering. The final commit()
-        // above refreshed lastOutput to the current tree, so write that latest
-        // frame once, adding a line ending only when it needs one.
-        const lastFrame = mountedGetLastOutput?.() ?? "";
-        const finalDocument =
-          lastFrame === "" || lastFrame.endsWith("\n") ? lastFrame : `${lastFrame}\n`;
-        if (finalDocument !== "") {
-          writeBestEffort(mountedAppContext.stdout, finalDocument, sync);
-        }
-      }
-      // A viewport-filling Inline frame intentionally has no trailing newline
-      // while it is live. Advance exactly once before restoring the cursor so a
-      // following shell prompt cannot append to the frame's final row. NEL moves
-      // to column zero even when the terminal does not translate LF to CRLF.
-      if (mountedWriter && mountedDynamicUpdatesLive && mountedAppContext && stdoutWritable) {
-        const writer = mountedWriter;
-        if (mountedNeedsTerminalLineAdvance?.()) {
-          writeBestEffort(mountedAppContext.stdout, nextLineEscape, sync);
-        }
-        if (sync) {
-          if (writer.isCursorHidden()) {
-            writeBestEffort(mountedAppContext.stdout, "\x1b[?25h", true);
-          }
-          writer.reset({ cursorHidden: false });
-        } else {
-          runBestEffort(() => writer.done());
-        }
-      }
-      if (mountedAlternateScreen && mountedAppContext) {
-        if (writeBestEffort(mountedAppContext.stdout, ansiEscapes.exitAlternativeScreen, sync)) {
-          setAlternateScreenOwned(false);
-        }
-      }
-      if (mountedFullscreenCursorHidden && mountedAppContext) {
-        if (writeBestEffort(mountedAppContext.stdout, "\x1b[?25h", sync)) {
-          setFullscreenCursorHidden(false);
-        }
+      if (mountedSurface && mountedSurfaceRuntime) {
+        runBestEffort(() =>
+          mountedSurface?.dispose(mountedSurfaceRuntime!, {
+            cleanExit: !pendingExitFailure,
+            sync,
+          }),
+        );
       }
       if (mountedRoot) {
         runBestEffort(() => releasePaintCaches(mountedRoot!));
@@ -1243,7 +1182,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         runBestEffort(() => renderSession.dispose());
       }
       mountedRenderSession = null;
-      mountedNeedsTerminalLineAdvance = null;
       // Drop this app's full-reload registration so a stale teardown can't run on
       // the next reload. Identity-guarded inside unregisterDevApp: during a reload
       // the old app unregisters here before the new app registers.
@@ -1440,20 +1378,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     if (requestedMode === "fullscreen") {
       assertFullscreenCapability(stdout, terminalProbe);
     }
-    const surface = resolveLiveSurface({
+    const resolvedSurface = resolveLiveSurface({
       requestedMode,
       stdout: stdoutFacts,
       terminalProbe,
     });
-    // Live TTY surfaces update continuously; the non-TTY document host is final-only.
-    const dynamicUpdatesLive =
-      surface.kind === "inline-terminal" || surface.kind === "fullscreen-terminal";
-    const fixedFullscreenSurface = surface.kind === "fullscreen-terminal";
-    const boundedInlineSurface = surface.kind === "inline-terminal";
-    const inlineTerminalSurface = surface.kind === "inline-terminal";
-    // Supported secondary document host: non-TTY final-stream with modeled layout.
-    const documentHostSurface = surface.kind === "final-stream";
-    const boundedDocumentSurface = documentHostSurface;
+    const outputSurface = createSurface(resolvedSurface.kind);
 
     // Deterministic option, stream, capability, ownership, and surface
     // preflight ends here. From this point every consumed operation is covered
@@ -1462,7 +1392,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
     mountAttemptConsumed = true;
     consumedMountInProgress = true;
     try {
-      const renderSession = createLiveRenderSessionService(surface, terminalStyle);
+      mountedSurface = outputSurface;
+      const renderSession = createLiveRenderSessionService(resolvedSurface, terminalStyle);
 
       function readCurrentDimensions(preferFreshProbe = false): ResolvedLiveDimensions | null {
         const currentStdout = {
@@ -1484,29 +1415,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
               }
             : currentStdout;
         const next = resolveLiveDimensions(dimensionsSource, currentProbe);
-
-        if (surface.kind === "fullscreen-terminal") {
-          if (next.terminal === null) return null;
-          return { ...next, layout: next.terminal };
-        }
-        if (boundedInlineSurface) {
-          if (next.terminal === null) return null;
-          return { ...next, layout: next.terminal };
-        }
-        // Document hosts keep the fixed modeled layout for the whole lifetime.
-        if (boundedDocumentSurface) {
-          return {
-            terminal: null,
-            layout: {
-              columns: surface.session.dimensions.layout.columns,
-              rows: surface.session.dimensions.layout.rows,
-            },
-          };
-        }
-        return next;
+        return next.terminal === null ? null : { ...next, layout: next.terminal };
       }
-
-      mountedDynamicUpdatesLive = dynamicUpdatesLive;
 
       let failureOutputCoordinator: OutputCoordinator | null = null;
       const streamLifecycle = createMountedStreamLifecycle({
@@ -1582,12 +1492,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         return writable;
       }
 
-      function writeTerminalOutput(data: string, onHandoff?: () => void): boolean {
+      function writeTerminalOutput(
+        data: string,
+        onAccepted?: () => void,
+        onAttempt?: () => void,
+      ): boolean {
         let captured = false;
         let result: CoordinatedWriteResult;
         try {
           result = outputCoordinator.continue(() => {
-            captured = outputCoordinator.write(stdout, data, undefined, onHandoff);
+            captured = outputCoordinator.write(stdout, data, undefined, onAccepted, onAttempt);
           });
         } catch (error) {
           mountedAbandonPendingTerminalOutput?.({ physicalStateUncertain: true });
@@ -1630,23 +1544,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         writable: true,
       }) satisfies CoordinatedWriteResult;
 
-      // Frame coordination state — tracks the last rendered output so
-      // writeToStdout/writeToStderr can clear and restore the active frame.
-      // Frame state: lastOutput is the most recent rendered frame string and
-      // outputHeight is its line count (used by transcript erasure and lifecycle
-      // bookkeeping). Inline history is emitted once and is never accumulated for
-      // destructive whole-terminal replay.
-      const frameState = {
-        lastOutput: "",
-        lastOutputToRender: "" as string | undefined,
-        outputHeight: 0,
-      };
-      let fullscreenBaselineValid = false;
-      let fullscreenBaselineColumns: number | null = null;
-      let fullscreenBaselineRows: number | null = null;
-      let fullscreenEnterPending = false;
-      let fullscreenCursorHidePending = false;
-      let inlineRegionStarted = false;
       let terminalSuspended = false;
       let pendingMountSuspension = false;
       let terminalResumeInProgress = false;
@@ -1656,30 +1553,18 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       let resizePaintPending = false;
       let requestPendingResizeRefresh: () => void = () => {};
       let prepareResumeSurface: (() => (() => CoordinatedWriteResult) | null) | null = null;
-      let suspendedFullscreenSurface = false;
-      let suspendedInlineSurface = false;
+      let surfaceRuntime: SurfaceRuntime | null = null;
       let rejectedFullscreenStatic = false;
       mountedAbandonPendingTerminalOutput = (abandonment) => {
-        fullscreenEnterPending = false;
-        fullscreenCursorHidePending = false;
-        if (fixedFullscreenSurface && abandonment?.physicalStateUncertain) {
-          fullscreenBaselineValid = false;
-        }
+        outputSurface.abandonPendingOutput(abandonment);
         (mountedKittyController ?? mountedEmergencyKittyController)?.abandonPendingOutput();
         (mountedStdinController ?? mountedEmergencyStdinController)?.abandonPendingTerminalOutput(
           abandonment,
         );
         if (!abandonment?.physicalStateUncertain) requestTerminalReconcile();
       };
-      mountedGetLastOutput = () => frameState.lastOutput;
-      mountedNeedsTerminalLineAdvance = () =>
-        inlineTerminalSurface &&
-        frameState.lastOutputToRender !== undefined &&
-        frameState.lastOutputToRender !== "" &&
-        !frameState.lastOutputToRender.endsWith("\n");
-
       function rejectUnsupportedFullscreenStatic(statics = findStatics(tuiRoot)): boolean {
-        if (!fixedFullscreenSurface || statics.length === 0) return false;
+        if (outputSurface.acceptsHistory || statics.length === 0) return false;
         if (!rejectedFullscreenStatic) {
           // Static is terminal history, not fixed-viewport layout. Reject on
           // component presence (including an empty region) before preparation,
@@ -1703,50 +1588,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         }
       };
 
-      function releaseOutputSurfaceForSuspension(rememberSurface: boolean): void {
-        const writer = mountedWriter;
-        if (fixedFullscreenSurface) {
-          fullscreenBaselineValid = false;
-          mountedGeometry?.setSurfaceAvailable(false);
-          if (rememberSurface) suspendedFullscreenSurface = mountedAlternateScreen;
-          if (mountedAlternateScreen) {
-            if (writeBestEffort(stdout, ansiEscapes.exitAlternativeScreen, true)) {
-              setAlternateScreenOwned(false);
-            }
-          }
-          if (mountedFullscreenCursorHidden) {
-            if (writeBestEffort(stdout, "\x1b[?25h", true)) {
-              setFullscreenCursorHidden(false);
-            }
-          }
-          if (writer) {
-            runSuspensionStep(() => writer.reset({ cursorHidden: false }));
-          }
-          frameState.lastOutput = "";
-          frameState.lastOutputToRender = "";
-          frameState.outputHeight = 0;
-          reportTerminalReleased();
-          return;
-        }
-
-        if (!inlineTerminalSurface || !dynamicUpdatesLive || !writer) return;
-        mountedGeometry?.setSurfaceAvailable(false);
-        if (rememberSurface) suspendedInlineSurface = true;
-        if (mountedNeedsTerminalLineAdvance?.()) {
-          writeBestEffort(stdout, nextLineEscape, true);
-        }
-        const cursorWasHidden = writer.isCursorHidden();
-        const cursorShown = !cursorWasHidden || writeBestEffort(stdout, "\x1b[?25h", true);
-        runSuspensionStep(() =>
-          writer.reset({
-            cursorHidden: cursorWasHidden && !cursorShown,
-          }),
-        );
-        frameState.lastOutput = "";
-        frameState.lastOutputToRender = "";
-        frameState.outputHeight = 0;
-        inlineRegionStarted = false;
-        reportTerminalReleased();
+      function releaseOutputSurfaceForSuspension(): void {
+        if (!surfaceRuntime) return;
+        outputSurface.suspend(surfaceRuntime);
       }
 
       function suspendSession(): void {
@@ -1767,7 +1611,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           runSuspensionStep(() => mountedScheduler?.cancel());
           runSuspensionStep(() => mountedKittyController?.suspend(true));
           runSuspensionStep(() => mountedStdinController?.suspend(true));
-          releaseOutputSurfaceForSuspension(true);
+          releaseOutputSurfaceForSuspension();
         });
       }
 
@@ -1806,11 +1650,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         try {
           runLifecycleTransaction(() => {
             terminalResumeInProgress = true;
-            const needsLiveRepaint =
-              (fixedFullscreenSurface && suspendedFullscreenSurface) ||
-              (inlineTerminalSurface && suspendedInlineSurface) ||
-              dynamicUpdatesLive;
-            if (needsLiveRepaint) {
+            if (outputSurface.isLive) {
               prepareContinuedSurface();
             }
           });
@@ -1860,9 +1700,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
             const surfaceResult = runOutputTransaction(() => {
               runLifecycleTransaction(() => {
-                if (fixedFullscreenSurface && suspendedFullscreenSurface) {
-                  ensureFullscreenSurface();
-                }
+                if (surfaceRuntime) outputSurface.resume(surfaceRuntime);
                 mountedGeometry?.setSurfaceAvailable(true);
               });
             });
@@ -1920,8 +1758,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
 
             runLifecycleTransaction(() => {
               terminalSuspended = false;
-              suspendedFullscreenSurface = false;
-              suspendedInlineSurface = false;
               resizeHandledGeneration = Math.max(
                 resizeHandledGeneration,
                 resumeCoveredResizeGeneration,
@@ -1947,7 +1783,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             runLifecycleTransaction(() => {
               runSuspensionStep(() => mountedKittyController?.suspend(true));
               runSuspensionStep(() => mountedStdinController?.suspend(true));
-              releaseOutputSurfaceForSuspension(false);
+              releaseOutputSurfaceForSuspension();
             });
           }
         } finally {
@@ -1956,40 +1792,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         }
       }
 
-      function ensureInlineRegionStart() {
-        if (!inlineTerminalSurface || inlineRegionStarted) return;
-        // The runtime cannot know the caller's starting cursor column without an
-        // asynchronous terminal query. Start on a new physical row so later
-        // erase-line operations can never delete a pre-mount partial line. Delay
-        // this until the first visible write so an empty app emits no initial NEL.
-        writeRuntimeOutput(stdout, nextLineEscape);
-        inlineRegionStarted = true;
-      }
-
-      function restoreLastOutput() {
-        if (!dynamicUpdatesLive) return;
-        // Use `||` (not `??`): an EMPTY lastOutputToRender — its initial value before
-        // the first content commit or the value the resize-boundary path assigns —
-        // must fall back to `lastOutput + "\n"`. `??` only falls back for
-        // null/undefined, so an empty string would restore nothing after an
-        // external write.
-        writer.write(frameState.lastOutputToRender || frameState.lastOutput + "\n");
-      }
-
-      function writeCommittedInlineOutput(stream: NodeJS.WriteStream, data: string) {
-        if (data !== "") ensureInlineRegionStart();
-        writeRuntimeOutput(stream, data);
-        // Coordinated output becomes terminal-owned history before the dynamic
-        // region is restored. If the payload did not finish its row, NEL creates
-        // the line boundary without relying on the terminal's LF/CRLF mode.
-        if (
-          inlineTerminalSurface &&
-          data !== "" &&
-          !data.endsWith("\n") &&
-          (stream === stdout || Boolean(stream.isTTY))
-        ) {
-          writeRuntimeOutput(stream, nextLineEscape);
-        }
+      function requireSurfaceRuntime(): SurfaceRuntime {
+        if (!surfaceRuntime) throw new Error("output surface runtime is not ready");
+        return surfaceRuntime;
       }
 
       function writeToStdout(data: string): CoordinatedWriteResult {
@@ -2005,24 +1810,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             runLifecycleTransaction(() => {
               const outputData = stdout.isTTY ? sanitizeAnsiMultiline(data) : data;
               if (outputData === "") return;
-              if (fixedFullscreenSurface) {
-                repaintFullscreen(frameState.lastOutput, {
-                  writeBefore: () => writeRuntimeOutput(stdout, outputData),
-                  forceFull: true,
-                });
-                return;
-              }
-              if (!dynamicUpdatesLive) {
-                writeRuntimeOutput(stdout, outputData);
-                return;
-              }
-              // Mirror the render path: wrap clear+write+restore in BSU/ESU when the
-              // terminal supports synchronized updates, so the three-step sequence is
-              // atomic and prevents tear/flicker.
-              runCoordinatedWrite(() => {
-                writer.clear();
-                writeCommittedInlineOutput(stdout, outputData);
-              }, restoreLastOutput);
+              outputSurface.handoffHistory(stdout, outputData, requireSurfaceRuntime());
             });
           },
           { onUnhandedFailure: rollback },
@@ -2039,24 +1827,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             runLifecycleTransaction(() => {
               const outputData = stderr.isTTY ? sanitizeAnsiMultiline(data) : data;
               if (outputData === "") return;
-              if (fixedFullscreenSurface) {
-                repaintFullscreen(frameState.lastOutput, {
-                  writeBefore: () => writeRuntimeOutput(stderr, outputData),
-                  forceFull: true,
-                });
-                return;
-              }
-              if (!dynamicUpdatesLive) {
-                writeRuntimeOutput(stderr, outputData);
-                return;
-              }
-              // BSU/ESU are emitted on stdout because synchronized-update mode is a
-              // stdout capability, while the actual data remains on stderr. The sync
-              // gate therefore also uses stdout's TTY capability.
-              runCoordinatedWrite(() => {
-                writer.clear();
-                writeCommittedInlineOutput(stderr, outputData);
-              }, restoreLastOutput);
+              outputSurface.handoffHistory(stderr, outputData, requireSurfaceRuntime());
             });
           },
           { onUnhandedFailure: rollback },
@@ -2105,9 +1876,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         stderr,
         stdin,
         // Document hosts may parse mounted stdin bytes but never own its raw mode.
-        isRawModeSupported: boundedDocumentSurface ? false : hasRawInputCapability(stdin),
+        isRawModeSupported: outputSurface.isLive && hasRawInputCapability(stdin),
         setRawMode(mode: boolean) {
-          if (boundedDocumentSurface) return;
+          if (!outputSurface.isLive) return;
           if (
             typeof (stdin as { setRawMode?: (mode: boolean) => unknown }).setRawMode === "function"
           ) {
@@ -2174,10 +1945,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       const stdinController = createStdinController(stdin, {
         appCtx: appContext,
         exitOnCtrlC,
-        beforeManagedInputAcquire: ensureFullscreenSurface,
-        isManagedInputSurfaceReady: () =>
-          !terminalSuspended &&
-          (!fixedFullscreenSurface || (mountedAlternateScreen && mountedFullscreenCursorHidden)),
+        beforeManagedInputAcquire: () => outputSurface.resume(requireSurfaceRuntime()),
+        isManagedInputSurfaceReady: () => !terminalSuspended && outputSurface.isInputReady,
         isKittyKeyboardReady: () => kittyController?.isReady ?? true,
         writeTerminalOutput,
         requestTerminalReconcile,
@@ -2259,78 +2028,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       const writer = createFrameWriter(stdout, {
         write: (data) => writeRuntimeOutput(stdout, data),
       });
-      mountedWriter = writer;
+      outputSurface.attachWriter(writer);
 
       function createOutputStateRollback(): () => void {
-        const rollbackWriter = writer.createRollback();
-        const previousFrameState = { ...frameState };
-        const previousInlineRegionStarted = inlineRegionStarted;
-        const previousAlternateScreen = mountedAlternateScreen;
-        const previousFullscreenCursorHidden = mountedFullscreenCursorHidden;
-        const previousFullscreenBaselineValid = fullscreenBaselineValid;
-        const previousFullscreenBaselineColumns = fullscreenBaselineColumns;
-        const previousFullscreenBaselineRows = fullscreenBaselineRows;
-        let active = true;
-
-        return () => {
-          if (!active) return;
-          active = false;
-          rollbackWriter();
-          frameState.lastOutput = previousFrameState.lastOutput;
-          frameState.lastOutputToRender = previousFrameState.lastOutputToRender;
-          frameState.outputHeight = previousFrameState.outputHeight;
-          inlineRegionStarted = previousInlineRegionStarted;
-          setAlternateScreenOwned(previousAlternateScreen);
-          setFullscreenCursorHidden(previousFullscreenCursorHidden);
-          fullscreenBaselineValid = previousFullscreenBaselineValid;
-          fullscreenBaselineColumns = previousFullscreenBaselineColumns;
-          fullscreenBaselineRows = previousFullscreenBaselineRows;
-        };
+        return outputSurface.createRollback();
       }
       mountedCreateOutputStateRollback = createOutputStateRollback;
-
-      function reportFullscreenSurfaceAcquiredIfReady(): void {
-        if (mountedAlternateScreen && mountedFullscreenCursorHidden && !terminalResumeInProgress) {
-          reportTerminalAcquired();
-        }
-      }
-
-      function ensureFullscreenSurface(): boolean {
-        if (!fixedFullscreenSurface) return true;
-        let accepted = true;
-        if (!mountedAlternateScreen && !fullscreenEnterPending) {
-          fullscreenBaselineValid = false;
-          fullscreenEnterPending = true;
-          if (
-            !writeTerminalOutput(ansiEscapes.enterAlternativeScreen + "\x1b[H", () => {
-              if (!fullscreenEnterPending) return;
-              fullscreenEnterPending = false;
-              setAlternateScreenOwned(true);
-              reportFullscreenSurfaceAcquiredIfReady();
-              requestTerminalReconcile();
-            })
-          ) {
-            fullscreenEnterPending = false;
-            accepted = false;
-          }
-        }
-        if (!mountedFullscreenCursorHidden && !fullscreenCursorHidePending) {
-          fullscreenCursorHidePending = true;
-          if (
-            !writeTerminalOutput("\x1b[?25l", () => {
-              if (!fullscreenCursorHidePending) return;
-              fullscreenCursorHidePending = false;
-              setFullscreenCursorHidden(true);
-              reportFullscreenSurfaceAcquiredIfReady();
-              requestTerminalReconcile();
-            })
-          ) {
-            fullscreenCursorHidePending = false;
-            accepted = false;
-          }
-        }
-        return accepted;
-      }
 
       const synchronize = shouldSynchronize(stdout);
 
@@ -2400,75 +2103,39 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         if (error !== undefined) throw error;
       }
 
-      function repaintFullscreen(
-        output: string,
-        options: {
-          readonly writeBefore?: () => void;
-          /** Side-channel output invalidates every row, even when frame text is unchanged. */
-          readonly forceFull?: boolean;
-        } = {},
-      ): boolean {
-        const viewportColumns = renderSession.session.dimensions.layout.columns;
-        const viewportRows = renderSession.session.dimensions.layout.rows;
-        const dimensionsMatch =
-          fullscreenBaselineColumns === viewportColumns && fullscreenBaselineRows === viewportRows;
-        if (
-          options.writeBefore === undefined &&
-          fullscreenBaselineValid &&
-          dimensionsMatch &&
-          output === frameState.lastOutput
-        ) {
-          return false;
-        }
-        runLifecycleTransaction(() => {
-          ensureFullscreenSurface();
-          const previousRows = frameState.lastOutput.split("\n");
-          const nextRows = output.split("\n");
-          const canDiff =
-            options.forceFull !== true &&
-            fullscreenBaselineValid &&
-            dimensionsMatch &&
-            viewportRows !== null &&
-            previousRows.length === viewportRows &&
-            nextRows.length === viewportRows;
-          runCoordinatedWrite(
-            () => {
-              writeRuntimeOutput(stdout, hideCursorEscape);
-              options.writeBefore?.();
-            },
-            () => {
-              if (canDiff) {
-                const changedRows: string[] = [];
-                for (let row = 0; row < viewportRows; row++) {
-                  if (previousRows[row] === nextRows[row]) continue;
-                  changedRows.push(
-                    ansiEscapes.cursorTo(0, row),
-                    "\x1b[0m",
-                    nextRows[row]!,
-                    "\x1b[0m",
-                    ansiEscapes.eraseEndLine,
-                  );
-                }
-                // Keep the physical cursor at the frame bottom so later
-                // relative rewrites and teardown start from a known anchor.
-                changedRows.push(ansiEscapes.cursorTo(0, Math.max(0, viewportRows - 1)));
-                writeRuntimeOutput(stdout, changedRows.join(""));
-              } else {
-                writeRuntimeOutput(stdout, ansiEscapes.clearViewport + output);
-              }
-              writer.sync(output);
-            },
-          );
-
-          frameState.lastOutput = output;
-          frameState.lastOutputToRender = output;
-          frameState.outputHeight = output === "" ? 0 : output.split("\n").length;
-          fullscreenBaselineValid = true;
-          fullscreenBaselineColumns = viewportColumns;
-          fullscreenBaselineRows = viewportRows;
-        });
-        return true;
-      }
+      surfaceRuntime = {
+        stdout,
+        get isResumeInProgress() {
+          return terminalResumeInProgress;
+        },
+        get isStdoutTty() {
+          return stdout.isTTY === true;
+        },
+        get isStdoutWritable() {
+          return getWritableStreamState(stdout as MaybeWritableStream).canWriteToStdout;
+        },
+        get viewportColumns() {
+          return renderSession.session.dimensions.layout.columns;
+        },
+        get viewportRows() {
+          return renderSession.session.dimensions.layout.rows;
+        },
+        write(stream, data, onHandoff) {
+          return writeRuntimeOutput(stream, data, undefined, onHandoff);
+        },
+        writeBestEffort,
+        writeTerminal: writeTerminalOutput,
+        runCoordinatedWrite,
+        runLifecycleTransaction,
+        runSynchronizedOutput,
+        requestTerminalReconcile,
+        reportTerminalAcquired,
+        reportTerminalReleased,
+        setSurfaceAvailable(available) {
+          mountedGeometry?.setSurfaceAvailable(available);
+        },
+      };
+      mountedSurfaceRuntime = surfaceRuntime;
 
       function writePreparedStatic(
         prepared: PreparedStaticOutput,
@@ -2481,9 +2148,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         });
       }
 
-      function renderInteractiveFrame(
+      function presentFrame(
         output: string,
-        outputHeight: number,
         preparedStatic: PreparedStaticOutput,
         staticHooks?: {
           readonly onHandoff: () => void;
@@ -2491,48 +2157,20 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         },
       ): boolean {
         const staticOutput = preparedStatic.output;
-        const hasStaticOutput = staticOutput !== "";
-        const isTty = !!stdout.isTTY;
-        const viewportRows = renderSession.session.dimensions.layout.rows;
-
-        if (fixedFullscreenSurface) {
-          return repaintFullscreen(output);
-        }
-
-        if (output !== "" || hasStaticOutput) {
-          ensureInlineRegionStart();
-        }
-
-        // A frame that fills or exceeds the viewport gets no trailing newline.
-        // Only apply when writing to a real TTY — piped output always gets trailing newlines.
-        const fillsViewport = isTty && viewportRows !== null && outputHeight >= viewportRows;
-        const outputToRender = fillsViewport ? output : output + "\n";
-
-        let frameWritten = hasStaticOutput;
-        if (hasStaticOutput) {
-          // Clear frame -> write static -> re-render frame via log-update
-          runSynchronizedOutput(() => {
-            writer.clear();
-            writePreparedStatic(preparedStatic, staticOutput, staticHooks?.onHandoff);
-            staticHooks?.onPrepared();
-            writer.write(outputToRender);
-          });
-        } else {
-          // Compare the raw frame so an initially empty app never enters
-          // log-update and therefore emits no cursor escapes.
-          const willRender = writer.willRender(outputToRender);
-          if (output !== frameState.lastOutput) {
-            frameWritten = true;
-            const shouldWrap = synchronize && willRender;
-            if (shouldWrap) runSynchronizedOutput(() => writer.write(outputToRender));
-            else writer.write(outputToRender);
-          }
-        }
-
-        frameState.lastOutput = output;
-        frameState.lastOutputToRender = outputToRender;
-        frameState.outputHeight = outputHeight;
-        return frameWritten;
+        return outputSurface.present(
+          {
+            frame: output,
+            history: {
+              output: staticOutput,
+              handoff(onHandoff) {
+                writePreparedStatic(preparedStatic, staticOutput, onHandoff);
+              },
+            },
+            onHistoryHandoff: staticHooks?.onHandoff,
+            onHistoryPrepared: staticHooks?.onPrepared,
+          },
+          requireSurfaceRuntime(),
+        );
       }
 
       // Produce the visual dynamic frame for a given terminal width. Static
@@ -2549,12 +2187,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           viewport: viewportRows === undefined ? undefined : { width, height: viewportRows },
           geometry,
         });
-        // The hard paint viewport is the primary guard. Keep a final physical
-        // row bound as defense-in-depth for future paint extensions: Inline
-        // must never let an application frame exceed terminal-addressable rows.
-        return (boundedInlineSurface || boundedDocumentSurface) && viewportRows !== undefined
-          ? output.split("\n").slice(0, viewportRows).join("\n")
-          : output;
+        // Keep bounded output within the rows its surface protocol can safely
+        // address even if a paint implementation returns excess rows.
+        return outputSurface.limitFrame(output, viewportRows);
       }
 
       let blockedFrameRetryPending = false;
@@ -2609,18 +2244,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         }
         if (rejectUnsupportedFullscreenStatic()) return acceptedCoordinatedWrite;
 
-        // Fullscreen ownership must be physically established before user
-        // onRender callbacks run. Keep acquisition as its own finite transaction:
-        // if it backpressures, the frame is prepared only after drain; if a callback
-        // terminates during the later frame, emergency teardown can restore a
-        // surface that the stream has already accepted.
-        if (fixedFullscreenSurface && (!mountedAlternateScreen || !mountedFullscreenCursorHidden)) {
+        // A surface that has a physical input lease establishes it before user
+        // onRender callbacks. Keep acquisition in its own finite transaction so
+        // a blocked terminal write cannot overtake the first frame.
+        if (!outputSurface.isInputReady) {
           const surface = runOutputTransaction(() => {
             // A rendered target can establish state only after Vue has
             // attached its host node. Reconcile it before the first terminal
             // mutation so input acquisition observes the current tree.
             mountedRenderedTargets?.reconcile();
-            ensureFullscreenSurface();
+            outputSurface.resume(requireSurfaceRuntime());
           });
           if (surface.status === "blocked") {
             if (options.retryWhenBlocked !== false) requestBlockedFrameRetry(surface.ready);
@@ -2745,19 +2378,9 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         // instances stay open for later content or ordinary Vue unmount. A
         // prepared block is accepted only after its stdout write returns normally.
         const w = renderSession.session.dimensions.layout.columns;
-        const exactViewportRows = fixedFullscreenSurface
-          ? (renderSession.session.dimensions.layout.rows ?? undefined)
-          : undefined;
-        const maximumRows =
-          exactViewportRows === undefined && (boundedInlineSurface || boundedDocumentSurface)
-            ? (renderSession.session.dimensions.layout.rows ?? undefined)
-            : undefined;
-        const dynamicHeight: LayoutHeightConstraint =
-          exactViewportRows !== undefined
-            ? { mode: "exact", rows: exactViewportRows }
-            : maximumRows !== undefined
-              ? { mode: "at-most", rows: maximumRows }
-              : { mode: "unbounded" };
+        const dynamicHeight: LayoutHeightConstraint = outputSurface.layoutHeight(
+          renderSession.session.dimensions.layout.rows,
+        );
         const layout = runLayoutTransaction({
           dynamicRoot: tuiRoot,
           staticRoots: staticNodes,
@@ -2776,28 +2399,6 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
                 ? Math.min(dynamicHeight.rows, layout.dynamicHeight)
                 : undefined;
 
-          if (!dynamicUpdatesLive) {
-            // Non-interactive: compute the dynamic frame now, write static
-            // output after onRender, and defer dynamic output until unmount.
-            geometryFrame = mountedGeometry?.beginFrame();
-            const frame = renderFrame(layout.computed, w, paintViewportRows, geometryFrame);
-            renderObserver?.onCommit?.({
-              dynamic: frame,
-              staticOutput: hasStaticOutput ? staticOutput : "",
-              phase: teardownStarted ? "teardown" : "update",
-            });
-            frameState.lastOutput = frame;
-            frameState.lastOutputToRender = frame + "\n";
-            frameState.outputHeight = frame === "" ? 0 : frame.split("\n").length;
-            if (onRender) onRender({ renderTime: performance.now() - start });
-            if (hasStaticOutput) {
-              writePreparedStatic(preparedStatic, staticOutput, () =>
-                hooks.markStaticHanded(frame),
-              );
-            }
-            return;
-          }
-
           geometryFrame = mountedGeometry?.beginFrame();
           const frame = renderFrame(layout.computed, w, paintViewportRows, geometryFrame);
           renderObserver?.onCommit?.({
@@ -2805,24 +2406,16 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
             staticOutput: hasStaticOutput ? staticOutput : "",
             phase: teardownStarted ? "teardown" : "update",
           });
-          const outputHeight = frame === "" ? 0 : frame.split("\n").length;
-
-          if (fixedFullscreenSurface) {
-            // A setup-owned managed-input demand may already have acquired
-            // the surface after its capability preflight. Input-free mounts
-            // reach this idempotent acquisition only after renderer-owned
-            // target and geometry preparation has
-            // succeeded. Either path owns Fullscreen before a user onRender
-            // callback can terminate the process synchronously.
-            ensureFullscreenSurface();
+          if (!outputSurface.isInputReady) {
+            // A setup-owned managed-input demand may already own the physical
+            // surface. Otherwise this idempotent acquisition happens only after
+            // renderer-owned target and geometry preparation has succeeded.
+            outputSurface.resume(requireSurfaceRuntime());
           }
 
-          // Both surfaces commit the same way from here; only the acquisition
-          // above differs, and renderInteractiveFrame re-checks the surface
-          // itself to pick its write path.
           if (onRender) onRender({ renderTime: performance.now() - start });
           if (
-            renderInteractiveFrame(frame, outputHeight, preparedStatic, {
+            presentFrame(frame, preparedStatic, {
               onHandoff: () => hooks.markStaticHanded(frame),
               onPrepared: hooks.capturePostStaticRollback,
             })
@@ -2866,7 +2459,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       baseApp.provide(StdinContextKey, stdinController);
       if (devOverlayEnabled) {
         baseApp.provide(DevStateKey, devState);
-        baseApp.provide(DevOverlayPresentationKey, fixedFullscreenSurface ? "absolute" : "flow");
+        baseApp.provide(
+          DevOverlayPresentationKey,
+          // Fullscreen uses absolute overlay placement because it owns a fixed
+          // viewport with a stable origin.
+          outputSurface.kind === "fullscreen-terminal" ? "absolute" : "flow",
+        );
         // Full reload REPLACES this app without reporting an application exit;
         // closing the Vite session normally unmounts it and waits for terminal
         // restoration. Keeping those paths separate prevents server.close()
@@ -2949,8 +2547,8 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
         try {
           teardown(); // best-effort cursor/alt-screen restore
         } catch {
-          // teardown's restore write (mountedWriter.done() -> log-update
-          // showCursor -> stdout.write("\x1b[?25h")) can itself throw if
+          // teardown delegates restoration to the mounted surface, whose
+          // writer or terminal escape write can itself throw if
           // stdout.write fails. A failing best-effort restore must not replace
           // the first Runtime failure or Vue error selected for this mount.
         }
@@ -2962,7 +2560,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
       // the normal ~32ms commit throttle. Dimension facts update immediately,
       // then the newest resize waits for Vue consumers before one authoritative
       // paint. Rapid events are coalesced without exposing an intermediate frame.
-      if (dynamicUpdatesLive) {
+      if (outputSurface.isLive) {
         // Track the physical geometry that the current relative-writer baseline
         // was painted against. A real dimension change can invalidate that
         // baseline even when the logical component output is unchanged.
@@ -3003,7 +2601,7 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
           const currentRows = nextDimensions.terminal?.rows ?? null;
           const dimensionsChanged =
             currentWidth !== previousTerminalWidth || currentRows !== lastPaintedTerminalRows;
-          const inlineMappingChanged = dimensionsChanged;
+          const mappingChanged = dimensionsChanged;
 
           return () =>
             commit({
@@ -3013,31 +2611,12 @@ export function createApp(root: Component, rootProps?: RootProps | null): TuiApp
                 // dimensions. This explicit commit is the authoritative paint for
                 // the resize/continue boundary.
                 scheduler.cancel();
-                if (inlineTerminalSurface && inlineMappingChanged && inlineRegionStarted) {
-                  // Terminal reflow makes the old logical-line baseline untrustworthy:
-                  // erasing it could touch terminal-owned rows. Leave that snapshot
-                  // immutable, move to the bottom of the resized viewport, establish a
-                  // fresh row, forget writer bookkeeping without emitting erase bytes,
-                  // and paint the new bounded region from scratch.
-                  runSynchronizedOutput(() => {
-                    writeRuntimeOutput(stdout, hideCursorEscape);
-                    if (currentRows === null) return;
-                    writeRuntimeOutput(
-                      stdout,
-                      ansiEscapes.cursorDown(currentRows) + nextLineEscape,
-                    );
-                    writer.reset();
-                    frameState.lastOutput = "";
-                    frameState.lastOutputToRender = "";
-                    frameState.outputHeight = 0;
-                  });
-                } else if (currentWidth < previousTerminalWidth && !fixedFullscreenSurface) {
-                  // Live non-terminal streams retain the existing relative-writer
-                  // narrowing behavior; they do not claim terminal history ownership.
-                  writer.clear();
-                  frameState.lastOutput = "";
-                  frameState.lastOutputToRender = "";
-                }
+                outputSurface.resize(requireSurfaceRuntime(), {
+                  currentColumns: currentWidth,
+                  currentRows,
+                  mappingChanged,
+                  previousColumns: previousTerminalWidth,
+                });
               },
               onAccepted() {
                 lastPaintedTerminalWidth = currentWidth;

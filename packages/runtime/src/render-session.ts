@@ -1,29 +1,22 @@
 import { inject, readonly, shallowReactive, type DeepReadonly, type InjectionKey } from "vue";
 import type { TerminalStyle } from "./paint/terminal-style.ts";
 import { MAX_LAYOUT_VALUE } from "./layout/numeric-limits.ts";
+import type {
+  ResolvedLiveDimensions,
+  ResolvedLiveSurface,
+  SurfaceLayoutSize,
+  SurfaceSize,
+} from "./surface/surface-types.ts";
 import type { TerminalSizeProbeResult } from "./terminal/node/terminal-size-probe.ts";
+
+export type { ResolvedLiveDimensions, ResolvedLiveSurface } from "./surface/surface-types.ts";
 
 /** The terminal screen model requested when an application mounts. */
 export type RenderMode = "inline" | "fullscreen";
 
-/** A terminal or deliberately modeled terminal's character-cell dimensions. */
-export interface RenderSize {
-  readonly columns: number;
-  readonly rows: number;
-}
-
-/** The root area the renderer promises to lay out. `rows: null` is unbounded. */
-export interface RenderLayoutSize {
-  readonly columns: number;
-  readonly rows: number | null;
-}
-
-export interface RenderDimensions {
-  readonly terminal: RenderSize | null;
-  readonly layout: RenderLayoutSize;
-}
-
-export type ResolvedLiveDimensions = RenderDimensions;
+export type RenderSize = SurfaceSize;
+export type RenderLayoutSize = SurfaceLayoutSize;
+export type RenderDimensions = ResolvedLiveDimensions;
 
 /**
  * Reactive root-layout dimensions for one mounted live render tree.
@@ -55,33 +48,6 @@ export interface LiveHostInput {
   };
   readonly terminalProbe: TerminalSizeProbeResult;
 }
-
-interface ResolvedLiveSurfaceBase {
-  readonly dimensions: ResolvedLiveDimensions;
-  readonly session: InternalLiveRenderSessionSnapshot;
-}
-
-/**
- * Supported mounted surfaces only:
- * - live TTY Inline (`inline-terminal`)
- * - live TTY Fullscreen (`fullscreen-terminal`)
- * - non-TTY document / final-stream host
- *
- * Synchronous string rendering uses {@link createStringRenderSessionService}.
- * Test-only combinations (forced non-TTY live stream, TTY final-stream demotion)
- * are not created.
- */
-export type ResolvedLiveSurface =
-  | (ResolvedLiveSurfaceBase & {
-      readonly kind: "final-stream";
-      readonly reason: "stdout-not-tty";
-    })
-  | (ResolvedLiveSurfaceBase & {
-      readonly kind: "inline-terminal";
-    })
-  | (ResolvedLiveSurfaceBase & {
-      readonly kind: "fullscreen-terminal";
-    });
 
 /** Validate the accepted mount-mode contract without reading any stream option. */
 export function normalizeRequestedMode(options: object): RenderMode {
@@ -159,15 +125,6 @@ export function resolveLiveDimensions(
   };
 }
 
-function sessionSnapshot(dimensions: RenderDimensions): InternalLiveRenderSessionSnapshot {
-  return {
-    dimensions: {
-      terminal: dimensions.terminal,
-      layout: dimensions.layout,
-    },
-  };
-}
-
 /**
  * Resolve the supported mounted surface from host facts.
  *
@@ -190,7 +147,6 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
       kind: "final-stream",
       reason: "stdout-not-tty",
       dimensions: documentDimensions,
-      session: sessionSnapshot(documentDimensions),
     };
   }
 
@@ -205,14 +161,12 @@ export function resolveLiveSurface(input: LiveHostInput): ResolvedLiveSurface {
     return {
       kind: "fullscreen-terminal",
       dimensions: surfaceDimensions,
-      session: sessionSnapshot(surfaceDimensions),
     };
   }
 
   return {
     kind: "inline-terminal",
     dimensions: surfaceDimensions,
-    session: sessionSnapshot(surfaceDimensions),
   };
 }
 
@@ -251,7 +205,7 @@ export function createLiveRenderSessionService(
   terminalStyle: TerminalStyle,
 ): InternalLiveRenderSessionService {
   const state = shallowReactive<MutableLiveRenderSession>({
-    dimensions: frozenDimensions(surface.session.dimensions),
+    dimensions: frozenDimensions(surface.dimensions),
   });
   let disposed = false;
 

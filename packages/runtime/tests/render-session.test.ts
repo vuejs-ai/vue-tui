@@ -144,7 +144,7 @@ test("non-TTY Fullscreen and Inline select the same document host", () => {
     expect(surface.kind).toBe("final-stream");
     if (surface.kind !== "final-stream") throw new Error("expected final-stream");
     expect(surface.reason).toBe("stdout-not-tty");
-    expect(surface.session.dimensions).toEqual({
+    expect(surface.dimensions).toEqual({
       terminal: null,
       layout: { columns: 80, rows: 24 },
     });
@@ -157,7 +157,7 @@ test("visual TTY without detected dimensions stays live with modeled layout", ()
   );
 
   expect(surface.kind).toBe("inline-terminal");
-  expect(surface.session.dimensions).toEqual({
+  expect(surface.dimensions).toEqual({
     terminal: null,
     layout: { columns: 80, rows: 24 },
   });
@@ -167,7 +167,7 @@ test("visual Inline exposes terminal rows as a maximum layout bound", () => {
   const surface = resolveLiveSurface(liveInput());
 
   expect(surface.kind).toBe("inline-terminal");
-  expect(surface.session.dimensions).toEqual({
+  expect(surface.dimensions).toEqual({
     terminal: { columns: 100, rows: 30 },
     layout: { columns: 100, rows: 30 },
   });
@@ -177,7 +177,7 @@ test("visual Fullscreen owns an exact detected viewport", () => {
   const surface = resolveLiveSurface(liveInput({ requestedMode: "fullscreen" }));
 
   expect(surface.kind).toBe("fullscreen-terminal");
-  expect(surface.session.dimensions).toEqual({
+  expect(surface.dimensions).toEqual({
     terminal: { columns: 100, rows: 30 },
     layout: { columns: 100, rows: 30 },
   });
