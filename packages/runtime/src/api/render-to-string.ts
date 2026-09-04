@@ -21,10 +21,13 @@ import {
   type InternalStringRenderSessionService,
 } from "../session/render-session.ts";
 import { MAX_LAYOUT_VALUE } from "../layout/numeric-limits.ts";
-import { resolveTerminalStyle } from "../text/terminal-style.ts";
-import { normalizeColorOption, type ColorProfile } from "../frame/color-profile.ts";
+import {
+  normalizeColorOption,
+  resolveColorCapability,
+  type ColorProfile,
+} from "../frame/color-profile.ts";
 import { createNodeStringContexts, type NodeStringContexts } from "../session/string-context.ts";
-import { getDefaultNodeTerminalStyleFacts, isNodeProduction } from "../terminal/node/backend.ts";
+import { getDefaultNodeColorFacts, isNodeProduction } from "../terminal/node/backend.ts";
 
 export interface RenderToStringOptions {
   /**
@@ -80,19 +83,19 @@ interface NormalizedStringOptions {
 }
 
 function renderToStringInternal(component: Component, options: NormalizedStringOptions): string {
-  const nodeStyleFacts = options.color === true ? getDefaultNodeTerminalStyleFacts() : undefined;
-  const terminalStyle =
+  const nodeColorFacts = options.color === true ? getDefaultNodeColorFacts() : undefined;
+  const colorCapability =
     options.color === true
-      ? resolveTerminalStyle({
+      ? resolveColorCapability({
           color: true,
-          stdout: nodeStyleFacts!.stdout,
-          environment: nodeStyleFacts!.environment,
+          stdout: nodeColorFacts!.stdout,
+          environment: nodeColorFacts!.environment,
         })
-      : resolveTerminalStyle({ color: options.color });
+      : resolveColorCapability({ color: options.color });
   const renderSession = createStringRenderSessionService({
     columns: options.width,
     rows: options.height,
-    terminalStyle,
+    colorCapability,
   });
   const contexts = createNodeStringContexts();
   try {
@@ -181,7 +184,6 @@ function renderStringDocument(
       columns: options.width,
       dynamicHeight:
         options.height === null ? { mode: "unbounded" } : { mode: "at-most", rows: options.height },
-      terminalStyle: renderSession.terminalStyle,
       // Take the laid-out picture rather than a hard paint viewport for short
       // documents. Yoga already applied a finite height bound when content
       // exceeded it; shorter output stays unpadded. Clipping only by line count
@@ -192,8 +194,11 @@ function renderStringDocument(
     let output: string;
     let capturedStaticOutput = "";
     try {
-      capturedStaticOutput = encodeFrameHistory(preparedStatic.frames);
-      output = frame === undefined ? "" : encodeFrame(frame);
+      capturedStaticOutput = encodeFrameHistory(
+        preparedStatic.frames,
+        renderSession.colorCapability,
+      );
+      output = frame === undefined ? "" : encodeFrame(frame, renderSession.colorCapability);
       if (options.height !== null && output !== "") {
         const lines = output.split("\n");
         if (lines.length > options.height) {

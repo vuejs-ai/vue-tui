@@ -1,4 +1,5 @@
 import type { Frame } from "../frame/frame.ts";
+import type { ColorCapability } from "../frame/color-profile.ts";
 import type { TerminalBackend, TerminalOutput } from "../terminal/backend.ts";
 import type { FrameWriter } from "./frame-writer.ts";
 import type { ResolvedLiveSurface } from "./surface-types.ts";
@@ -101,6 +102,9 @@ export abstract class SurfaceBase implements Surface {
   private frame: Frame | undefined;
   private frameNeedsTerminalLineAdvance = false;
 
+  /** The one color capability this surface encodes every frame to. */
+  constructor(protected readonly color: ColorCapability) {}
+
   protected get previousFrame(): Frame | undefined {
     return this.frame;
   }
@@ -165,7 +169,7 @@ export abstract class SurfaceBase implements Surface {
   abstract layoutHeight(viewportRows: number | null): SurfaceLayoutHeight;
 
   encodeHistory(frames: readonly Frame[]): string {
-    return encodeFrameHistory(frames);
+    return encodeFrameHistory(frames, this.color);
   }
 
   abstract present(presentation: SurfacePresentation, runtime: SurfaceRuntime): boolean;

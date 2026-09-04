@@ -54,7 +54,7 @@ export class DocumentSurface extends SurfaceBase {
   private finalFrame(): string | undefined {
     const frame = this.previousFrame;
     if (!frame) return undefined;
-    const output = encodeFrame(frame);
+    const output = encodeFrame(frame, this.color);
     if (output === "") return undefined;
     return output.endsWith("\n") ? output : `${output}\n`;
   }

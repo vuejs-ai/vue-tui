@@ -11,8 +11,7 @@ import {
   type SgrPair,
   type Style,
 } from "../frame/style.ts";
-import { applyChalk, applyColor } from "../text/text-style.ts";
-import type { TerminalStyle } from "../text/terminal-style.ts";
+import { applySgrSpan, applyTextStyle, colorSpan, dimSpan } from "../text/text-style.ts";
 import { sanitizeAnsi, sanitizeAnsiMultiline } from "../text/sanitize-ansi.ts";
 import type {
   TuiNode,
@@ -339,13 +338,7 @@ class Output {
   private readonly caches: OutputCaches;
   private readonly hardClip: ClipRect | undefined;
 
-  constructor(
-    width: number,
-    height: number,
-    private readonly terminalStyle: TerminalStyle,
-    clipToBounds = false,
-    caches = new OutputCaches(),
-  ) {
+  constructor(width: number, height: number, clipToBounds = false, caches = new OutputCaches()) {
     assertPaintSurfaceSize(width, height);
     this.width = width;
     this.height = height;
@@ -431,7 +424,7 @@ class Output {
         // Every write operation is already split into structural rows. Remove
         // C0/DEL and unsafe terminal controls before width calculation or
         // clipping so the measured grid and emitted bytes stay identical.
-        line = sanitizeAnsi(line, { singleLine: true, terminalStyle: this.terminalStyle });
+        line = sanitizeAnsi(line, { singleLine: true });
         const row = y + offsetY;
 
         // Line can be outside the pre-initialized picture if text is taller
@@ -572,10 +565,7 @@ class Output {
         if (clipV && (row < clipV.y1 || row >= clipV.y2)) continue;
 
         const rawLine = op.lines[offset]!;
-        const line = sanitizeAnsi(rawLine, {
-          singleLine: true,
-          terminalStyle: this.terminalStyle,
-        });
+        const line = sanitizeAnsi(rawLine, { singleLine: true });
         const lineWidth = this.caches
           .getStyledChars(line)
           .reduce(
@@ -664,7 +654,6 @@ function inlineTextValue(chunks: InlineText): string {
 
 function renderTextWithInlineStyles(
   node: TuiText | TuiVirtualText,
-  terminalStyle: TerminalStyle,
   inheritedBg?: unknown,
 ): InlineText {
   if (node.style.display === "none") return [];
@@ -673,8 +662,8 @@ function renderTextWithInlineStyles(
   // Text nodes receive no second Box fallback: omission then inherits this
   // Text's resolved background through the same channel cascade as foreground
   // and modifiers.
-  const inner = squashInlineChildren(node.children, terminalStyle, undefined);
-  return applyOwnStyle(node.props, inner, terminalStyle, inheritedBg);
+  const inner = squashInlineChildren(node.children, undefined);
+  return applyOwnStyle(node.props, inner, inheritedBg);
 }
 
 function explicitStyleMask(props: TextProps): number {
@@ -710,12 +699,7 @@ function omitBlockedStyles(props: TextProps, mask: number): TextProps {
 // selects the terminal-default foreground or background. The structural mask
 // makes enclosing wrappers skip channels already settled by a nested Text,
 // including bold and dim which share SGR 22 as their reset code.
-function applyOwnStyle(
-  props: TextProps,
-  inner: InlineText,
-  terminalStyle: TerminalStyle,
-  inheritedBg: unknown,
-): InlineText {
+function applyOwnStyle(props: TextProps, inner: InlineText, inheritedBg: unknown): InlineText {
   if (inner.length === 0) return inner;
   const defined = Object.fromEntries(
     Object.entries(props).filter(([, v]) => v !== undefined),
@@ -732,7 +716,7 @@ function applyOwnStyle(
     inner.map((chunk) => {
       const chunkProps = omitBlockedStyles(styleProps, chunk.blockedAncestorStyles);
       return {
-        value: sanitizeAnsiMultiline(applyChalk(terminalStyle, chunk.value, chunkProps)),
+        value: sanitizeAnsiMultiline(applyTextStyle(chunk.value, chunkProps)),
         blockedAncestorStyles: chunk.blockedAncestorStyles | ownMask,
       };
     }),
@@ -742,14 +726,10 @@ function applyOwnStyle(
 // Squash an array of inline children into styled text. `inheritedBg` is a base for
 // nested Text descendants that inherit background through the parent's style
 // channel rather than receiving the surrounding Box value again.
-function squashInlineChildren(
-  children: readonly TuiNode[],
-  terminalStyle: TerminalStyle,
-  inheritedBg: unknown,
-): InlineText {
+function squashInlineChildren(children: readonly TuiNode[], inheritedBg: unknown): InlineText {
   const chunks: InlineTextChunk[] = [];
   for (const child of children) {
-    chunks.push(...squashInlineChild(child, terminalStyle, inheritedBg));
+    chunks.push(...squashInlineChild(child, inheritedBg));
   }
   return mergeInlineText(chunks);
 }
@@ -765,16 +745,12 @@ function squashInlineChildren(
 // `<Box bg=red><Text bg=blue>x` would render red, not blue. A nested
 // <Text>/<virtual-text> child wraps itself (renderTextWithInlineStyles),
 // carrying its own style INSIDE the parent's eventual wrap.
-function squashInlineChild(
-  child: TuiNode,
-  terminalStyle: TerminalStyle,
-  inheritedBg: unknown,
-): InlineText {
+function squashInlineChild(child: TuiNode, inheritedBg: unknown): InlineText {
   if (child.type === "text-leaf") {
     return child.value.length === 0 ? [] : [{ value: child.value, blockedAncestorStyles: 0 }];
   }
   if (child.type === "tui-virtual-text" || child.type === "tui-text") {
-    return renderTextWithInlineStyles(child, terminalStyle, inheritedBg);
+    return renderTextWithInlineStyles(child, inheritedBg);
   }
   // Comments (null/undefined renders), boxes, etc. contribute nothing.
   return [];
@@ -788,7 +764,6 @@ function isBoxStyleName(style: string): style is keyof cliBoxes.Boxes {
 
 function drawBorder(
   output: Output,
-  terminalStyle: TerminalStyle,
   x: number,
   y: number,
   w: number,
@@ -840,13 +815,13 @@ function drawBorder(
     const edgeBg = stringProp(`border${capEdge}BackgroundColor`) ?? borderBackgroundColor;
     // Border SGR nesting deliberately differs from Text: foreground is
     // innermost, then background, with dim outermost. Routing edges through
-    // applyChalk would emit the channels in the wrong order for borders.
+    // applyTextStyle would emit the channels in the wrong order for borders.
     let styled = s;
-    if (edgeColor) {
-      styled = applyColor(terminalStyle, edgeColor, false)(styled);
-    }
-    if (edgeBg) styled = applyColor(terminalStyle, edgeBg, true)(styled);
-    if (edgeDim) styled = terminalStyle.chalk.dim(styled);
+    const edgeForeground = colorSpan(edgeColor, false);
+    if (edgeForeground) styled = applySgrSpan(styled, edgeForeground);
+    const edgeBackground = colorSpan(edgeBg, true);
+    if (edgeBackground) styled = applySgrSpan(styled, edgeBackground);
+    if (edgeDim) styled = applySgrSpan(styled, dimSpan);
     return styled;
   }
 
@@ -895,7 +870,6 @@ function getBoxContentMetrics(
 
 function fillBackground(
   output: Output,
-  terminalStyle: TerminalStyle,
   x: number,
   y: number,
   w: number,
@@ -907,7 +881,7 @@ function fillBackground(
   const height = Math.max(0, Math.floor(h));
   if (width === 0 || height === 0) return;
 
-  const line = applyChalk(terminalStyle, " ".repeat(width), { backgroundColor: color });
+  const line = applyTextStyle(" ".repeat(width), { backgroundColor: color });
   for (let i = 0; i < height; i++) output.write(x, y + i, [line]);
 }
 
@@ -923,7 +897,6 @@ interface PreparedTextPaintCache extends PreparedTextPaint {
   readonly wrapWidth: number;
   readonly wrapMode: TextProps["wrap"];
   readonly wrappedLines: readonly string[];
-  readonly terminalStyleKey: string;
 }
 
 const preparedTextPaintCache = new WeakMap<TuiText, PreparedTextPaintCache>();
@@ -932,7 +905,6 @@ function alignTextLine(
   line: string,
   width: number,
   textAlign: NonNullable<TextProps["textAlign"]>,
-  terminalStyle: TerminalStyle,
   inheritedBg: string | undefined,
 ): string {
   const remaining = Math.max(0, width - stringWidth(line));
@@ -944,13 +916,12 @@ function alignTextLine(
 
   const padProps: TextProps = { backgroundColor: inheritedBg };
   const pad = (columns: number): string =>
-    columns === 0 ? "" : applyChalk(terminalStyle, " ".repeat(columns), padProps);
+    columns === 0 ? "" : applyTextStyle(" ".repeat(columns), padProps);
   return pad(leading) + line + pad(trailing);
 }
 
 function prepareTextPaint(
   node: TuiText,
-  terminalStyle: TerminalStyle,
   inheritedBg: string | undefined,
   wrapWidth: number,
   wrappedLines: readonly string[],
@@ -964,15 +935,14 @@ function prepareTextPaint(
     cached.textAlign === textAlign &&
     cached.wrapWidth === wrapWidth &&
     cached.wrapMode === wrapMode &&
-    cached.wrappedLines === wrappedLines &&
-    cached.terminalStyleKey === terminalStyle.cacheKey
+    cached.wrappedLines === wrappedLines
   ) {
     return cached;
   }
 
-  const text = inlineTextValue(renderTextWithInlineStyles(node, terminalStyle, inheritedBg));
+  const text = inlineTextValue(renderTextWithInlineStyles(node, inheritedBg));
   const wrapped = styleMeasuredTextLines(text, wrappedLines, wrapMode ?? "wrap", wrapWidth).map(
-    (line) => alignTextLine(line, wrapWidth, textAlign ?? "left", terminalStyle, inheritedBg),
+    (line) => alignTextLine(line, wrapWidth, textAlign ?? "left", inheritedBg),
   );
   const prepared = { text, wrapped };
   const entry = {
@@ -982,7 +952,6 @@ function prepareTextPaint(
     wrapWidth,
     wrapMode,
     wrappedLines,
-    terminalStyleKey: terminalStyle.cacheKey,
     ...prepared,
   };
   preparedTextPaintCache.set(node, entry);
@@ -999,8 +968,6 @@ interface PaintRect {
 export interface PaintOptions {
   /** Immutable geometry from the layout transaction that precedes this paint. */
   readonly layout: ComputedLayout;
-  /** Text styling capability resolved for this render session. */
-  readonly terminalStyle: TerminalStyle;
   /** Private frame-local geometry collector. Publication happens after paint succeeds. */
   readonly geometry?: PaintGeometryFrame;
   /**
@@ -1050,25 +1017,9 @@ export function paint(root: TuiNode, options: PaintOptions): Frame {
   if (!rootLayout) throw new Error("paint requires the root ComputedLayout");
   const width = Math.max(1, Math.floor(options.viewport?.width ?? rootLayout.rect.width));
   const height = Math.max(1, Math.floor(options.viewport?.height ?? rootLayout.rect.height));
-  const out = new Output(
-    width,
-    height,
-    options.terminalStyle,
-    options.viewport !== undefined,
-    getRootOutputCaches(root),
-  );
+  const out = new Output(width, height, options.viewport !== undefined, getRootOutputCaches(root));
   const viewportClip = options.viewport ? { x: 0, y: 0, width, height } : undefined;
-  paintNode(
-    root,
-    options.layout,
-    out,
-    options.terminalStyle,
-    0,
-    0,
-    undefined,
-    viewportClip,
-    options.geometry,
-  );
+  paintNode(root, options.layout, out, 0, 0, undefined, viewportClip, options.geometry);
   return out.get();
 }
 
@@ -1076,7 +1027,6 @@ function paintNode(
   node: TuiNode,
   computedLayout: ComputedLayout,
   output: Output,
-  terminalStyle: TerminalStyle,
   x0: number,
   y0: number,
   inheritedBg?: string,
@@ -1101,7 +1051,7 @@ function paintNode(
   switch (node.type) {
     case "root": {
       for (const child of node.children) {
-        paintNode(child, computedLayout, output, terminalStyle, x0, y0, undefined, clip, geometry);
+        paintNode(child, computedLayout, output, x0, y0, undefined, clip, geometry);
       }
       return;
     }
@@ -1120,7 +1070,7 @@ function paintNode(
       const ownBg = typeof rawBg === "string" ? rawBg : undefined;
       const childBg = ownBg ? ownBg : inheritedBg;
       if (node.props["borderStyle"]) {
-        drawBorder(output, terminalStyle, x, y, w, h, node.props);
+        drawBorder(output, x, y, w, h, node.props);
       }
       if (ownBg) {
         const hasBorder = !!node.props["borderStyle"];
@@ -1128,7 +1078,7 @@ function paintNode(
         const bb = hasBorder && node.props["borderBottom"] !== false ? 1 : 0;
         const bl = hasBorder && node.props["borderLeft"] !== false ? 1 : 0;
         const br = hasBorder && node.props["borderRight"] !== false ? 1 : 0;
-        fillBackground(output, terminalStyle, x + bl, y + bt, w - bl - br, h - bt - bb, ownBg);
+        fillBackground(output, x + bl, y + bt, w - bl - br, h - bt - bb, ownBg);
       }
 
       // Overflow clipping limits children to the box content area (inside
@@ -1174,17 +1124,7 @@ function paintNode(
       if (contentMetrics.width === 0 || contentMetrics.height === 0) {
         for (const child of node.children) {
           if (computedLayout.get(child)?.isAbsolute) {
-            paintNode(
-              child,
-              computedLayout,
-              output,
-              terminalStyle,
-              x,
-              y,
-              childBg,
-              childClip,
-              geometry,
-            );
+            paintNode(child, computedLayout, output, x, y, childBg, childClip, geometry);
           } else {
             recordZeroContentGeometry(child, computedLayout, geometry);
           }
@@ -1194,7 +1134,7 @@ function paintNode(
       }
 
       for (const child of node.children) {
-        paintNode(child, computedLayout, output, terminalStyle, x, y, childBg, childClip, geometry);
+        paintNode(child, computedLayout, output, x, y, childBg, childClip, geometry);
       }
 
       if (clipped) output.unclip();
@@ -1230,13 +1170,7 @@ function paintNode(
       const textLayout = computed.text;
       if (!textLayout) return;
       const { wrapWidth, wrappedLines } = textLayout;
-      const { text, wrapped } = prepareTextPaint(
-        node,
-        terminalStyle,
-        inheritedBg,
-        wrapWidth,
-        wrappedLines,
-      );
+      const { text, wrapped } = prepareTextPaint(node, inheritedBg, wrapWidth, wrappedLines);
       // Empty text has no cells to write.
       if (text === "") return;
       // Pad each line to the cell width with the INHERITED Box background only —
@@ -1269,24 +1203,16 @@ function paintNode(
   }
 }
 
-export function paintContainer(
-  container: TuiContainer,
-  layout: ComputedLayout,
-  terminalStyle: TerminalStyle,
-): Frame {
+export function paintContainer(container: TuiContainer, layout: ComputedLayout): Frame {
   // Used by Static channel and tests.
-  if (container.type === "root") return paint(container, { layout, terminalStyle });
+  if (container.type === "root") return paint(container, { layout });
   throw new Error("paintContainer currently only supports root");
 }
 
-export function paintStaticLayout(
-  region: StaticLayoutRegion,
-  layout: ComputedLayout,
-  terminalStyle: TerminalStyle,
-): Frame {
-  const out = new Output(region.width, region.height, terminalStyle);
+export function paintStaticLayout(region: StaticLayoutRegion, layout: ComputedLayout): Frame {
+  const out = new Output(region.width, region.height);
   for (const child of region.children) {
-    paintNode(child, layout, out, terminalStyle, region.offsetX, region.offsetY);
+    paintNode(child, layout, out, region.offsetX, region.offsetY);
   }
   return out.get();
 }

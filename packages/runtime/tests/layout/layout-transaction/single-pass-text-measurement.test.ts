@@ -8,7 +8,7 @@ import {
 import { createBox, createRoot, createText, createTextLeaf } from "../../../src/host/nodes.ts";
 import { attachYoga, bindTextMeasure, detachYoga, getYogaNode } from "../../../src/layout/yoga.ts";
 import { paint, releasePaintCaches } from "../../../src/paint/paint.ts";
-import { createTerminalStyle } from "../../../src/text/terminal-style.ts";
+import { createColorCapability } from "../../../src/frame/color-profile.ts";
 import { encodeFrame } from "../../../src/surface/frame-encoder.ts";
 
 test("fractional text measurement completes in one layout call", () => {
@@ -105,9 +105,7 @@ test("paint consumes the wrapped lines captured by the layout transaction", () =
       },
     };
 
-    expect(
-      encodeFrame(paint(root, { layout: snapshot, terminalStyle: createTerminalStyle(0) })),
-    ).toBe("A\nBCD");
+    expect(encodeFrame(paint(root, { layout: snapshot }), createColorCapability(0))).toBe("A\nBCD");
   } finally {
     layout.dispose();
     releasePaintCaches(root);

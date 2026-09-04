@@ -91,7 +91,7 @@ Shared data and utilities, on no stage of their own:
 
 | Directory | Owns                                                                                                                  | May import |
 | --------- | --------------------------------------------------------------------------------------------------------------------- | ---------- |
-| `frame/`  | `Cell`, `Style`, `Frame`, `diff`. **No encoding**                                                                     | —          |
+| `frame/`  | `Cell`, `Style`, `Frame`, `diff`, and the resolved colour capability. **No encoding**                                 | —          |
 | `text/`   | Measurement, wrapping, and parsing user strings (including ANSI) into styled runs, produced once per content revision | `frame/`   |
 
 Above both paths:
@@ -103,7 +103,7 @@ Above both paths:
 | `session/` | `Session`: assembly, commit scheduling, the lifecycle state machine, focus ownership, geometry registration                                      | everything below, plus `vue/` and `vue`                                                   |
 | `vue/`     | `Box` / `Text` / `Static`, composables, the injection keys, the Vue custom-renderer node operations, and leaf helpers that `session/` also needs | `host/`, `layout/`, `frame/`, `input/`, `vue`, `session/` and `node:stream` as types only |
 
-`paint/` may not import `terminal/` or `surface/`, so painting has no route by which to emit an escape sequence. `surface/` may not import `host/`, so a surface has no route by which to read node props.
+`paint/` may not import `terminal/` or `surface/`, so painting has no route by which to emit an escape sequence. `surface/` may not import `host/`, so a surface has no route by which to read node props. The colour capability each host resolves lives in `frame/` because the encoder degrades to it and `surface/` may import `frame/`; `terminal/` cannot hold it, since that row may import nothing and the capability is derived from the public `ColorProfile`.
 
 `session/` sits above `vue/` because it builds the Vue renderer out of `vue/`'s node operations. The composables need what the session provides, but they reach it through injection keys rather than by importing it, so `vue/` owns the keys and needs `session/` for types alone. Both directions as values would be a cycle.
 

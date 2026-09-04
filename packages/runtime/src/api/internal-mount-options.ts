@@ -9,7 +9,7 @@ import {
   INTERNAL_KITTY_KEYBOARD,
   type InternalKittyKeyboardMountOptions,
 } from "../terminal/kitty-keyboard.ts";
-import type { TerminalStyle } from "../text/terminal-style.ts";
+import type { ColorCapability } from "../frame/color-profile.ts";
 import {
   INTERNAL_TERMINAL_SIZE_PROBE,
   type TerminalSizeProbe,
@@ -24,7 +24,7 @@ export type { InternalMountOptionPayload } from "../session/session.ts";
 type InternalMountOptionInput = {
   readonly onRender?: (info: { renderTime: number }) => void;
   readonly maxFps?: number;
-  readonly terminalStyle?: TerminalStyle;
+  readonly colorCapability?: ColorCapability;
   readonly [INTERNAL_KITTY_KEYBOARD]?: InternalKittyKeyboardMountOptions;
   readonly [INTERNAL_RENDER_OBSERVER]?: InternalRenderObserver;
   readonly [INTERNAL_TERMINAL_SIZE_PROBE]?: TerminalSizeProbe;
@@ -47,7 +47,7 @@ export type InternalMountOptionsInput = MountOptions &
 const internalOptionKeys = [
   "onRender",
   "maxFps",
-  "terminalStyle",
+  "colorCapability",
   INTERNAL_KITTY_KEYBOARD,
   INTERNAL_RENDER_OBSERVER,
   INTERNAL_TERMINAL_SIZE_PROBE,
@@ -71,7 +71,7 @@ export function createInternalMountOptions(
   const payload: InternalMountOptionPayload = {
     onRender: input.onRender,
     maxFps: input.maxFps,
-    terminalStyle: input.terminalStyle,
+    colorCapability: input.colorCapability,
     [INTERNAL_KITTY_KEYBOARD]: input[INTERNAL_KITTY_KEYBOARD],
     [INTERNAL_RENDER_OBSERVER]: input[INTERNAL_RENDER_OBSERVER],
     [INTERNAL_TERMINAL_SIZE_PROBE]: input[INTERNAL_TERMINAL_SIZE_PROBE],

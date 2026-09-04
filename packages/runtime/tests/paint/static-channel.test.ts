@@ -8,10 +8,10 @@ import {
   findStatics,
   prepareStaticOutput as prepareStaticOutputForStyle,
 } from "../../src/paint/static-channel.ts";
-import { createTerminalStyle } from "../../src/text/terminal-style.ts";
+import { createColorCapability } from "../../src/frame/color-profile.ts";
 import { encodeFrameHistory } from "../../src/surface/frame-encoder.ts";
 
-const terminalStyle = createTerminalStyle(3);
+const truecolor = createColorCapability(3);
 const prepareStaticOutput = (root: Parameters<typeof findStatics>[0], columns: number) => {
   const dynamicRoot = createRoot({} as AppContext);
   attachYoga(dynamicRoot);
@@ -23,7 +23,7 @@ const prepareStaticOutput = (root: Parameters<typeof findStatics>[0], columns: n
       dynamicHeight: { mode: "unbounded" },
     });
     try {
-      return prepareStaticOutputForStyle(layout, terminalStyle);
+      return prepareStaticOutputForStyle(layout);
     } finally {
       layout.dispose();
     }
@@ -33,7 +33,7 @@ const prepareStaticOutput = (root: Parameters<typeof findStatics>[0], columns: n
 };
 
 const output = (prepared: ReturnType<typeof prepareStaticOutputForStyle>): string =>
-  encodeFrameHistory(prepared.frames);
+  encodeFrameHistory(prepared.frames, truecolor);
 
 const ops = buildNodeOps({ onCommit: () => {} });
 

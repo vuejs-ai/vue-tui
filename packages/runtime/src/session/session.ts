@@ -27,7 +27,7 @@ import { runRenderCommit } from "./render-commit.ts";
 import { releasePaintCaches } from "../paint/paint.ts";
 import type { Frame } from "../frame/frame.ts";
 import { sanitizeAnsiMultiline } from "../text/sanitize-ansi.ts";
-import { resolveTerminalStyle, type TerminalStyle } from "../text/terminal-style.ts";
+import { resolveColorCapability, type ColorCapability } from "../frame/color-profile.ts";
 import { findStatics, type PreparedStaticOutput } from "../paint/static-channel.ts";
 import { createFrameWriter } from "../surface/frame-writer.ts";
 import { createSurface, type Surface, type SurfaceRuntime } from "../surface/surface.ts";
@@ -122,7 +122,7 @@ export const INTERNAL_RENDER_OBSERVER: unique symbol = Symbol.for(
 export interface InternalMountOptionPayload {
   readonly onRender?: (info: { renderTime: number }) => void;
   readonly maxFps?: number;
-  readonly terminalStyle?: TerminalStyle;
+  readonly colorCapability?: ColorCapability;
   readonly [INTERNAL_KITTY_KEYBOARD]?: InternalKittyKeyboardMountOptions;
   readonly [INTERNAL_RENDER_OBSERVER]?: InternalRenderObserver;
   readonly [INTERNAL_TERMINAL_SIZE_PROBE]?: TerminalSizeProbe;
@@ -1482,16 +1482,16 @@ export function createSessionApp(
       throw new Error("Cannot mount vue-tui: the selected stdout already has a live app.");
     }
     const stdoutFacts = currentStdoutFacts(terminal);
-    const terminalStyle =
-      color === true && internalOptions.terminalStyle !== undefined
-        ? internalOptions.terminalStyle
+    const colorCapability =
+      color === true && internalOptions.colorCapability !== undefined
+        ? internalOptions.colorCapability
         : color === true
-          ? resolveTerminalStyle({
+          ? resolveColorCapability({
               color,
               stdout: terminal.capabilities.stdout,
               environment: terminal.capabilities.environment,
             })
-          : resolveTerminalStyle({ color });
+          : resolveColorCapability({ color });
     // Internal deterministic-test observer. It observes the resolved session
     // and renderer content commits without selecting another output path.
     const renderObserver = internalOptions[INTERNAL_RENDER_OBSERVER];
@@ -1503,7 +1503,7 @@ export function createSessionApp(
       requestedMode,
       stdout: stdoutFacts,
     });
-    const outputSurface = createSurface(resolvedSurface.kind);
+    const outputSurface = createSurface(resolvedSurface.kind, colorCapability);
 
     // Deterministic option, stream, capability, ownership, and surface
     // preflight ends here. From this point every consumed operation is covered
@@ -1522,7 +1522,7 @@ export function createSessionApp(
       },
     });
     try {
-      const renderSession = createLiveRenderSessionService(resolvedSurface, terminalStyle);
+      const renderSession = createLiveRenderSessionService(resolvedSurface, colorCapability);
 
       function readCurrentDimensions(preferFreshProbe = false): ResolvedLiveDimensions | null {
         const currentStdout = currentStdoutFacts(terminal, preferFreshProbe);
@@ -2435,7 +2435,9 @@ export function createSessionApp(
                   emitTestEvent(RUNTIME_TEST_EVENT.paintCommitted, {
                     frame:
                       committedFrameEncoding ??
-                      (committedFrame === undefined ? "" : encodeFrame(committedFrame)),
+                      (committedFrame === undefined
+                        ? ""
+                        : encodeFrame(committedFrame, renderSession.colorCapability)),
                   });
                 }
               }
@@ -2515,7 +2517,6 @@ export function createSessionApp(
           staticRoots: staticNodes,
           columns: w,
           dynamicHeight,
-          terminalStyle: renderSession.terminalStyle,
           paintViewport: "height-constraint",
           focusController: session!.focusController,
           geometry: geometryFrame,
@@ -2526,7 +2527,8 @@ export function createSessionApp(
           const hasStaticOutput = staticOutput !== "";
           let encodedFrame: string | undefined;
           if (renderObserver?.onCommit) {
-            encodedFrame = frame === undefined ? "" : encodeFrame(frame);
+            encodedFrame =
+              frame === undefined ? "" : encodeFrame(frame, renderSession.colorCapability);
             renderObserver.onCommit({
               dynamic: encodedFrame,
               staticOutput: hasStaticOutput ? staticOutput : "",

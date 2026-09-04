@@ -299,7 +299,7 @@ export class FullscreenSurface extends SurfaceBase {
               changedRows.push(
                 ansiEscapes.cursorTo(0, row),
                 "\x1b[0m",
-                encodeFrameRow(frame!, row),
+                encodeFrameRow(frame!, row, this.color),
                 "\x1b[0m",
                 ansiEscapes.eraseEndLine,
               );
@@ -307,7 +307,7 @@ export class FullscreenSurface extends SurfaceBase {
             changedRows.push(ansiEscapes.cursorTo(0, Math.max(0, runtime.viewportRows! - 1)));
             runtime.write(runtime.stdout, changedRows.join(""));
           } else {
-            const encoded = options.encoded ?? (frame ? encodeFrame(frame) : "");
+            const encoded = options.encoded ?? (frame ? encodeFrame(frame, this.color) : "");
             runtime.write(runtime.stdout, ansiEscapes.clearViewport + encoded);
           }
         },

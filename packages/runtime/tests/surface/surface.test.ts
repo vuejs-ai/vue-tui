@@ -1,6 +1,7 @@
 import { expect, test } from "vite-plus/test";
 import { blankCell } from "../../src/frame/cell.ts";
 import { Frame } from "../../src/frame/frame.ts";
+import { createColorCapability } from "../../src/frame/color-profile.ts";
 import { createSurface, type Surface } from "../../src/surface/surface.ts";
 import type { FrameWriter } from "../../src/surface/frame-writer.ts";
 import type { SurfaceHistory, SurfaceRuntime } from "../../src/surface/surface-contract.ts";
@@ -8,6 +9,8 @@ import {
   createTestTerminalBackend,
   type TestTerminalBackend,
 } from "../../src/terminal/test/backend.ts";
+
+const truecolor = createColorCapability(3);
 
 function frame(text: string): Frame {
   const lines = text.split("\n");
@@ -118,16 +121,16 @@ test.each([
   ["fullscreen-terminal", { history: false, live: true }],
   ["final-stream", { history: true, live: false }],
 ] as const)("selects the %s surface capabilities", (kind, expected) => {
-  const surface: Surface = createSurface(kind);
+  const surface: Surface = createSurface(kind, truecolor);
 
   expect(surface.isLive).toBe(expected.live);
   expect(surface.acceptsHistory).toBe(expected.history);
 });
 
 test("each surface supplies its own layout height", () => {
-  const inline = createSurface("inline-terminal");
-  const fullscreen = createSurface("fullscreen-terminal");
-  const document = createSurface("final-stream");
+  const inline = createSurface("inline-terminal", truecolor);
+  const fullscreen = createSurface("fullscreen-terminal", truecolor);
+  const document = createSurface("final-stream", truecolor);
 
   expect(inline.layoutHeight(2)).toEqual({ mode: "at-most", rows: 2 });
   expect(fullscreen.layoutHeight(2)).toEqual({ mode: "exact", rows: 2 });
@@ -135,7 +138,7 @@ test("each surface supplies its own layout height", () => {
 });
 
 test("Inline owns a bounded writer region and restores it around history", () => {
-  const surface = createSurface("inline-terminal");
+  const surface = createSurface("inline-terminal", truecolor);
   const { runtime, writes } = createRuntime();
   const { writer, frames } = createWriter();
   const { history: staticHistory } = history();
@@ -150,7 +153,7 @@ test("Inline owns a bounded writer region and restores it around history", () =>
 });
 
 test("Fullscreen owns its terminal lease and fixed-viewport presentation", () => {
-  const surface = createSurface("fullscreen-terminal");
+  const surface = createSurface("fullscreen-terminal", truecolor);
   const { runtime, terminal, terminalWrites, writes } = createRuntime();
   const { writer, frames } = createWriter();
   const { history: staticHistory } = history();
@@ -173,7 +176,7 @@ test("Fullscreen owns its terminal lease and fixed-viewport presentation", () =>
 });
 
 test("Fullscreen keeps post-snapshot physical acquisitions until disposal", () => {
-  const surface = createSurface("fullscreen-terminal");
+  const surface = createSurface("fullscreen-terminal", truecolor);
   const { runtime, terminal } = createRuntime();
   const rollback = surface.createRollback();
 
@@ -186,7 +189,7 @@ test("Fullscreen keeps post-snapshot physical acquisitions until disposal", () =
 });
 
 test("Fullscreen releases mode leases only after restore handoff", () => {
-  const surface = createSurface("fullscreen-terminal");
+  const surface = createSurface("fullscreen-terminal", truecolor);
   const { runtime, terminal, writes } = createRuntime();
   const { writer } = createWriter();
   const handoffs: Array<() => void> = [];
@@ -222,7 +225,7 @@ test.each([
 ] as const)(
   "Fullscreen restores %s after its lease write throws",
   (_name, failingWrite, restore) => {
-    const surface = createSurface("fullscreen-terminal");
+    const surface = createSurface("fullscreen-terminal", truecolor);
     const { runtime, terminalWrites, writes } = createRuntime();
     const { writer } = createWriter();
     surface.attachWriter(writer);
@@ -248,7 +251,7 @@ test.each([
 );
 
 test("Document hands history off immediately and writes one final clean frame", () => {
-  const surface = createSurface("final-stream");
+  const surface = createSurface("final-stream", truecolor);
   const { runtime, writes } = createRuntime();
   const { writer } = createWriter();
   const { history: staticHistory, handed } = history("past\n");
@@ -262,7 +265,7 @@ test("Document hands history off immediately and writes one final clean frame", 
 });
 
 test("Fullscreen retains handed leases across output rollback", () => {
-  const surface = createSurface("fullscreen-terminal");
+  const surface = createSurface("fullscreen-terminal", truecolor);
   const { runtime, writes } = createRuntime();
   const { writer } = createWriter();
   surface.attachWriter(writer);
@@ -295,7 +298,7 @@ test("Fullscreen retains handed leases across output rollback", () => {
 });
 
 test("Fullscreen restores only the lease whose handoff started", () => {
-  const surface = createSurface("fullscreen-terminal");
+  const surface = createSurface("fullscreen-terminal", truecolor);
   const { runtime, writes } = createRuntime();
   const { writer } = createWriter();
   surface.attachWriter(writer);
@@ -320,7 +323,7 @@ test("Fullscreen restores only the lease whose handoff started", () => {
 });
 
 test("Fullscreen restores the screen when the writer throws on release", () => {
-  const surface = createSurface("fullscreen-terminal");
+  const surface = createSurface("fullscreen-terminal", truecolor);
   const { runtime, writes } = createRuntime();
   const { writer } = createWriter();
   surface.attachWriter({

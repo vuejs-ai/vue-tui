@@ -2,7 +2,6 @@ import type { LayoutTransactionResult } from "../layout/layout-transaction.ts";
 import type { TuiNode, TuiStatic } from "../host/nodes.ts";
 import type { Frame } from "../frame/frame.ts";
 import { paintStaticLayout } from "./paint.ts";
-import type { TerminalStyle } from "../text/terminal-style.ts";
 
 export function findStatics(root: TuiNode, out: TuiStatic[] = []): TuiStatic[] {
   if (root.type === "tui-static") out.push(root);
@@ -38,14 +37,11 @@ export interface PreparedStaticOutput {
 }
 
 /** Prepare every currently open Static region as one ordered output transaction. */
-export function prepareStaticOutput(
-  layout: LayoutTransactionResult,
-  terminalStyle: TerminalStyle,
-): PreparedStaticOutput {
+export function prepareStaticOutput(layout: LayoutTransactionResult): PreparedStaticOutput {
   const batches = layout.staticLayouts.map(
     ({ stat, region }): PreparedStaticBatch => ({
       stat,
-      frame: region ? paintStaticLayout(region, layout.computed, terminalStyle) : undefined,
+      frame: region ? paintStaticLayout(region, layout.computed) : undefined,
     }),
   );
   // An output-free instance is still a producer: it remains open until a later

@@ -161,7 +161,7 @@ function outputCapabilitiesFor(
 }
 
 /** Read the process default output only for renderToString({ color: true }). */
-export function getDefaultNodeTerminalStyleFacts(): {
+export function getDefaultNodeColorFacts(): {
   readonly stdout: TerminalOutputCapabilities;
   readonly environment: Readonly<Record<string, string | undefined>>;
 } {

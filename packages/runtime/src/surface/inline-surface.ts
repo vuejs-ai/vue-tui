@@ -43,7 +43,7 @@ export class InlineSurface extends SurfaceBase {
       return false;
     }
 
-    const encoded = presentation.encoded ?? (frame ? encodeFrame(frame) : "");
+    const encoded = presentation.encoded ?? (frame ? encodeFrame(frame, this.color) : "");
     if (encoded !== "" || hasStaticOutput) this.ensureRegionStart(runtime);
 
     // A frame that fills the viewport gets no trailing newline. A non-TTY
@@ -179,7 +179,7 @@ export class InlineSurface extends SurfaceBase {
 
   private restoreLastOutput(): void {
     const frame = this.previousFrame;
-    const output = frame ? encodeFrame(frame) : "";
+    const output = frame ? encodeFrame(frame, this.color) : "";
     if (output === "") {
       this.getWriter().write("\n");
       return;

@@ -1,7 +1,5 @@
 import { describe, test, expect } from "vite-plus/test";
-import { Chalk } from "chalk";
 import { sanitizeAnsi, sanitizeAnsiMultiline } from "../../src/text/sanitize-ansi.ts";
-import { createTerminalStyle, resolveTerminalStyle } from "../../src/text/terminal-style.ts";
 
 // Minimal ANSI-stripping helper for test assertions (avoids strip-ansi dep).
 function stripAnsi(s: string): string {
@@ -14,62 +12,6 @@ function stripAnsi(s: string): string {
 describe("sanitize-ansi", () => {
   test("preserves SGR (color) sequences", () => {
     expect(sanitizeAnsi("\u001b[31mred\u001b[0m")).toBe("\u001b[31mred\u001b[0m");
-  });
-
-  test("plain capability strips all SGR while preserving visible text and hyperlinks", () => {
-    const link = "\u001b]8;;https://example.com\u0007link\u001b]8;;\u0007";
-    const input = `\u001b[31mred\u001b[39m \u001b[1mbold\u001b[22m ${link}`;
-
-    expect(sanitizeAnsi(input, { terminalStyle: createTerminalStyle(0) })).toBe(`red bold ${link}`);
-  });
-
-  test("NO_COLOR strips color SGR while preserving non-color attributes", () => {
-    const terminalStyle = resolveTerminalStyle({
-      color: true,
-      stdout: { isTTY: true, colorDepth: 24 },
-      environment: { NO_COLOR: "1" },
-    });
-
-    expect(sanitizeAnsi("\u001b[1;31mred\u001b[39;22m", { terminalStyle })).toBe(
-      "\u001b[1mred\u001b[22m",
-    );
-  });
-
-  test.each([
-    [1, new Chalk({ level: 1 }).rgb(255, 0, 128)("rgb")],
-    [2, new Chalk({ level: 2 }).rgb(255, 0, 128)("rgb")],
-  ] as const)("converts authored truecolor to color level %i", (level, expected) => {
-    const input = "\u001b[38;2;255;0;128mrgb\u001b[39m";
-
-    expect(sanitizeAnsi(input, { terminalStyle: createTerminalStyle(level) })).toBe(expected);
-  });
-
-  test("converts colon-form truecolor and indexed color to the selected capability", () => {
-    const terminalStyle = createTerminalStyle(2);
-    const expectedRgb = new Chalk({ level: 2 }).rgb(255, 100, 0)("rgb");
-
-    expect(sanitizeAnsi("\u001b[38:2::255:100:0mrgb\u001b[39m", { terminalStyle })).toBe(
-      expectedRgb,
-    );
-    expect(sanitizeAnsi("\u001b[38;5;194mindexed\u001b[39m", { terminalStyle })).toBe(
-      "\u001b[38;5;194mindexed\u001b[39m",
-    );
-  });
-
-  test("converts authored indexed color to ansi16", () => {
-    const expected = new Chalk({ level: 1 }).rgb(255, 0, 255)("indexed");
-
-    expect(
-      sanitizeAnsi("\u001b[38;5;201mindexed\u001b[39m", {
-        terminalStyle: createTerminalStyle(1),
-      }),
-    ).toBe(expected);
-  });
-
-  test("truecolor capability preserves authored SGR bytes", () => {
-    const input = "\u001b[1;38:2::255:100:0mcolor\u001b[0m";
-
-    expect(sanitizeAnsi(input, { terminalStyle: createTerminalStyle(3) })).toBe(input);
   });
 
   test("preserve SGR sequences (colon-form 24-bit color)", () => {

@@ -125,7 +125,7 @@ export function createTestHostBridge(options: TestHostBridgeOptions = {}): TestH
         maxFps: 0,
         // The official test host models output capability explicitly instead
         // of inheriting the test worker's FORCE_COLOR / NO_COLOR state.
-        terminalStyle: nodeFacts.terminalStyle,
+        colorCapability: nodeFacts.colorCapability,
         [INTERNAL_RENDER_OBSERVER]: observer,
         [INTERNAL_SUSPENSION_HOST]: suspensionHost,
         [INTERNAL_TERMINAL_SIZE_PROBE]: () => ({ kind: "unavailable" }),

@@ -8,7 +8,6 @@ import {
 import type { PaintGeometryFrame } from "../paint/geometry.ts";
 import { paint } from "../paint/paint.ts";
 import { prepareStaticOutput, type PreparedStaticOutput } from "../paint/static-channel.ts";
-import type { TerminalStyle } from "../text/terminal-style.ts";
 import type { InternalFocusController } from "./focus-controller.ts";
 
 export interface RenderCommitRequest {
@@ -17,8 +16,6 @@ export interface RenderCommitRequest {
   readonly staticRoots: readonly TuiStatic[];
   readonly columns: number;
   readonly dynamicHeight: LayoutHeightConstraint;
-  /** Text styling capability resolved for the host that renders this commit. */
-  readonly terminalStyle: TerminalStyle;
   /**
    * `"height-constraint"` paints the dynamic frame into `columns` by the rows
    * the constraint resolved to, so a host that owns a fixed terminal region
@@ -68,14 +65,13 @@ export function runRenderCommit(request: RenderCommitRequest): RenderCommitResul
   });
   try {
     request.focusController?.reconcileAfterLayout();
-    const preparedStatic = prepareStaticOutput(layout, request.terminalStyle);
+    const preparedStatic = prepareStaticOutput(layout);
     const viewportRows =
       request.paintViewport === "none"
         ? undefined
         : viewportRowsFor(request.dynamicHeight, layout.dynamicHeight);
     const frame = paint(request.dynamicRoot, {
       layout: layout.computed,
-      terminalStyle: request.terminalStyle,
       viewport:
         viewportRows === undefined ? undefined : { width: request.columns, height: viewportRows },
       geometry: request.geometry,
