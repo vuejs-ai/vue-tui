@@ -360,6 +360,10 @@ export class NodeTerminalBackend implements TerminalBackend {
     this.modes.onChange(listener);
   }
 
+  onModeFailure(listener: ((error: unknown) => void) | null): void {
+    this.modes.onFailure(listener);
+  }
+
   write(
     output: TerminalOutput,
     data: string,

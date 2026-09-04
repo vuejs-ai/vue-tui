@@ -5,16 +5,19 @@ import type {
   TerminalModeReleaseOptions,
   TerminalModeWrite,
 } from "./backend.ts";
+import { createRawModeDevice, type RawModeDevice } from "./raw-mode.ts";
 
 /**
  * What one terminal-wide mode costs the device, and what the device will take.
  *
- * Every mode below is one reference-counted protocol: the enable bytes go out
- * when the first holder arrives and the restore bytes when the last one leaves.
- * The rows differ only where the six modes genuinely differ, so the differences
- * are visible side by side instead of living at six write sites.
+ * Every mode below is one reference-counted protocol: the mode goes on when the
+ * first holder arrives and comes back off when the last one leaves. The rows
+ * differ only where the six modes genuinely differ, so the differences are
+ * visible side by side instead of living at six operating sites.
  */
-interface ModePolicy {
+interface EscapeModePolicy {
+  /** A mode the backend switches by writing to the output. */
+  readonly kind: "escape";
   /** Bytes that put the device into this mode. */
   readonly enable: string;
   /** Bytes that take it back out. */
@@ -45,6 +48,19 @@ interface ModePolicy {
   readonly deferWhilePending: boolean;
 }
 
+/**
+ * A mode the backend switches by operating the device itself. Raw mode is the
+ * only one: it is a line discipline rather than a sequence, and the input it
+ * switches is shared by every session mounted on the same stdin, so its state is
+ * process-wide instead of living with one backend.
+ */
+interface DeviceModePolicy {
+  readonly kind: "device";
+  create(terminal: TerminalBackend, reportDeferredFailure: (error: unknown) => void): RawModeDevice;
+}
+
+type ModePolicy = EscapeModePolicy | DeviceModePolicy;
+
 /** Begin and end synchronized update, the one mode whose markers are named. */
 export const bsu = "\x1b[?2026h";
 export const esu = "\x1b[?2026l";
@@ -55,14 +71,9 @@ const canWriteOutput = (terminal: TerminalBackend): boolean =>
 const isLiveTty = (terminal: TerminalBackend): boolean =>
   terminal.capabilities.stdout.isTTY && terminal.capabilities.stdout.canWrite;
 
-/**
- * Raw mode has no row: it is a line discipline rather than an escape sequence,
- * and its device transition is `setRawMode` on the input the session shares with
- * every other session mounted on the same stdin. A mode with no policy is a
- * reference count and nothing else.
- */
-const modePolicies: Readonly<Partial<Record<TerminalMode, ModePolicy>>> = {
+const modePolicies: Readonly<Record<TerminalMode, ModePolicy>> = {
   "alternate-screen": {
+    kind: "escape",
     // Home follows the switch so the viewport has a stable origin before its
     // first frame; the two have always travelled as one write.
     enable: "\x1b[?1049h\x1b[H",
@@ -77,6 +88,7 @@ const modePolicies: Readonly<Partial<Record<TerminalMode, ModePolicy>>> = {
     deferWhilePending: true,
   },
   "cursor-visibility": {
+    kind: "escape",
     enable: "\x1b[?25l",
     restore: "\x1b[?25h",
     canEnable: isLiveTty,
@@ -86,6 +98,7 @@ const modePolicies: Readonly<Partial<Record<TerminalMode, ModePolicy>>> = {
     deferWhilePending: true,
   },
   "synchronized-output": {
+    kind: "escape",
     enable: bsu,
     restore: esu,
     canEnable: (terminal) => terminal.capabilities.stdout.isTTY,
@@ -95,6 +108,7 @@ const modePolicies: Readonly<Partial<Record<TerminalMode, ModePolicy>>> = {
     deferWhilePending: false,
   },
   "bracketed-paste": {
+    kind: "escape",
     enable: "\x1b[?2004h",
     restore: "\x1b[?2004l",
     canEnable: isLiveTty,
@@ -104,6 +118,7 @@ const modePolicies: Readonly<Partial<Record<TerminalMode, ModePolicy>>> = {
     deferWhilePending: true,
   },
   "kitty-keyboard": {
+    kind: "escape",
     // Fixed progressive-enhancement level: only disambiguate escape codes.
     enable: "\x1b[>1u",
     restore: "\x1b[<u",
@@ -124,12 +139,17 @@ const modePolicies: Readonly<Partial<Record<TerminalMode, ModePolicy>>> = {
     reissueOnAbruptRestore: false,
     deferWhilePending: true,
   },
+  raw: {
+    kind: "device",
+    create: createRawModeDevice,
+  },
 };
 
 /**
  * The order the sweep restores modes in when an owner left one behind. It is the
  * order teardown itself uses: the input protocols, then the screen the viewport
- * borrowed, then the cursor it hid, then the paste framing.
+ * borrowed, then the cursor it hid, then the paste framing, then the input's own
+ * line discipline.
  */
 const restoreOrder: readonly TerminalMode[] = [
   "synchronized-output",
@@ -137,6 +157,7 @@ const restoreOrder: readonly TerminalMode[] = [
   "alternate-screen",
   "cursor-visibility",
   "bracketed-paste",
+  "raw",
 ];
 
 interface PendingModeWrite {
@@ -146,7 +167,9 @@ interface PendingModeWrite {
 
 interface ModeState {
   readonly mode: TerminalMode;
-  readonly policy: ModePolicy | undefined;
+  readonly policy: ModePolicy;
+  /** Present exactly for a mode the backend operates rather than writes. */
+  readonly device: RawModeDevice | undefined;
   holders: number;
   /** Release callbacks for the leases still able to give this mode back. */
   readonly leases: Set<() => void>;
@@ -181,19 +204,26 @@ export interface TerminalModeLeases {
   restore(mode: TerminalMode, options?: TerminalModeReleaseOptions): void;
   restoreAll(options?: TerminalModeReleaseOptions): void;
   onChange(listener: ((mode: TerminalMode) => void) | null): void;
+  onFailure(listener: ((error: unknown) => void) | null): void;
 }
 
 export function createTerminalModeLeases(terminal: TerminalBackend): TerminalModeLeases {
   const states = new Map<TerminalMode, ModeState>();
   let coordinatedWrite: TerminalModeWrite | null = null;
   let changeListener: ((mode: TerminalMode) => void) | null = null;
+  let failureListener: ((error: unknown) => void) | null = null;
 
   function stateFor(mode: TerminalMode): ModeState {
     let state = states.get(mode);
     if (!state) {
+      const policy = modePolicies[mode];
       state = {
         mode,
-        policy: modePolicies[mode],
+        policy,
+        device:
+          policy.kind === "device"
+            ? policy.create(terminal, (error) => failureListener?.(error))
+            : undefined,
         holders: 0,
         leases: new Set(),
         active: false,
@@ -227,7 +257,25 @@ export function createTerminalModeLeases(terminal: TerminalBackend): TerminalMod
   function abandon(state: ModeState): void {
     let attempted = false;
     for (const pending of state.pending.splice(0)) attempted ||= pending.attempted;
-    if (attempted && state.policy?.tracksUncertainty) state.uncertain = true;
+    if (attempted && state.policy.kind === "escape" && state.policy.tracksUncertainty) {
+      state.uncertain = true;
+    }
+  }
+
+  /**
+   * Match the device to this mode's holders. A written mode converges through
+   * the loop below; an operated one hands the count to its device, where `sync`
+   * means the transition happens now rather than at the microtask boundary that
+   * lets a same-tick replacement inherit it.
+   */
+  function applyMode(state: ModeState, sync: boolean): void {
+    if (state.device) {
+      // Raw mode changes with every input consumer and no reconciler waits on
+      // it, so it is not reported the way a written mode is.
+      state.device.reconcile(state.holders, { defer: !sync });
+      return;
+    }
+    reconcile(state, sync);
   }
 
   /**
@@ -237,7 +285,7 @@ export function createTerminalModeLeases(terminal: TerminalBackend): TerminalMod
    */
   function writeTransition(state: ModeState, target: boolean, sync: boolean): boolean {
     const policy = state.policy;
-    if (!policy) return false;
+    if (policy.kind !== "escape") return false;
     if (target ? !policy.canEnable(terminal) : !policy.canRestore(terminal, sync)) return false;
     const data = target ? policy.enable : policy.restore;
 
@@ -303,7 +351,8 @@ export function createTerminalModeLeases(terminal: TerminalBackend): TerminalMod
   }
 
   function reconcile(state: ModeState, sync: boolean): void {
-    if (!state.policy) return;
+    const policy = state.policy;
+    if (policy.kind !== "escape") return;
     if (state.reconciling) {
       // The loop below re-reads the holders after every write, so a re-entrant
       // change is picked up there; only a synchronous restore has to survive.
@@ -315,7 +364,7 @@ export function createTerminalModeLeases(terminal: TerminalBackend): TerminalMod
     state.deferredSyncRestore = false;
     try {
       for (;;) {
-        if (state.pending.length > 0 && state.policy.deferWhilePending) {
+        if (state.pending.length > 0 && policy.deferWhilePending) {
           // A synchronous restore requested while a write is captured has to
           // wait: only that write's handoff decides whether this device owns
           // anything to restore.
@@ -348,7 +397,12 @@ export function createTerminalModeLeases(terminal: TerminalBackend): TerminalMod
     const state = stateFor(mode);
     forget(state);
     const policy = state.policy;
-    if (!policy) return;
+    if (policy.kind === "device") {
+      // A sweep is the last restore anyone will ask for, so an operated mode
+      // transitions now whichever path reached here.
+      state.device?.reconcile(0, { defer: false });
+      return;
+    }
     const mustReissue =
       reissue &&
       sync &&
@@ -370,11 +424,13 @@ export function createTerminalModeLeases(terminal: TerminalBackend): TerminalMod
 
   function isActive(mode: TerminalMode): boolean {
     const state = stateFor(mode);
+    if (state.device) return state.device.isEnabled;
     return state.active && !state.uncertain;
   }
 
   function isSettled(mode: TerminalMode): boolean {
     const state = stateFor(mode);
+    if (state.device) return state.device.isEnabled === state.holders > 0;
     // Nothing left to do: what the device will carry once every captured write
     // hands off is already what the holders ask for.
     return !state.uncertain && settledState(state) === state.holders > 0;
@@ -393,7 +449,7 @@ export function createTerminalModeLeases(terminal: TerminalBackend): TerminalMod
       const lease: TerminalLease<Mode> = Object.freeze({
         mode,
         reassert() {
-          if (!active || !state.policy) return;
+          if (!active || state.policy.kind !== "escape") return;
           if (!state.policy.canEnable(terminal)) return;
           // Re-issued without a handoff hook: ownership does not change, so the
           // bytes only restate what this lease already holds. A Fullscreen frame
@@ -406,27 +462,37 @@ export function createTerminalModeLeases(terminal: TerminalBackend): TerminalMod
           if (!active) return;
           deactivate();
           state.holders = Math.max(0, state.holders - 1);
+          const sync = options?.sync === true;
           try {
-            reconcile(state, options?.sync === true);
+            applyMode(state, sync);
           } catch (error) {
             // A stream can accept the restore and then throw while this
             // reconciler is still on the stack. Retry the idempotent transition
-            // once it has unwound, then preserve the original failure.
-            try {
-              reconcile(state, options?.sync === true);
-            } catch {
-              // Preserve the first release failure.
+            // once it has unwound, then preserve the original failure. An
+            // operated mode runs its own bounded recovery and is not asked twice.
+            if (!state.device) {
+              try {
+                applyMode(state, sync);
+              } catch {
+                // Preserve the first release failure.
+              }
             }
             throw error;
           }
         },
       });
       try {
-        reconcile(state, false);
+        applyMode(state, false);
       } catch (error) {
         // The acquisition never completed, so it owns no share of the mode.
-        // Give the share back and let the surviving demand converge.
-        lease.release();
+        // Give the share back and let the surviving demand converge. An operated
+        // mode gives it back now: its caller reads the device as soon as the
+        // failure returns, with no transaction left to hand off first.
+        try {
+          lease.release({ sync: state.device !== undefined });
+        } catch {
+          // Preserve the acquisition failure.
+        }
         throw error;
       }
       return lease;
@@ -447,7 +513,7 @@ export function createTerminalModeLeases(terminal: TerminalBackend): TerminalMod
       }
     },
     reconcile() {
-      for (const state of states.values()) reconcile(state, false);
+      for (const state of states.values()) applyMode(state, false);
     },
     restore(mode, options) {
       restore(mode, options?.sync === true, true);
@@ -469,6 +535,9 @@ export function createTerminalModeLeases(terminal: TerminalBackend): TerminalMod
     },
     onChange(listener) {
       changeListener = listener;
+    },
+    onFailure(listener) {
+      failureListener = listener;
     },
   };
 }

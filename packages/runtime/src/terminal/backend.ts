@@ -108,6 +108,8 @@ export interface TerminalBackend {
   restoreModes(options?: TerminalModeReleaseOptions): void;
   /** Observe mode transitions the device has taken or refused. */
   onModeChange(listener: ((mode: TerminalMode) => void) | null): void;
+  /** Observe a failure from mode work the backend deferred past its caller. */
+  onModeFailure(listener: ((error: unknown) => void) | null): void;
   /** Physical raw-mode fact captured from the selected input device. */
   readonly isRawModeEnabled: boolean;
   setRawMode(enabled: boolean): void;

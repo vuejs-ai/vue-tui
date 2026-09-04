@@ -124,6 +124,9 @@ export function createTestTerminalBackend(
     onModeChange(listener) {
       modes.onChange(listener);
     },
+    onModeFailure(listener) {
+      modes.onFailure(listener);
+    },
     setRawMode() {
       // Test mode ownership is modeled through acquire(); raw transitions are inert.
     },

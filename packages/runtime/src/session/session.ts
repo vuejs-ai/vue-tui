@@ -837,6 +837,7 @@ class Session implements SessionMember {
       // The output gate closes with the session; later restores write directly.
       this.terminal?.attachModeWrites(null);
       this.terminal?.onModeChange(null);
+      this.terminal?.onModeFailure(null);
       if (this.asOwner && this.terminal) {
         liveInstances.delete(this.terminal.outputOwnerFor("stdout"));
         this.asOwner = false;
@@ -1689,6 +1690,9 @@ export function createSessionApp(
       // mode change keeps its place among the frames it belongs between.
       terminal.attachModeWrites(writeTerminalOutput);
       terminal.onModeChange(onTerminalModeChange);
+      // A mode the backend defers past its caller — raw input waiting one
+      // microtask for a same-tick replacement — has no one left to raise to.
+      terminal.onModeFailure(requestRuntimeFailure);
       let terminalReconcileTurn: Promise<void> | null = null;
       let terminalReconcileRequested = false;
       let reconcileManagedTerminalOutput: () => void = () => {};
