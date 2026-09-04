@@ -1,12 +1,11 @@
 import { createRenderer, createVNode, type Component, type VNode } from "vue";
 import { createRoot, type TuiNode } from "../host/nodes.ts";
-import { runLayoutTransaction } from "../layout/layout-transaction.ts";
 import { attachYoga, detachYoga } from "../layout/yoga.ts";
 import { buildNodeOps } from "../vue/node-ops.ts";
 import { createHostYogaAllocationLedger } from "../layout/yoga-allocation-ledger.ts";
-import { paint } from "../paint/paint.ts";
-import { findStatics, prepareStaticOutput } from "../paint/static-channel.ts";
+import { findStatics } from "../paint/static-channel.ts";
 import { encodeFrame, encodeFrameHistory } from "../surface/frame-encoder.ts";
+import { runRenderCommit } from "../session/render-commit.ts";
 import {
   AppContextKey,
   InternalRenderSessionKey,
@@ -176,32 +175,25 @@ function renderStringDocument(
     renderCompleted = true;
     renderedTargets.reconcile();
 
-    const layout = runLayoutTransaction({
+    const { frame, preparedStatic, layout } = runRenderCommit({
       dynamicRoot: root,
       staticRoots: findStatics(root),
       columns: options.width,
       dynamicHeight:
         options.height === null ? { mode: "unbounded" } : { mode: "at-most", rows: options.height },
+      terminalStyle: renderSession.terminalStyle,
+      // Take the laid-out picture rather than a hard paint viewport for short
+      // documents. Yoga already applied a finite height bound when content
+      // exceeded it; shorter output stays unpadded. Clipping only by line count
+      // below keeps ordinary horizontal overflow behavior.
+      paintViewport: "none",
+      focusController,
     });
     let output: string;
     let capturedStaticOutput = "";
-    let preparedStatic: ReturnType<typeof prepareStaticOutput>;
     try {
-      focusController.reconcileAfterLayout();
-      // String rendering has no physical handoff. Snapshot every complete open
-      // Static subtree after mount while its transaction-owned geometry is
-      // available. Acceptance follows transaction disposal below so callbacks
-      // cannot observe temporary Yoga parentage.
-      preparedStatic = prepareStaticOutput(layout, renderSession.terminalStyle);
       capturedStaticOutput = encodeFrameHistory(preparedStatic.frames);
-
-      // Paint the computed layout without manufacturing a hard paint viewport for
-      // short documents. Yoga already applied a finite height bound when content
-      // exceeded it; shorter output stays unpadded. Clip only by line count so
-      // ordinary horizontal overflow behavior matches the previous unbounded paint.
-      output = encodeFrame(
-        paint(root, { layout: layout.computed, terminalStyle: renderSession.terminalStyle }),
-      );
+      output = frame === undefined ? "" : encodeFrame(frame);
       if (options.height !== null && output !== "") {
         const lines = output.split("\n");
         if (lines.length > options.height) {
@@ -211,6 +203,8 @@ function renderStringDocument(
     } finally {
       layout.dispose();
     }
+    // String rendering has no physical handoff, so acceptance follows transaction
+    // disposal: callbacks cannot observe temporary Yoga parentage.
     preparedStatic.accept();
 
     // Run component and host cleanup before deciding whether the first

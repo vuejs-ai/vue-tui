@@ -13,11 +13,7 @@ import {
   type StdinController,
 } from "./stdin-controller.ts";
 import { createRoot, type TuiNode, type TuiRoot, type TuiStatic } from "../host/nodes.ts";
-import {
-  runLayoutTransaction,
-  type ComputedLayout,
-  type LayoutHeightConstraint,
-} from "../layout/layout-transaction.ts";
+import type { LayoutHeightConstraint } from "../layout/layout-transaction.ts";
 import { attachYoga, detachYoga } from "../layout/yoga.ts";
 import { buildNodeOps } from "../vue/node-ops.ts";
 import {
@@ -27,15 +23,12 @@ import {
   type HostYogaNode,
 } from "../layout/yoga-allocation-ledger.ts";
 import { createCommitScheduler } from "./scheduler.ts";
-import { paint, releasePaintCaches } from "../paint/paint.ts";
+import { runRenderCommit } from "./render-commit.ts";
+import { releasePaintCaches } from "../paint/paint.ts";
 import type { Frame } from "../frame/frame.ts";
 import { sanitizeAnsiMultiline } from "../text/sanitize-ansi.ts";
 import { resolveTerminalStyle, type TerminalStyle } from "../text/terminal-style.ts";
-import {
-  findStatics,
-  prepareStaticOutput,
-  type PreparedStaticOutput,
-} from "../paint/static-channel.ts";
+import { findStatics, type PreparedStaticOutput } from "../paint/static-channel.ts";
 import { createFrameWriter } from "../surface/frame-writer.ts";
 import { createSurface, type Surface, type SurfaceRuntime } from "../surface/surface.ts";
 import { encodeFrame } from "../surface/frame-encoder.ts";
@@ -2312,25 +2305,6 @@ export function createSessionApp(
         );
       }
 
-      // Produce the visual dynamic frame for a given terminal width. Static
-      // output is handled separately by commit().
-      function renderFrame(
-        layout: ComputedLayout,
-        width: number,
-        viewportRows?: number,
-        geometry?: InternalGeometryPaintFrame,
-      ): Frame | undefined {
-        const frame = paint(tuiRoot, {
-          layout,
-          terminalStyle: renderSession.terminalStyle,
-          viewport: viewportRows === undefined ? undefined : { width, height: viewportRows },
-          geometry,
-        });
-        // `Frame` cannot have zero rows. Still paint to collect geometry, then
-        // omit that synthetic one-row frame from an empty at-most viewport.
-        return viewportRows === 0 ? undefined : frame;
-      }
-
       let blockedFrameRetryPending = false;
 
       function requestBlockedFrameRetry(ready: Promise<void>): void {
@@ -2531,26 +2505,25 @@ export function createSessionApp(
         const dynamicHeight: LayoutHeightConstraint = outputSurface.layoutHeight(
           renderSession.session.dimensions.layout.rows,
         );
-        const layout = runLayoutTransaction({
+        geometryFrame = session!.geometry?.beginFrame();
+        const {
+          frame,
+          preparedStatic: prepared,
+          layout,
+        } = runRenderCommit({
           dynamicRoot: tuiRoot,
           staticRoots: staticNodes,
           columns: w,
           dynamicHeight,
+          terminalStyle: renderSession.terminalStyle,
+          paintViewport: "height-constraint",
+          focusController: session!.focusController,
+          geometry: geometryFrame,
         });
+        preparedStatic = prepared;
         try {
-          session!.focusController?.reconcileAfterLayout();
-          preparedStatic = prepareStaticOutput(layout, renderSession.terminalStyle);
-          const staticOutput = outputSurface.encodeHistory(preparedStatic.frames);
+          const staticOutput = outputSurface.encodeHistory(prepared.frames);
           const hasStaticOutput = staticOutput !== "";
-          const paintViewportRows =
-            dynamicHeight.mode === "exact"
-              ? dynamicHeight.rows
-              : dynamicHeight.mode === "at-most"
-                ? Math.min(dynamicHeight.rows, layout.dynamicHeight)
-                : undefined;
-
-          geometryFrame = session!.geometry?.beginFrame();
-          const frame = renderFrame(layout.computed, w, paintViewportRows, geometryFrame);
           let encodedFrame: string | undefined;
           if (renderObserver?.onCommit) {
             encodedFrame = frame === undefined ? "" : encodeFrame(frame);
@@ -2569,7 +2542,7 @@ export function createSessionApp(
 
           if (onRender) onRender({ renderTime: performance.now() - start });
           if (
-            presentFrame(frame, encodedFrame, staticOutput, preparedStatic, {
+            presentFrame(frame, encodedFrame, staticOutput, prepared, {
               onHandoff: () => hooks.markStaticHanded(frame, encodedFrame),
               onPrepared: hooks.capturePostStaticRollback,
             })

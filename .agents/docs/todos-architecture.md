@@ -4,7 +4,7 @@ The work that moves `@vue-tui/runtime` from its current internal structure to th
 
 **This file deletes itself.** It exists only to hold the gap between the record and the code. When every task below has landed, delete this file and remove its route from [the records map](./README.md); nothing here needs to be preserved, because the architecture record already states the target and git keeps the history. Do not add ordinary follow-up work here — that belongs in [TODOs](./todos.md).
 
-Tasks 8, 9, 10, 12 and 13 remain. Tasks 8, 9 and 10 are independent. Tasks 12 and 13 both change paint's text path, and 13 lands first: while paint still applies a Text node's props by wrapping its content in SGR and parsing that string back into cells, runs carried on the node would have to be serialized into the same string again.
+Tasks 8, 9, 12 and 13 remain. Tasks 8 and 9 are independent. Tasks 12 and 13 both change paint's text path, and 13 lands first: while paint still applies a Text node's props by wrapping its content in SGR and parsing that string back into cells, runs carried on the node would have to be serialized into the same string again.
 
 ## 8. Route mode bytes through the lease
 
@@ -36,22 +36,6 @@ Tasks 8, 9, 10, 12 and 13 remain. Tasks 8, 9 and 10 are independent. Tasks 12 an
 **Verify.** The lifecycle suites under `tests/runtime/integration/lifecycle/`, the PTY suspension and signal suites, and the vite e2e suites that exercise HMR replacement and suspension.
 
 **Watch for.** Some of these flags guard re-entrancy inside one transition rather than a state of their own; a flag that is set and cleared within one synchronous call stays a local, not a state.
-
-## 10. One commit function for both hosts
-
-**Today.** `api/render-to-string.ts` runs `runLayoutTransaction`, `prepareStaticOutput`, `paint`, `encodeFrame` and `encodeFrameHistory` itself; `session/session.ts` runs the same sequence inside its commit.
-
-**Steps.**
-
-1. Extract that sequence into one function in `session/` that takes the dynamic root, the open `Static` roots, the columns and the height constraint, runs the layout transaction, paints the dynamic frame and each `Static` frame, and returns the frames, the prepared `Static` output and the transaction to dispose. It keeps nothing between calls.
-2. Call it from the commit, leaving encoding, presentation and `Static` settlement where they are: the mounted host still encodes through `Surface.encodeHistory`, presents through `Surface.present`, and accepts a block only after its write returned normally.
-3. Call it from `render-to-string.ts`, leaving the string host's own concerns at the call site: its `at-most` or `unbounded` height, its unpainted viewport and line-count clip, the trailing-newline strip, and acceptance after the transaction is disposed.
-
-**Done when.** One function in `session/` runs layout and paint for the dynamic root and the open `Static` roots and returns the frames; `session.ts` and `render-to-string.ts` both call it.
-
-**Verify.** The `tests/runtime/integration/render-to-string/` and `tests/runtime/integration/components/static/` suites are unchanged and green.
-
-**Watch for.** The two hosts differ after paint, not during it, and folding either difference into the shared function changes observable behavior: the string host accepts `Static` once the transaction is disposed so callbacks cannot observe temporary Yoga parentage, while the mounted commit accepts inside the transaction only once the write returned; and the mounted commit paints against a viewport derived from the height constraint and threads a geometry frame through paint, where the string host paints without either and clips by line count afterwards.
 
 ## 12. One content parse per revision, with the runs on the node
 
