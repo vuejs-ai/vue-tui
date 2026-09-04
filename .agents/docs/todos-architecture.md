@@ -4,7 +4,7 @@ The work that moves `@vue-tui/runtime` from its current internal structure to th
 
 **This file deletes itself.** It exists only to hold the gap between the record and the code. When every task below has landed, delete this file and remove its route from [the records map](./README.md); nothing here needs to be preserved, because the architecture record already states the target and git keeps the history. Do not add ordinary follow-up work here — that belongs in [TODOs](./todos.md).
 
-Tasks 8, 9 and 12 remain, and they are independent of one another.
+Tasks 8 and 9 remain, and they are independent of one another.
 
 ## 8. Route mode bytes through the lease
 
@@ -36,20 +36,3 @@ Tasks 8, 9 and 12 remain, and they are independent of one another.
 **Verify.** The lifecycle suites under `tests/runtime/integration/lifecycle/`, the PTY suspension and signal suites, and the vite e2e suites that exercise HMR replacement and suspension.
 
 **Watch for.** Some of these flags guard re-entrancy inside one transition rather than a state of their own; a flag that is set and cleared within one synchronous call stays a local, not a state.
-
-## 12. One content parse per revision, with the runs on the node
-
-**Today.** `layout/yoga.ts` keeps `textYogaMeasureStates`, a `WeakMap<TuiText, TextMeasureState>` whose entry is keyed by the node's `textRevision`, the available width, the width mode and `wrap`; its measure callback flattens the leaves through `sanitizeAnsiMultiline` and calls `measureTextNatural` and `wrapText`, which parse the content's ANSI themselves. `paint/paint.ts` keeps a second cache, `preparedTextPaintCache`, keyed by `textRevision`, the inherited background, `textAlign`, the wrap width and mode, and the wrapped-lines identity; it re-renders the node's inline styles into one string, which the per-root `OutputCaches` then parse back into cells. Each side parses the same content on its own.
-
-**Steps.**
-
-1. Put the runs on the node. `TuiText` already carries `textRevision` beside its props in `host/nodes.ts`, and `host/` imports nothing, so the runs are plain data with no engine handle.
-2. Keep the parse in `text/`: `styledGraphemesFromAnsi` in `text/text-measure.ts` is where a content string becomes styled runs today.
-3. Trigger it from `layout/`, not from `vue/`. The `vue/` row does not list `text/`, and `vue/node-ops.ts` only bumps `textRevision` or calls `layout/`'s `markTextDirty`, so the measure callback parses when the node's recorded revision differs and stores the runs.
-4. Have paint read the node's runs together with `ComputedLayout`'s `text.wrapWidth` and `text.wrappedLines`, which it already receives, and delete `preparedTextPaintCache`.
-
-**Done when.** One parse per content revision, and no cache in `paint/`.
-
-**Verify.** `packages/runtime/tests/text/`, `packages/runtime/tests/layout/layout-transaction/single-pass-text-measurement.test.ts` and the `tests/runtime/integration/components/text/` suites; `benchmarks/runtime/renderer.bench.ts` is where the change's cost is measured.
-
-**Watch for.** `textRevision` is not a content revision today: `vue/node-ops.ts` bumps it for every style prop on a Text host, including paint-only ones like `color`, so runs keyed on it alone would be reparsed on a colour change. The second cache is `OutputCaches` in `paint/paint.ts`, pinned by `packages/runtime/tests/paint/paint/output-cache.test.ts`; its width and slice helpers serve the clip path, which works on strings. `paint/paint.ts` also applies a Text node's own props by wrapping its composed content in SGR through `applyTextStyle`, so runs kept on the node have to be serialized back into that string unless the props' style moves onto the runs in the same change. And `text/text-measure.ts` slices and re-styles strings for that clip path (`sliceAnsiPreservingIntensity`, `safeSliceEnd`, `styleMeasuredTextLines`), so runs have to survive it or the clip moves onto runs; OSC 8 links and `extraSgr` must survive it too.

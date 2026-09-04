@@ -159,6 +159,75 @@ function applyColorValue(text: string, color: unknown, background: boolean): str
   return style === undefined ? text : applySgrSpan(text, style);
 }
 
+/**
+ * The style channels a Text's props carry. A nested Text that sets a channel
+ * resolves it for its own subtree, so an enclosing Text must not open that
+ * channel again: the mask represents terminal-default colors and all three
+ * modifier states without sentinel characters in user text.
+ */
+export const TextStyleChannel = {
+  foreground: 1 << 0,
+  background: 1 << 1,
+  dimColor: 1 << 2,
+  bold: 1 << 3,
+  italic: 1 << 4,
+  underline: 1 << 5,
+  strikethrough: 1 << 6,
+  inverse: 1 << 7,
+} as const;
+
+/** The channels these props set explicitly, whatever value they set them to. */
+export function explicitTextStyleChannels(props: TextStyleProps): number {
+  let mask = 0;
+  if (props.color !== undefined) mask |= TextStyleChannel.foreground;
+  if (props.backgroundColor !== undefined) mask |= TextStyleChannel.background;
+  if (props.dimColor !== undefined) mask |= TextStyleChannel.dimColor;
+  if (props.bold !== undefined) mask |= TextStyleChannel.bold;
+  if (props.italic !== undefined) mask |= TextStyleChannel.italic;
+  if (props.underline !== undefined) mask |= TextStyleChannel.underline;
+  if (props.strikethrough !== undefined) mask |= TextStyleChannel.strikethrough;
+  if (props.inverse !== undefined) mask |= TextStyleChannel.inverse;
+  return mask;
+}
+
+/**
+ * The SGR spans these props open, outermost first, skipping every `blocked`
+ * channel. The order is the one {@link applyTextStyle} writes: it wraps dim
+ * innermost and inverse outermost, so the outermost span opens first.
+ */
+export function textStyleSpans(props: TextStyleProps, blocked: number): SgrSpan[] {
+  const spans: SgrSpan[] = [];
+  const add = (channel: number, span: SgrSpan | undefined): void => {
+    if (span !== undefined && (blocked & channel) === 0) spans.push(span);
+  };
+  add(TextStyleChannel.inverse, props.inverse ? modifierSpans.inverse : undefined);
+  add(
+    TextStyleChannel.strikethrough,
+    props.strikethrough ? modifierSpans.strikethrough : undefined,
+  );
+  add(TextStyleChannel.underline, props.underline ? modifierSpans.underline : undefined);
+  add(TextStyleChannel.italic, props.italic ? modifierSpans.italic : undefined);
+  add(TextStyleChannel.bold, props.bold ? modifierSpans.bold : undefined);
+  add(TextStyleChannel.background, channelSpan(props.backgroundColor, true));
+  add(TextStyleChannel.foreground, channelSpan(props.color, false));
+  add(TextStyleChannel.dimColor, props.dimColor ? dimSpan : undefined);
+  return spans;
+}
+
+/**
+ * One color channel's span. `default` selects the terminal's own color, which
+ * {@link resetChannel} writes as the channel's end code on both sides — a span
+ * whose open is its own close, ending the channel rather than starting one.
+ */
+function channelSpan(color: unknown, background: boolean): SgrSpan | undefined {
+  if (!color) return undefined;
+  if (isTerminalDefaultColor(color)) {
+    const close = background ? backgroundClose : foregroundClose;
+    return { open: close, close };
+  }
+  return colorSpan(color, background);
+}
+
 export function applyTextStyle(text: string, props: TextStyleProps): string {
   // Apply each enabled style as its own span, in the order dim -> color ->
   // backgroundColor -> bold -> italic -> underline -> strikethrough -> inverse.

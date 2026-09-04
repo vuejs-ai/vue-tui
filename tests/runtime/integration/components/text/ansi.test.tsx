@@ -320,3 +320,39 @@ test("link ansi escapes are closed properly", async () => {
   // Lock the exact bytes: the OSC-8 hyperlink must round-trip unchanged.
   expect(output).toBe(ansiEscapes.link("Example", "https://example.com"));
 });
+
+// A reset written in the content closes the SGR a Text's own props open around
+// it, and unlike a channel's own end code it does not re-open them. Paint
+// composes those props onto the parsed content, so this stays observable.
+test("a reset written in Text content also clears the component's own styling", () => {
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Text color="red" bold>{`plain ${ESC}[32mgreen${ESC}[0m back`}</Text>
+    )),
+    { color: "truecolor", width: 100 },
+  );
+
+  expect(output).toBe(`${ESC}[1m${ESC}[31mplain ${ESC}[32mgreen${ESC}[39m${ESC}[22m back`);
+});
+
+test("a channel's end code written in Text content re-opens that prop", () => {
+  const output = renderToString(
+    defineComponent(() => () => <Text color="red">{`A${ESC}[0mB${ESC}[39mC`}</Text>),
+    { color: "truecolor", width: 100 },
+  );
+
+  expect(output).toBe(`${ESC}[31mA${ESC}[39mB${ESC}[31mC${ESC}[39m`);
+});
+
+test("a reset keeps clearing the component's styling across a wrapped row", () => {
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Box width={4}>
+        <Text color="red">{`abc${ESC}[0mdef`}</Text>
+      </Box>
+    )),
+    { color: "truecolor", width: 4 },
+  );
+
+  expect(output).toBe(`${ESC}[31mabc${ESC}[39md\nef`);
+});

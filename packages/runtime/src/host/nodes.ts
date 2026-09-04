@@ -41,13 +41,68 @@ export interface TuiBox extends NodeBase {
   props: BoxProps;
 }
 
+/**
+ * One SGR pair active on a parsed run: the code that opens it and the code that
+ * ends it.
+ */
+export interface TuiTextRunStyle {
+  type: "ansi";
+  code: string;
+  endCode: string;
+}
+
+/**
+ * One grapheme of a Text node's parsed content, with the SGR the content itself
+ * has active on it. `text/` produces these and `layout/` stores them here, but
+ * `host/` imports nothing, so the shape is declared rather than imported.
+ */
+export interface TuiTextRun {
+  type: "char";
+  value: string;
+  fullWidth: boolean;
+  styles: TuiTextRunStyle[];
+}
+
+/**
+ * A full SGR reset written inside the content also cancels the SGR the
+ * enclosing Text hosts open around it, because a reset closes those spans
+ * without the re-open each span's own end code triggers. `at[i]` is the run a
+ * reset last took effect at within the current physical line (`-1` for none),
+ * and `rearmed[i]` the end codes seen since, so a later `\x1b[39m` restores the
+ * foreground span alone.
+ */
+export interface TuiTextContentReset {
+  readonly at: readonly number[];
+  readonly rearmed: readonly number[];
+}
+
+/** The runs one nested inline host contributes, in content order. */
+export interface TuiTextChunk {
+  readonly runs: number;
+  /** The nested inline hosts enclosing this chunk, outermost first. */
+  readonly nesting: readonly TuiVirtualText[];
+}
+
+/** A Text node's content, parsed once per content revision. */
+export interface TuiTextContent {
+  /** The `contentRevision` this was parsed from. */
+  readonly revision: number;
+  /** The sanitized source text, which `layout/` measures and wraps. */
+  readonly text: string;
+  readonly runs: readonly TuiTextRun[];
+  readonly chunks: readonly TuiTextChunk[];
+  readonly reset: TuiTextContentReset | null;
+}
+
 export interface TuiText extends NodeBase {
   type: "tui-text";
   children: TuiInlineNode[];
   style: TuiHostStyle;
   props: TextProps;
-  /** Increments whenever cached text composition or measurement can become stale. */
-  textRevision: number;
+  /** Increments whenever this node's content, and only its content, changes. */
+  contentRevision: number;
+  /** The parse of that content, refreshed by `layout/` when the revision moves. */
+  content: TuiTextContent | null;
 }
 
 export interface TuiVirtualText extends NodeBase {
@@ -93,25 +148,49 @@ export type TuiInlineNode = TuiVirtualText | TuiTextLeaf | TuiComment;
 export type TuiContainer = TuiRoot | TuiBox | TuiStatic | TuiText | TuiVirtualText;
 export type TuiNode = TuiContainer | TuiTextLeaf | TuiComment;
 
+/** One run of source text beneath a text host, and the hosts that style it. */
+export interface TuiTextChunkSource {
+  /** The raw text this chunk contributes, in content order. */
+  text: string;
+  /** The nested inline hosts enclosing it, outermost first. */
+  readonly nesting: readonly TuiVirtualText[];
+}
+
 /**
- * Collect the visible source text beneath one text host without interpreting
- * it. A caller-owned normalizer can preserve text-boundary semantics without
- * making host depend on text processing.
+ * Collect the source text beneath one text host without interpreting it, split
+ * where the nested inline hosts that style it change. Adjacent leaves under one
+ * host stay in a single chunk, so an escape sequence written across two of them
+ * survives; `text/` interprets each chunk.
  */
-export function flattenTextLeaves(
+export function collectTextChunks(node: TuiText | TuiVirtualText): TuiTextChunkSource[] {
+  const chunks: TuiTextChunkSource[] = [];
+  collectTextChunksInto(node, [], chunks);
+  return chunks;
+}
+
+function collectTextChunksInto(
   node: TuiText | TuiVirtualText,
-  normalize: (text: string) => string = (text) => text,
-): string {
-  if (node.style.display === "none") return "";
-  let output = "";
+  nesting: readonly TuiVirtualText[],
+  chunks: TuiTextChunkSource[],
+): void {
+  if (node.style.display === "none") return;
+  let open: TuiTextChunkSource | undefined;
   for (const child of node.children) {
     if (child.type === "text-leaf") {
-      output += child.value;
+      if (child.value === "") continue;
+      if (open) open.text += child.value;
+      else {
+        open = { text: child.value, nesting };
+        chunks.push(open);
+      }
     } else if (child.type === "tui-virtual-text") {
-      output += flattenTextLeaves(child, normalize);
+      const before = chunks.length;
+      collectTextChunksInto(child, [...nesting, child], chunks);
+      // A nested host that contributed nothing leaves the surrounding text in
+      // one chunk, exactly as one uninterrupted run of leaves would be.
+      if (chunks.length !== before) open = undefined;
     }
   }
-  return normalize(output);
 }
 
 // Host identity is nominal inside one runtime instance. Structural checks such
@@ -164,9 +243,12 @@ export function createText(): TuiText {
     children: [],
     style: { display: "" },
     props: {},
-    textRevision: 0,
+    contentRevision: 0,
+    content: null,
   } satisfies TuiText;
   Object.defineProperty(node, "style", { enumerable: false });
+  // The parse is derived from the children, not declarative tree state.
+  Object.defineProperty(node, "content", { enumerable: false });
   return trackTuiNode(node);
 }
 

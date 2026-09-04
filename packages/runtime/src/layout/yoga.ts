@@ -17,9 +17,9 @@ import type {
   TuiText,
   TextProps,
 } from "../host/nodes.ts";
-import { flattenTextLeaves } from "../host/nodes.ts";
+import { collectTextChunks, type TuiTextContent } from "../host/nodes.ts";
 import { measureTextNatural, wrapText } from "../text/text-measure.ts";
-import { sanitizeAnsiMultiline } from "../text/sanitize-ansi.ts";
+import { parseTextContent } from "../text/text-content.ts";
 
 export type YogaCarrier = TuiRoot | TuiBox | TuiText | TuiStatic;
 
@@ -686,25 +686,51 @@ export function getTextMeasureCellWidth(
   return toWholeCellWidth(availableWidth);
 }
 
+/**
+ * The node's content, parsed into styled runs once per content revision and
+ * kept on the node. Measurement and the capture below are the two places a
+ * commit needs a Text's content, and both come through here, so the runs paint
+ * reads are the ones this frame measured.
+ */
+export function ensureTextContent(text: TuiText): TuiTextContent {
+  const current = text.content;
+  if (current !== null && current.revision === text.contentRevision) return current;
+
+  const sources = collectTextChunks(text);
+  const parsed = parseTextContent(sources.map((chunk) => chunk.text));
+  const content: TuiTextContent = {
+    revision: text.contentRevision,
+    text: parsed.text,
+    runs: parsed.runs,
+    chunks: sources.map((chunk, index) => ({
+      runs: parsed.chunkRuns[index] ?? 0,
+      nesting: chunk.nesting,
+    })),
+    reset: parsed.reset,
+  };
+  text.content = content;
+  return content;
+}
+
 export function bindTextMeasure(text: TuiText): void {
   const state: TextMeasureState = {};
   textYogaMeasureStates.set(text, state);
   getYogaNode(text).setMeasureFunc((availableWidth, widthMode) => {
     const wrap = text.props.wrap;
+    const content = ensureTextContent(text);
 
     if (
-      state.cache?.revision === text.textRevision &&
+      state.cache?.revision === text.contentRevision &&
       state.cache.availableWidth === availableWidth &&
       state.cache.widthMode === widthMode &&
       state.cache.wrap === wrap
     ) {
       return state.cache.result;
     }
-    const raw = flattenTextLeaves(text, sanitizeAnsiMultiline);
 
     const remember = (result: TextMeasureResult): TextMeasureResult => {
       state.cache = {
-        revision: text.textRevision,
+        revision: text.contentRevision,
         availableWidth,
         widthMode,
         wrap,
@@ -713,7 +739,7 @@ export function bindTextMeasure(text: TuiText): void {
       return result;
     };
 
-    return remember(measureTextForCellWidth(raw, wrap, availableWidth, widthMode));
+    return remember(measureTextForCellWidth(content.text, wrap, availableWidth, widthMode));
   });
 }
 
@@ -777,6 +803,7 @@ export function getTextTerminalCellWidth(text: TuiText): number {
  */
 export function getComputedTextMeasure(text: TuiText): ComputedTextMeasure {
   const wrapWidth = getTextTerminalCellWidth(text);
+  const content = ensureTextContent(text);
   const state = textYogaMeasureStates.get(text);
   const cached = state?.cache;
   // The measure ran against Yoga's budget for this node, which a row parent
@@ -785,7 +812,7 @@ export function getComputedTextMeasure(text: TuiText): ComputedTextMeasure {
   // lines, so the measured array is reused and paint sees one identity per
   // revision rather than a fresh copy every commit.
   if (
-    cached?.revision === text.textRevision &&
+    cached?.revision === text.contentRevision &&
     cached.wrap === text.props.wrap &&
     (text.props.wrap === undefined || text.props.wrap === "wrap" || text.props.wrap === "hard") &&
     cached.result.width <= wrapWidth &&
@@ -794,18 +821,23 @@ export function getComputedTextMeasure(text: TuiText): ComputedTextMeasure {
     return { wrapWidth, wrappedLines: cached.result.wrappedLines };
   }
 
-  const raw = flattenTextLeaves(text, sanitizeAnsiMultiline);
-  if (raw === "") return { wrapWidth: 0, wrappedLines: [] };
-  const natural = measureTextNatural(raw);
+  if (content.text === "") return { wrapWidth: 0, wrappedLines: [] };
+  const natural = measureTextNatural(content.text);
   const wrappedLines =
     natural.width <= wrapWidth
-      ? raw.split("\n")
-      : wrapText(raw, wrapWidth, text.props.wrap ?? "wrap");
+      ? content.text.split("\n")
+      : wrapText(content.text, wrapWidth, text.props.wrap ?? "wrap");
   const result = { ...measureTextNatural(wrappedLines.join("\n")), wrappedLines, wrapWidth };
   return { wrapWidth: result.wrapWidth, wrappedLines: result.wrappedLines };
 }
 
+/** A Text prop that changes its measurement but not its content, such as `wrap`. */
 export function markTextDirty(text: TuiText): void {
-  text.textRevision++;
+  getYogaNode(text).markDirty();
+}
+
+/** A change to what a Text node holds: its leaves, their nesting, or a hidden one. */
+export function markTextContentDirty(text: TuiText): void {
+  text.contentRevision++;
   getYogaNode(text).markDirty();
 }

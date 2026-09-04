@@ -3,15 +3,16 @@ import { expect, test } from "vite-plus/test";
 import stringWidth from "string-width";
 import wrapAnsi from "wrap-ansi";
 import {
+  collectTextChunks,
   createText,
   createTextLeaf,
   createVirtualText,
-  flattenTextLeaves,
 } from "../../src/host/nodes.ts";
 import {
   measureTextNatural,
   safeSliceEnd,
   sliceAnsiPreservingIntensity,
+  styledGraphemesFromAnsi,
   styleMeasuredTextLines,
   wrapText,
 } from "../../src/text/text-measure.ts";
@@ -25,17 +26,17 @@ function stripAnsi(s: string): string {
   return s.replace(/\x1B\[[0-9;]*[A-Za-z]/g, "");
 }
 
-test("flattenTextLeaves concatenates a flat text node", () => {
+test("collectTextChunks concatenates a flat text node", () => {
   const t = createText();
   const a = createTextLeaf("hello ");
   const b = createTextLeaf("world");
   a.parent = t;
   b.parent = t;
   t.children = [a, b];
-  expect(flattenTextLeaves(t)).toBe("hello world");
+  expect(collectTextChunks(t)).toEqual([{ text: "hello world", nesting: [] }]);
 });
 
-test("flattenTextLeaves recurses into virtual-text", () => {
+test("collectTextChunks splits at a nested virtual-text", () => {
   const t = createText();
   const v = createVirtualText();
   const a = createTextLeaf("a");
@@ -45,7 +46,10 @@ test("flattenTextLeaves recurses into virtual-text", () => {
   v.parent = t;
   t.children = [a, v];
   a.parent = t;
-  expect(flattenTextLeaves(t)).toBe("ab");
+  expect(collectTextChunks(t)).toEqual([
+    { text: "a", nesting: [] },
+    { text: "b", nesting: [v] },
+  ]);
 });
 
 test("wrapText splits on width", () => {
@@ -247,7 +251,7 @@ test("styleMeasuredTextLines restores ANSI spans over layout's width-zero line p
 
   // The plan comes from unstyled layout text. Paint receives it verbatim and
   // only restores ANSI around its rows; it does not choose the split itself.
-  expect(styleMeasuredTextLines(styled, layoutPlan, "wrap", 0)).toEqual([
+  expect(styleMeasuredTextLines(styledGraphemesFromAnsi(styled), layoutPlan, "wrap", 0)).toEqual([
     "",
     "\x1b[41mA\x1b[49m",
     "\x1b[41m​\x1b[49m",
@@ -257,7 +261,7 @@ test("styleMeasuredTextLines restores ANSI spans over layout's width-zero line p
 });
 
 test("styleMeasuredTextLines accepts Yoga's zero-line plan for empty text", () => {
-  expect(styleMeasuredTextLines("", [], "wrap", 0)).toEqual([]);
+  expect(styleMeasuredTextLines([], [], "wrap", 0)).toEqual([]);
 });
 
 test("styleMeasuredTextLines restores styles for a layout-selected truncation", () => {
@@ -265,9 +269,9 @@ test("styleMeasuredTextLines restores styles for a layout-selected truncation", 
   const styled = "\x1b[31mabcdef\x1b[39m";
   const layoutPlan = wrapText(raw, 5, "truncate-middle");
 
-  expect(styleMeasuredTextLines(styled, layoutPlan, "truncate-middle", 5)).toEqual(
-    wrapText(styled, 5, "truncate-middle"),
-  );
+  expect(
+    styleMeasuredTextLines(styledGraphemesFromAnsi(styled), layoutPlan, "truncate-middle", 5),
+  ).toEqual(wrapText(styled, 5, "truncate-middle"));
 });
 
 test("styleMeasuredTextLines preserves wrap-ansi's normalized graphemes", () => {
@@ -275,7 +279,9 @@ test("styleMeasuredTextLines preserves wrap-ansi's normalized graphemes", () => 
   const layoutPlan = wrapText("e\u0301x", 1, "wrap");
 
   expect(layoutPlan).toEqual(["é", "x"]);
-  expect(styleMeasuredTextLines(styled, layoutPlan, "wrap", 1).map(stripAnsi)).toEqual(layoutPlan);
+  expect(
+    styleMeasuredTextLines(styledGraphemesFromAnsi(styled), layoutPlan, "wrap", 1).map(stripAnsi),
+  ).toEqual(layoutPlan);
 });
 
 test("truncate uses the final cell width and preserves component styling", () => {

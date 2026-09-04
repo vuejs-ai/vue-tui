@@ -11,14 +11,25 @@ import {
   type SgrPair,
   type Style,
 } from "../frame/style.ts";
-import { applySgrSpan, applyTextStyle, colorSpan, dimSpan } from "../text/text-style.ts";
-import { sanitizeAnsi, sanitizeAnsiMultiline } from "../text/sanitize-ansi.ts";
+import {
+  applySgrSpan,
+  applyTextStyle,
+  colorSpan,
+  dimSpan,
+  explicitTextStyleChannels,
+  textStyleSpans,
+  type SgrSpan,
+} from "../text/text-style.ts";
+import { styleContentRuns } from "../text/text-content.ts";
+import { sanitizeAnsi } from "../text/sanitize-ansi.ts";
 import type {
   TuiNode,
   TuiRoot,
   TuiContainer,
   TextProps,
   TuiText,
+  TuiTextChunk,
+  TuiTextContent,
   TuiVirtualText,
   BoxProps,
 } from "../host/nodes.ts";
@@ -601,8 +612,8 @@ class Output {
   }
 }
 
-// Compose a Text node by styling its already-composed children as one sequence.
-// Parent modifiers remain active across nested Text boundaries, while a nested
+// Compose a Text node by styling the runs its content parsed into. Parent
+// modifiers remain active across nested Text boundaries, while a nested
 // explicit channel value overrides that channel for its own subtree.
 //
 // The surrounding Box background is the outermost Text's base. From there,
@@ -610,150 +621,62 @@ class Output {
 // modifiers: omission inherits the nearest Text value, an explicit color
 // replaces it, and "default" actively resets the terminal channel. Unsupported
 // raw-host non-string values are treated as absent.
-const InlineStyleChannel = {
-  foreground: 1 << 0,
-  background: 1 << 1,
-  dimColor: 1 << 2,
-  bold: 1 << 3,
-  italic: 1 << 4,
-  underline: 1 << 5,
-  strikethrough: 1 << 6,
-  inverse: 1 << 7,
-} as const;
+function composeTextRuns(
+  node: TuiText,
+  content: TuiTextContent,
+  inheritedBg: string | undefined,
+): readonly StyledChar[] {
+  const spans = content.chunks.map((chunk) => textStyleSpansForChunk(node, chunk, inheritedBg));
+  // Content that no enclosing Text styles is already its own composition.
+  if (spans.every((list) => list.length === 0)) return content.runs;
 
-interface InlineTextChunk {
-  readonly value: string;
-  /**
-   * Channels whose nearest explicit nested value has already resolved. An
-   * enclosing Text must not wrap those channels again. This represents both
-   * terminal-default colors and all three modifier states without sentinel
-   * characters in user text.
-   */
-  readonly blockedAncestorStyles: number;
-}
-
-type InlineText = readonly InlineTextChunk[];
-
-function mergeInlineText(chunks: InlineText): InlineTextChunk[] {
-  const merged: InlineTextChunk[] = [];
-  for (const chunk of chunks) {
-    if (chunk.value.length === 0) continue;
-    const previous = merged.at(-1);
-    if (previous?.blockedAncestorStyles === chunk.blockedAncestorStyles) {
-      merged[merged.length - 1] = { ...previous, value: previous.value + chunk.value };
-    } else {
-      merged.push(chunk);
-    }
-  }
-  return merged;
-}
-
-function inlineTextValue(chunks: InlineText): string {
-  return chunks.map((chunk) => chunk.value).join("");
-}
-
-function renderTextWithInlineStyles(
-  node: TuiText | TuiVirtualText,
-  inheritedBg?: unknown,
-): InlineText {
-  if (node.style.display === "none") return [];
-  if (!node.children || node.children.length === 0) return [];
-  // Only this Text receives the surrounding Box background as its base. Nested
-  // Text nodes receive no second Box fallback: omission then inherits this
-  // Text's resolved background through the same channel cascade as foreground
-  // and modifiers.
-  const inner = squashInlineChildren(node.children, undefined);
-  return applyOwnStyle(node.props, inner, inheritedBg);
-}
-
-function explicitStyleMask(props: TextProps): number {
-  let mask = 0;
-  if (props.color !== undefined) mask |= InlineStyleChannel.foreground;
-  if (props.backgroundColor !== undefined) mask |= InlineStyleChannel.background;
-  if (props.dimColor !== undefined) mask |= InlineStyleChannel.dimColor;
-  if (props.bold !== undefined) mask |= InlineStyleChannel.bold;
-  if (props.italic !== undefined) mask |= InlineStyleChannel.italic;
-  if (props.underline !== undefined) mask |= InlineStyleChannel.underline;
-  if (props.strikethrough !== undefined) mask |= InlineStyleChannel.strikethrough;
-  if (props.inverse !== undefined) mask |= InlineStyleChannel.inverse;
-  return mask;
-}
-
-function omitBlockedStyles(props: TextProps, mask: number): TextProps {
-  return {
-    ...props,
-    color: mask & InlineStyleChannel.foreground ? undefined : props.color,
-    backgroundColor: mask & InlineStyleChannel.background ? undefined : props.backgroundColor,
-    dimColor: mask & InlineStyleChannel.dimColor ? undefined : props.dimColor,
-    bold: mask & InlineStyleChannel.bold ? undefined : props.bold,
-    italic: mask & InlineStyleChannel.italic ? undefined : props.italic,
-    underline: mask & InlineStyleChannel.underline ? undefined : props.underline,
-    strikethrough: mask & InlineStyleChannel.strikethrough ? undefined : props.strikethrough,
-    inverse: mask & InlineStyleChannel.inverse ? undefined : props.inverse,
-  };
-}
-
-// Apply one Text node's explicit channel values around its composed children.
-// Every explicit value resolves that channel for the complete subtree:
-// omission inherits, true enables, false disables, and `default` actively
-// selects the terminal-default foreground or background. The structural mask
-// makes enclosing wrappers skip channels already settled by a nested Text,
-// including bold and dim which share SGR 22 as their reset code.
-function applyOwnStyle(props: TextProps, inner: InlineText, inheritedBg: unknown): InlineText {
-  if (inner.length === 0) return inner;
-  const defined = Object.fromEntries(
-    Object.entries(props).filter(([, v]) => v !== undefined),
-  ) as TextProps;
-  // A surrounding Box supplies only the outermost Text's base background.
-  // Public Text background values are strings, including the active `default`
-  // reset. Unsupported raw-host values do not replace the base.
-  const ownBg = defined.backgroundColor;
-  const effectiveBg = typeof ownBg === "string" ? ownBg : inheritedBg;
-  const styleProps: TextProps = { ...defined, backgroundColor: effectiveBg };
-  const ownMask = explicitStyleMask(props);
-
-  return mergeInlineText(
-    inner.map((chunk) => {
-      const chunkProps = omitBlockedStyles(styleProps, chunk.blockedAncestorStyles);
-      return {
-        value: sanitizeAnsiMultiline(applyTextStyle(chunk.value, chunkProps)),
-        blockedAncestorStyles: chunk.blockedAncestorStyles | ownMask,
-      };
-    }),
+  const composed: StyledChar[] = [];
+  const blocked = content.chunks.map((chunk) =>
+    chunk.nesting.reduce((mask, nested) => mask | explicitTextStyleChannels(nested.props), 0),
   );
+  let start = 0;
+  let groupStart = 0;
+  for (let index = 0; index < content.chunks.length; index++) {
+    const chunk = content.chunks[index]!;
+    // One span wraps every neighbouring chunk this node styles identically, so
+    // a reset written in one of them keeps cancelling that span through the
+    // rest of the group, exactly as one wrap around the joined text did.
+    if (index === 0 || blocked[index] !== blocked[index - 1]) groupStart = start;
+    const end = start + chunk.runs;
+    styleContentRuns(content.runs, content.reset, start, end, groupStart, spans[index]!, composed);
+    start = end;
+  }
+  return composed;
 }
 
-// Squash an array of inline children into styled text. `inheritedBg` is a base for
-// nested Text descendants that inherit background through the parent's style
-// channel rather than receiving the surrounding Box value again.
-function squashInlineChildren(children: readonly TuiNode[], inheritedBg: unknown): InlineText {
-  const chunks: InlineTextChunk[] = [];
-  for (const child of children) {
-    chunks.push(...squashInlineChild(child, inheritedBg));
+/** The spans the enclosing Text hosts open around one chunk, outermost first. */
+function textStyleSpansForChunk(
+  node: TuiText,
+  chunk: TuiTextChunk,
+  inheritedBg: string | undefined,
+): SgrSpan[] {
+  const levels: readonly (TuiText | TuiVirtualText)[] = [node, ...chunk.nesting];
+  // Every explicit value resolves its channel for the complete subtree, so a
+  // level skips the channels any level inside it sets.
+  const blockedBelow: number[] = [];
+  let inner = 0;
+  for (let index = levels.length - 1; index >= 0; index--) {
+    blockedBelow[index] = inner;
+    inner |= explicitTextStyleChannels(levels[index]!.props);
   }
-  return mergeInlineText(chunks);
-}
 
-// Squash a single inline child into styled text.
-//
-// A bare text-leaf has NO style of its own (it is React's `#text` node), so it
-// contributes its RAW value — NOT even the inherited Box bg. ALL styling,
-// including the effective bg (`ownBg ?? inheritedBg`), is applied exactly ONCE
-// by the enclosing <Text>'s applyOwnStyle, around the whole children
-// concatenation. Applying the inherited bg here too would emit a SECOND, INNER
-// bg-open that wins over the outer one for these glyphs — e.g.
-// `<Box bg=red><Text bg=blue>x` would render red, not blue. A nested
-// <Text>/<virtual-text> child wraps itself (renderTextWithInlineStyles),
-// carrying its own style INSIDE the parent's eventual wrap.
-function squashInlineChild(child: TuiNode, inheritedBg: unknown): InlineText {
-  if (child.type === "text-leaf") {
-    return child.value.length === 0 ? [] : [{ value: child.value, blockedAncestorStyles: 0 }];
+  const spans: SgrSpan[] = [];
+  for (let index = 0; index < levels.length; index++) {
+    const props = levels[index]!.props;
+    // A surrounding Box supplies only the outermost Text's base background.
+    // Public Text background values are strings, including the active `default`
+    // reset. Unsupported raw-host values do not replace the base.
+    const ownBg = props.backgroundColor;
+    const styleProps =
+      index === 0 && typeof ownBg !== "string" ? { ...props, backgroundColor: inheritedBg } : props;
+    spans.push(...textStyleSpans(styleProps, blockedBelow[index]!));
   }
-  if (child.type === "tui-virtual-text" || child.type === "tui-text") {
-    return renderTextWithInlineStyles(child, inheritedBg);
-  }
-  // Comments (null/undefined renders), boxes, etc. contribute nothing.
-  return [];
+  return spans;
 }
 
 type BoxStyle = (typeof cliBoxes)[keyof cliBoxes.Boxes];
@@ -885,22 +808,6 @@ function fillBackground(
   for (let i = 0; i < height; i++) output.write(x, y + i, [line]);
 }
 
-interface PreparedTextPaint {
-  readonly text: string;
-  readonly wrapped: string[];
-}
-
-interface PreparedTextPaintCache extends PreparedTextPaint {
-  readonly revision: number;
-  readonly inheritedBg: string | undefined;
-  readonly textAlign: TextProps["textAlign"];
-  readonly wrapWidth: number;
-  readonly wrapMode: TextProps["wrap"];
-  readonly wrappedLines: readonly string[];
-}
-
-const preparedTextPaintCache = new WeakMap<TuiText, PreparedTextPaintCache>();
-
 function alignTextLine(
   line: string,
   width: number,
@@ -920,42 +827,18 @@ function alignTextLine(
   return pad(leading) + line + pad(trailing);
 }
 
-function prepareTextPaint(
+/** Style the node's runs, split them over the measured lines, and align each. */
+function paintedTextLines(
   node: TuiText,
+  content: TuiTextContent,
   inheritedBg: string | undefined,
   wrapWidth: number,
   wrappedLines: readonly string[],
-): PreparedTextPaint {
-  const textAlign = node.props.textAlign;
-  const wrapMode = node.props.wrap;
-  const cached = preparedTextPaintCache.get(node);
-  if (
-    cached?.revision === node.textRevision &&
-    cached.inheritedBg === inheritedBg &&
-    cached.textAlign === textAlign &&
-    cached.wrapWidth === wrapWidth &&
-    cached.wrapMode === wrapMode &&
-    cached.wrappedLines === wrappedLines
-  ) {
-    return cached;
-  }
-
-  const text = inlineTextValue(renderTextWithInlineStyles(node, inheritedBg));
-  const wrapped = styleMeasuredTextLines(text, wrappedLines, wrapMode ?? "wrap", wrapWidth).map(
-    (line) => alignTextLine(line, wrapWidth, textAlign ?? "left", inheritedBg),
+): string[] {
+  const composed = composeTextRuns(node, content, inheritedBg);
+  return styleMeasuredTextLines(composed, wrappedLines, node.props.wrap ?? "wrap", wrapWidth).map(
+    (line) => alignTextLine(line, wrapWidth, node.props.textAlign ?? "left", inheritedBg),
   );
-  const prepared = { text, wrapped };
-  const entry = {
-    revision: node.textRevision,
-    inheritedBg,
-    textAlign,
-    wrapWidth,
-    wrapMode,
-    wrappedLines,
-    ...prepared,
-  };
-  preparedTextPaintCache.set(node, entry);
-  return entry;
 }
 
 interface PaintRect {
@@ -1161,18 +1044,21 @@ function paintNode(
         return;
       }
       // Thread the INHERITED Box bg (NOT a pre-computed effective bg) into the
-      // squash. The Text's own backgroundColor — including an explicit "" opt-out —
-      // is resolved against this inherited bg inside applyOwnStyle, where it
-      // wraps the node's complete child sequence alongside its boolean styles.
+      // composition. The Text's own backgroundColor — including an explicit ""
+      // opt-out — is resolved against this inherited bg while the enclosing
+      // spans are collected, alongside its boolean styles.
       // Layout already chose the whole-cell budget and every physical line.
       // Paint only applies terminal styles and alignment to that immutable plan;
       // re-wrapping here would let a second budget diverge from Yoga's measure.
       const textLayout = computed.text;
       if (!textLayout) return;
-      const { wrapWidth, wrappedLines } = textLayout;
-      const { text, wrapped } = prepareTextPaint(node, inheritedBg, wrapWidth, wrappedLines);
+      // The layout transaction parsed this node's content for the same commit,
+      // so the runs are current for every Text it laid out.
+      const content = node.content;
       // Empty text has no cells to write.
-      if (text === "") return;
+      if (!content || content.text === "") return;
+      const { wrapWidth, wrappedLines } = textLayout;
+      const wrapped = paintedTextLines(node, content, inheritedBg, wrapWidth, wrappedLines);
       // Pad each line to the cell width with the INHERITED Box background only —
       // this fills the space behind the text with the Box's bg (the Box also fills
       // it via fillBackground), and is the reason a Box bg pads to full width while
@@ -1197,7 +1083,7 @@ function paintNode(
     case "tui-virtual-text":
     case "text-leaf":
     case "comment":
-      // virtual-text and text-leaf are handled inside renderTextWithInlineStyles.
+      // virtual-text and text-leaf are painted through their enclosing Text.
       // Comments are invisible.
       return;
   }
