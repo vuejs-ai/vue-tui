@@ -1,6 +1,6 @@
 # Architecture decisions
 
-Judgments Yunfei actually expressed about the internal structure of `@vue-tui/runtime`, and about how that structure is tested — selections, acceptances, and rejections. A finished implementation, a passed review, resemblance to a peer, or silence is not acceptance. Never invent a rationale; where no reason was given, the entry says so. Entries record the act of judgment, not the structure itself; [Runtime architecture](./architecture.md) records the structure, with the remaining work in [TODOs — architecture](./todos-architecture.md). Edit entries in place; git keeps history.
+Judgments Yunfei actually expressed about the internal structure of `@vue-tui/runtime`, and about how that structure is tested — selections, acceptances, and rejections. A finished implementation, a passed review, resemblance to a peer, or silence is not acceptance. Never invent a rationale; where no reason was given, the entry says so. Entries record the act of judgment, not the structure itself; [Runtime architecture](./architecture.md) records the structure. Edit entries in place; git keeps history.
 
 Judgments about the **public** surface belong in the [Runtime API decision ledger](./runtime-api-decisions.md) and are not duplicated here. Boundaries between packages are settled in [Package architecture](./package-architecture.md).
 
