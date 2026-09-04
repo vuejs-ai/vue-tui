@@ -50,6 +50,20 @@ Entries without a stamp are drafts of judgments Yunfei expressed. A stamp alone 
 - **Why:** Yunfei chose targeted delivery after both models and their consequences were laid out, including that an application cannot perform the resolution itself — `useBoxMetrics` reports a parent-relative rectangle by accepted contract, explicitly excluding terminal coordinates and pointer facts, so an application receiving a coordinate has no way to map it to one of its own components. He gave no further reason.
 - **Source:** Yunfei, 2026-08-30, explicit instruction to take targeted delivery, given after the two models were compared; no durable session URL is available, so this entry is the durable record.
 
+### Content is parsed once per revision and the runs live on the node
+
+- **Ruling:** A `Text` node's content is parsed into styled runs once per content revision, and the runs are kept on the node as plain data. The layout pass wraps them for its width and records the wrapped lines in `ComputedLayout`; paint reads the node's runs and those wrapped lines and keeps no cache of its own.
+- **Limits:** This does not decide whether the parse runs when the content is set or on the first measurement after a change. It does not change the May-import tables, and it does not decide the memory layout of the runs.
+- **Why:** Yunfei adopted the recommendation as it was given: the parse does not depend on width, so it need not repeat per measurement, and one set of runs on the node replaces the two caches. He gave no further reason.
+- **Source:** Yunfei, 2026-09-05, adopted the recommendation by reference after the alternative was laid out; no durable session URL is available, so this entry is the durable record.
+
+### Colour degrades in the encoder
+
+- **Ruling:** The encoder in `surface/` degrades a cell's colour to the resolved colour level. The level is resolved once per host from the `color` option and the environment and handed to the encoder by the session and by `renderToString`; the painter and `Style` carry structured colour only and do not know the level.
+- **Limits:** This does not decide the mapping from truecolor to 256 or 16 colours, and it does not change the public `color` option. Content ANSI colours and prop colours degrade through the same encoder.
+- **Why:** Yunfei adopted the recommendation as it was given: the target painter produces no strings, so degradation needs one home both hosts reach, and the encoder is that place. He gave no further reason.
+- **Source:** Yunfei, 2026-09-05, adopted the recommendation by reference after the alternative was laid out; no durable session URL is available, so this entry is the durable record.
+
 ## Open
 
 ### Which SGR attributes receive structured fields
