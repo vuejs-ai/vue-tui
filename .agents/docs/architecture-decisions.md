@@ -1,6 +1,6 @@
 # Architecture decisions
 
-Judgments Yunfei actually expressed about the internal structure of `@vue-tui/runtime` — selections, acceptances, and rejections. A finished implementation, a passed review, resemblance to a peer, or silence is not acceptance. Never invent a rationale; where no reason was given, the entry says so. Entries record the act of judgment, not the structure itself; [Runtime architecture](./architecture.md) records the structure, with the remaining work in [TODOs — architecture](./todos-architecture.md). Edit entries in place; git keeps history.
+Judgments Yunfei actually expressed about the internal structure of `@vue-tui/runtime`, and about how that structure is tested — selections, acceptances, and rejections. A finished implementation, a passed review, resemblance to a peer, or silence is not acceptance. Never invent a rationale; where no reason was given, the entry says so. Entries record the act of judgment, not the structure itself; [Runtime architecture](./architecture.md) records the structure, with the remaining work in [TODOs — architecture](./todos-architecture.md). Edit entries in place; git keeps history.
 
 Judgments about the **public** surface belong in the [Runtime API decision ledger](./runtime-api-decisions.md) and are not duplicated here. Boundaries between packages are settled in [Package architecture](./package-architecture.md).
 
@@ -49,6 +49,15 @@ Entries without a stamp are drafts of judgments Yunfei expressed. A stamp alone 
 - **Limits:** This settles who receives an event, not how far the delivery model goes: bubbling, pointer capture, hover, and click chains are each undecided. It does not change `useInput`, whose accepted contract is broadcast and whose Limits already require that a future facility "must be a separate opt-in primitive rather than changing this default delivery contract". Scope remains Fullscreen only, per the first entry above. The implementation must respect clipping, but no hit-attribution representation is selected until the work qualifies under the product-work rule.
 - **Why:** Yunfei chose targeted delivery after both models and their consequences were laid out, including that an application cannot perform the resolution itself — `useBoxMetrics` reports a parent-relative rectangle by accepted contract, explicitly excluding terminal coordinates and pointer facts, so an application receiving a coordinate has no way to map it to one of its own components. He gave no further reason.
 - **Source:** Yunfei, 2026-08-30, explicit instruction to take targeted delivery, given after the two models were compared; no durable session URL is available, so this entry is the durable record.
+
+### Runtime behavior is proved by end-to-end and integration tests
+
+[VOUCHED @hyfdev 2026-09-04]
+
+- **Ruling:** For `@vue-tui/runtime`, end-to-end and integration tests are the primary evidence for behavior and unit tests are supplementary. Internal code logic is never changed, and never hacked around, in order to make it unit-testable.
+- **Limits:** Yunfei did not enumerate what counts as a hack. This does not forbid unit tests of pure functions that already exist as units, and it does not remove tests already in the repository. It does not decide suite placement, file naming, or harness details, which the repository's testing rules in `AGENTS.md` already govern. It covers Runtime code; how the other packages are tested is not decided here.
+- **Why:** Yunfei gave this ruling as a direct instruction and stated no reason for it, so none is recorded.
+- **Source:** Yunfei, 2026-09-04, explicit instruction to adopt this principle and stamp it; no durable session URL is available, so this entry is the durable record.
 
 ### Content is parsed once per revision and the runs live on the node
 
