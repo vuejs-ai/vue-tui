@@ -23,7 +23,6 @@ export interface ManagedInputSession {
   readonly isManagedInputReady: boolean;
   acquireKittyKeyboard(): () => void;
   readonly isKittyKeyboardReady: boolean;
-  writeTerminal(data: string, onHandoff?: () => void, onAttempt?: () => void): boolean;
   requestTerminalReconcile(): void;
   reportManagedInputFailure(error: unknown): void;
 }
@@ -141,19 +140,14 @@ export function createStdinController(
     resolved: undefined,
   };
   let cleanupErrorSink: ((error: unknown) => void) | null = null;
+  /** Logical bracketed-paste demand; the leases below express it physically. */
   let bracketedPasteModeCount = 0;
   const bracketedPasteLeases: TerminalLease<"bracketed-paste">[] = [];
-  let pendingBracketedPasteMode: { readonly enabled: boolean; attempted: boolean } | undefined;
-  let reconcilingBracketedPaste = false;
-  let bracketedPasteReconcileRequested = false;
-  let bracketedPasteSyncRequested = false;
   let suspended = false;
   let disposed = false;
   let releaseKittyKeyboardDemand: (() => void) | undefined;
   let reconcilingKittyDemand = false;
   let kittyDemandReconcileRequested = false;
-  let bracketedPastePhysicallyEnabled = false;
-  let bracketedPastePhysicalUncertain = false;
   let localRefs = 0;
   const rawModeLeases: TerminalLease<"raw">[] = [];
   /** Logical managed-input owners, whether or not this stream supports raw mode. */
@@ -176,37 +170,12 @@ export function createStdinController(
   let semanticInputReconcileRequested = false;
   let resumeAwaitingTerminalModes = false;
 
-  // True once bracketed paste has been enabled at least once on this controller
-  // (semantic input was active). Lets signal-exit teardown re-issue a SYNCHRONOUS
-  // paste-OFF even after Vue's unmount already ran the async disable and zeroed
-  // bracketedPasteModeCount (see dispose(sync) below).
-  let everEnabledBracketedPaste = false;
-
   // Write terminal-mode escapes only when stdout can still take them. `isTTY`
   // stays truthy after a stream is destroyed or ended, so a restore gated on it
   // alone throws ERR_STREAM_DESTROYED on a teardown where stdout is already
   // gone; the backend's `canWrite` fact carries that check.
   function canWriteTerminalMode(): boolean {
     return terminal.capabilities.stdout.isTTY && terminal.capabilities.stdout.canWrite;
-  }
-
-  function writeTerminalMode(
-    data: string,
-    sync = false,
-    onHandoff: () => void = () => {},
-    onAttempt: () => void = () => {},
-  ): boolean {
-    if (!canWriteTerminalMode()) return false;
-    if (sync) {
-      // The base WriteStream type doesn't declare `fd`; tty/fs streams do.
-      // Let failures propagate to the reconciler: OFF transitions are retried
-      // once before the outer signal/suspension cleanup swallows the error.
-      onAttempt();
-      terminal.writeSync("stdout", data);
-      onHandoff();
-      return true;
-    }
-    return session.writeTerminal(data, onHandoff, onAttempt);
   }
 
   function runTerminalCleanup(operation: () => void): void {
@@ -228,111 +197,29 @@ export function createStdinController(
     session.reportManagedInputFailure(error);
   }
 
+  /**
+   * Match the bracketed-paste leases this controller holds to the demand it may
+   * physically express. The lease issues the escape at the edges: only the first
+   * acquisition and the last release reach the device.
+   */
   function reconcileBracketedPasteMode(sync = false): void {
-    bracketedPasteSyncRequested ||= sync;
-    if (reconcilingBracketedPaste) {
-      bracketedPasteReconcileRequested = true;
-      return;
+    const desired = disposed || suspended ? 0 : bracketedPasteModeCount;
+    while (bracketedPasteLeases.length > desired) {
+      bracketedPasteLeases.pop()!.release({ sync });
     }
-
-    reconcilingBracketedPaste = true;
-    try {
-      while (true) {
-        bracketedPasteReconcileRequested = false;
-        const useSync = bracketedPasteSyncRequested;
-        bracketedPasteSyncRequested = false;
-        const shouldEnable =
-          !disposed && !suspended && bracketedPasteModeCount > 0 && canWriteTerminalMode();
-        if (pendingBracketedPasteMode) break;
-        if (bracketedPastePhysicalUncertain) {
-          const pending = { enabled: false, attempted: false };
-          pendingBracketedPasteMode = pending;
-          try {
-            const accepted = writeTerminalMode(
-              "\x1b[?2004l",
-              useSync,
-              () => {
-                if (pendingBracketedPasteMode !== pending) return;
-                pendingBracketedPasteMode = undefined;
-                bracketedPastePhysicallyEnabled = false;
-                bracketedPastePhysicalUncertain = false;
-                session.requestTerminalReconcile();
-              },
-              () => {
-                if (pendingBracketedPasteMode === pending) pending.attempted = true;
-              },
-            );
-            if (!accepted) {
-              if (pendingBracketedPasteMode === pending) pendingBracketedPasteMode = undefined;
-              session.requestTerminalReconcile();
-            }
-          } catch (error) {
-            if (pendingBracketedPasteMode === pending) {
-              pendingBracketedPasteMode = undefined;
-              if (pending.attempted) bracketedPastePhysicalUncertain = true;
-            }
-            throw error;
-          }
-          break;
-        }
-        if (shouldEnable === bracketedPastePhysicallyEnabled && !bracketedPastePhysicalUncertain) {
-          if (!bracketedPasteReconcileRequested) break;
-          continue;
-        }
-
-        const pending = { enabled: shouldEnable, attempted: false };
-        pendingBracketedPasteMode = pending;
-        try {
-          const accepted = writeTerminalMode(
-            shouldEnable ? "\x1b[?2004h" : "\x1b[?2004l",
-            useSync,
-            () => {
-              if (pendingBracketedPasteMode !== pending) return;
-              pendingBracketedPasteMode = undefined;
-              bracketedPastePhysicallyEnabled = shouldEnable;
-              bracketedPastePhysicalUncertain = false;
-              if (shouldEnable) everEnabledBracketedPaste = true;
-              session.requestTerminalReconcile();
-            },
-            () => {
-              if (pendingBracketedPasteMode === pending) pending.attempted = true;
-            },
-          );
-          if (!accepted) {
-            if (pendingBracketedPasteMode === pending) {
-              pendingBracketedPasteMode = undefined;
-            }
-            session.requestTerminalReconcile();
-            break;
-          }
-        } catch (error) {
-          if (pendingBracketedPasteMode === pending) {
-            pendingBracketedPasteMode = undefined;
-            if (pending.attempted) bracketedPastePhysicalUncertain = true;
-          }
-          throw error;
-        }
-        if (pendingBracketedPasteMode) break;
-      }
-    } finally {
-      reconcilingBracketedPaste = false;
+    while (bracketedPasteLeases.length < desired) {
+      bracketedPasteLeases.push(terminal.acquire("bracketed-paste"));
     }
-  }
-
-  // On an abrupt signal path Vue cleanup may already have issued the normal
-  // async OFF and cleared the logical count. Re-issuing OFF synchronously is
-  // idempotent and guarantees the restore reaches the terminal before re-raise.
-  function forceDisableBracketedPaste(sync: boolean): void {
-    writeTerminalMode("\x1b[?2004l", sync);
-    pendingBracketedPasteMode = undefined;
-    bracketedPastePhysicallyEnabled = false;
-    bracketedPastePhysicalUncertain = false;
   }
 
   function reissueIdempotentTerminalDisables(sync: boolean): void {
-    if (everEnabledBracketedPaste) {
-      runTerminalCleanup(() => forceDisableBracketedPaste(sync));
-    }
+    // On an abrupt signal path Vue cleanup may already have issued the normal
+    // async OFF and cleared the logical count. Re-issuing OFF synchronously is
+    // idempotent and guarantees the restore reaches the terminal before re-raise.
+    runTerminalCleanup(() => {
+      bracketedPasteLeases.length = 0;
+      terminal.restoreMode("bracketed-paste", { sync });
+    });
   }
 
   function reconcileSharedSubscription(): void {
@@ -342,10 +229,8 @@ export function createStdinController(
         (session.isManagedInputReady &&
           session.isKittyKeyboardReady &&
           (!canWriteTerminalMode() ||
-            (bracketedPasteModeCount === 0
-              ? !bracketedPastePhysicallyEnabled && !bracketedPastePhysicalUncertain
-              : bracketedPastePhysicallyEnabled && !bracketedPastePhysicalUncertain)) &&
-          pendingBracketedPasteMode === undefined))
+            (terminal.isModeSettled("bracketed-paste") &&
+              (bracketedPasteModeCount === 0 || terminal.isModeActive("bracketed-paste"))))))
     ) {
       resumeAwaitingTerminalModes = false;
     }
@@ -678,9 +563,7 @@ export function createStdinController(
   function semanticTerminalModesReady(): boolean {
     const pasteReady =
       !canWriteTerminalMode() ||
-      (bracketedPastePhysicallyEnabled &&
-        !bracketedPastePhysicalUncertain &&
-        pendingBracketedPasteMode === undefined);
+      (terminal.isModeActive("bracketed-paste") && terminal.isModeSettled("bracketed-paste"));
     return !suspended && session.isManagedInputReady && session.isKittyKeyboardReady && pasteReady;
   }
 
@@ -1007,27 +890,17 @@ export function createStdinController(
       flushPendingApplicationInput();
     },
     abandonPendingTerminalOutput(options) {
-      if (pendingBracketedPasteMode?.attempted) bracketedPastePhysicalUncertain = true;
-      pendingBracketedPasteMode = undefined;
       for (const demand of semanticInputDemands) {
         if (demand.physicalAcquired && !semanticTerminalModesReady()) {
           setSemanticDemandPublished(demand, false);
         }
       }
-      if (options?.physicalStateUncertain) {
-        // The coordinator is idle before it reports a physical stream failure.
-        // Converge immediately to a terminal-safe paste-OFF state.
-        runTerminalCleanup(reconcileBracketedPasteMode);
-      } else {
-        session.requestTerminalReconcile();
-      }
+      if (!options?.physicalStateUncertain) session.requestTerminalReconcile();
     },
     setBracketedPasteMode(enabled: boolean) {
       if (disposed) return;
       if (enabled) {
         const bracketedPasteModeCountBefore = bracketedPasteModeCount;
-        const lease = terminal.acquire("bracketed-paste");
-        bracketedPasteLeases.push(lease);
         bracketedPasteModeCount++;
         try {
           reconcileBracketedPasteMode();
@@ -1035,16 +908,12 @@ export function createStdinController(
           if (!disposed && bracketedPasteModeCount > bracketedPasteModeCountBefore) {
             bracketedPasteModeCount--;
           }
-          const index = bracketedPasteLeases.lastIndexOf(lease);
-          if (index !== -1) bracketedPasteLeases.splice(index, 1);
-          lease.release();
           runTerminalCleanup(reconcileBracketedPasteMode);
           throw error;
         }
       } else {
         if (bracketedPasteModeCount === 0) return;
         bracketedPasteModeCount--;
-        bracketedPasteLeases.pop()?.release();
         // Let the semantic release finish before retrying an ambiguous OFF. A
         // re-entrant replacement can then establish the newest desired count,
         // so reconciliation emits ON directly instead of an obsolete second
@@ -1157,34 +1026,20 @@ export function createStdinController(
       }
       managedInputRefs = 0;
       semanticInputDemands.clear();
-      // Normal teardown itself owns one unhanded output transaction. Preserve
-      // terminal-mode callbacks captured by Vue scope cleanup so the handoff
-      // commits their physical state exactly once. Abrupt teardown aborts that
-      // transaction and explicitly abandons these pending callbacks first.
-      if (sync) {
-        pendingBracketedPasteMode = undefined;
-      }
       resumeAwaitingTerminalModes = false;
       runTerminalCleanup(() => reconcileBracketedPasteMode(sync));
       if (sync && reissueAbruptTerminalDisables) {
         // The paste-off escape must flush synchronously on signal exit. By the
-        // time dispose() runs, Vue's unmount has usually
-        // already disposed the semantic-input lease, which wrote `\x1b[?2004l`
-        // ASYNC and zeroed the count — and that
-        // async write is exactly what signal-exit's immediate re-raise can drop.
-        // So re-issue it SYNCHRONOUSLY here whenever paste was ever enabled, not
-        // gated on the (now-zero) live count. Re-sending paste-OFF is idempotent:
-        // disabling an already-disabled mode is a terminal no-op, so a redundant
-        // sync write after a surviving async one is harmless. If detach hasn't run
-        // yet (count still > 0), this single sync write still covers it.
+        // time dispose() runs, Vue's unmount has usually already released the
+        // semantic-input lease, which disabled bracketed paste through the
+        // output gate and zeroed the count — and that asynchronous write is
+        // exactly what signal-exit's immediate re-raise can drop. So re-issue
+        // it synchronously here whenever paste was ever enabled, not gated on
+        // the (now-zero) live count. If the release has not run yet, this one
+        // synchronous restore still covers it.
         reissueIdempotentTerminalDisables(true);
-      } else {
-        if (bracketedPastePhysicalUncertain) {
-          runTerminalCleanup(() => forceDisableBracketedPaste(sync));
-        }
       }
       bracketedPasteModeCount = 0;
-      for (const lease of bracketedPasteLeases.splice(0)) lease.release();
       if (terminal.capabilities.stdin.canSetRawMode) {
         const state = getRawModeState(inputOwner);
         // Drop this controller's outstanding refs (if Vue's unmount hasn't already

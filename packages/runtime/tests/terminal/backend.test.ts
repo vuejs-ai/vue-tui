@@ -1,7 +1,7 @@
 import { expect, test } from "vite-plus/test";
 import { createTestTerminalBackend } from "../../src/terminal/test/backend.ts";
 
-test("test backend records bytes, reports fixed facts, and balances generic mode leases", () => {
+test("test backend records bytes, reports fixed facts, and issues a mode at its lease edges", () => {
   const terminal = createTestTerminalBackend({
     size: { columns: 120, rows: 40 },
     capabilities: { stdout: { isTTY: false } },
@@ -16,6 +16,7 @@ test("test backend records bytes, reports fixed facts, and balances generic mode
   expect(terminal.size).toEqual({ columns: 120, rows: 40 });
   expect(terminal.capabilities.stdout.isTTY).toBe(false);
   expect(terminal.writes).toEqual([
+    { output: "stdout", data: "\x1b[?1049h\x1b[H" },
     { output: "stdout", data: "one" },
     { output: "stderr", data: "two" },
   ]);
@@ -24,6 +25,7 @@ test("test backend records bytes, reports fixed facts, and balances generic mode
   second.release();
   second.release();
   expect(terminal.isModeHeld("alternate-screen")).toBe(false);
+  expect(terminal.writes.at(-1)).toEqual({ output: "stdout", data: "\x1b[?1049l" });
 });
 
 test("test backend exposes deterministic input and resize events", () => {

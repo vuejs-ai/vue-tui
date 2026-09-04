@@ -1,8 +1,5 @@
 import type { TerminalBackend, TerminalLease } from "./backend.ts";
 
-/** Fixed Kitty progressive-enhancement flag: disambiguate escape codes only. */
-const KITTY_DISAMBIGUATE_ESCAPE_CODES = 1;
-
 export const kittyModifiers = {
   shift: 1,
   alt: 2,
@@ -39,10 +36,9 @@ export interface KittyKeyboardController {
   /** Reacquire the protocol state that was active before suspend(). */
   resume(): void;
   /**
-   * @param sync When true, write the disable-kitty escape synchronously
-   * (fs.writeSync) so it reaches the fd before an abrupt signal-driven exit
-   * re-raises the signal. Defaults to async stream.write for
-   * the normal unmount path.
+   * @param sync When true, restore the protocol synchronously so the escape
+   * reaches the fd before an abrupt signal-driven exit re-raises the signal.
+   * Defaults to the coordinated path for the normal unmount route.
    */
   dispose(sync?: boolean): void;
   /** Whether managed input may be published for the current demand. */
@@ -50,6 +46,7 @@ export interface KittyKeyboardController {
   readonly isEnabled: boolean;
 }
 
+/** How the support query reaches the terminal; the protocol itself is a lease. */
 export type WriteKittyOutput = (
   data: string,
   onHandoff?: () => void,
@@ -74,24 +71,19 @@ export function createKittyKeyboardController(
   },
   onStateChange?: () => void,
 ): KittyKeyboardController {
-  let enabled = false;
   let disposed = false;
   let suspended = false;
   const configuredMode: "auto" | "enabled" | "disabled" = options?.mode ?? "auto";
   let autoSupport: "unknown" | "supported" | "unsupported" = "unknown";
   let demandCount = 0;
   let pendingDeactivate = false;
+  /** Held exactly while this controller wants the protocol pushed. */
   let protocolLease: TerminalLease<"kitty-keyboard"> | undefined;
-  let protocolMayBeEnabled = false;
-  let deferredDisableSync = false;
-  let nextOutputGeneration = 0;
   let nextDetectionGeneration = 0;
   let reconciling = false;
   let reconcileRequested = false;
 
-  type PendingOutput = {
-    readonly generation: number;
-    readonly kind: "push" | "query" | "pop";
+  type PendingQuery = {
     attempted: boolean;
   };
 
@@ -104,7 +96,7 @@ export function createKittyKeyboardController(
     settled: boolean;
   };
 
-  let pendingOutput: PendingOutput | null = null;
+  let pendingQuery: PendingQuery | null = null;
   let activeDetection: ActiveDetection | null = null;
 
   function canUseControlOutput(): boolean {
@@ -116,19 +108,6 @@ export function createKittyKeyboardController(
     );
   }
 
-  /**
-   * Enabling the protocol needs a readable stdin, because the terminal answers
-   * the query there. Restoring it does not: the pop only travels outward, and a
-   * stdin that has gone away -- a PTY hangup, a host closing it during teardown
-   * -- is exactly when leaving the protocol pushed costs the user their shell.
-   *
-   * This gates the asynchronous pop, which travels through the output gate. The
-   * synchronous one bypasses it deliberately; see `writeSyncPop`.
-   */
-  function canRestoreControlOutput(): boolean {
-    return terminal.capabilities.stdout.canWrite;
-  }
-
   function notifyStateChange(): void {
     onStateChange?.();
   }
@@ -137,14 +116,20 @@ export function createKittyKeyboardController(
     return !disposed && !suspended && demandCount > 0;
   }
 
-  function writeControlOutput(
-    kind: PendingOutput["kind"],
-    data: string,
-    commit: () => void,
-  ): boolean {
-    if (pendingOutput) return true;
-    const pending: PendingOutput = { generation: ++nextOutputGeneration, kind, attempted: false };
-    pendingOutput = pending;
+  /** Whether the protocol is pushed on the device right now. */
+  function isProtocolEnabled(): boolean {
+    return terminal.isModeActive("kitty-keyboard");
+  }
+
+  /** Whether the device already matches this controller's protocol demand. */
+  function isProtocolSettled(): boolean {
+    return terminal.isModeSettled("kitty-keyboard");
+  }
+
+  function writeQuery(data: string, commit: () => void): boolean {
+    if (pendingQuery) return true;
+    const pending: PendingQuery = { attempted: false };
+    pendingQuery = pending;
     let handed = false;
     let accepted = false;
 
@@ -152,21 +137,19 @@ export function createKittyKeyboardController(
       accepted = writeOutput(
         data,
         () => {
-          if (pendingOutput !== pending) return;
+          if (pendingQuery !== pending) return;
           handed = true;
-          pendingOutput = null;
+          pendingQuery = null;
           commit();
           reconcileDesired();
           notifyStateChange();
         },
         () => {
-          if (pendingOutput !== pending) return;
-          pending.attempted = true;
-          if (kind === "push") protocolMayBeEnabled = true;
+          if (pendingQuery === pending) pending.attempted = true;
         },
       );
     } catch (error) {
-      if (pendingOutput === pending) pendingOutput = null;
+      if (pendingQuery === pending) pendingQuery = null;
       notifyStateChange();
       throw error;
     }
@@ -174,70 +157,44 @@ export function createKittyKeyboardController(
     // The handoff callback is authoritative if a direct adapter invokes it
     // before returning. Otherwise false means the gate captured nothing, so no
     // ownership may be committed and the desired state remains retryable.
-    if (!accepted && !handed && pendingOutput === pending) {
-      pendingOutput = null;
+    if (!accepted && !handed && pendingQuery === pending) {
+      pendingQuery = null;
       notifyStateChange();
       return false;
     }
-    if (pendingOutput === pending) notifyStateChange();
+    if (pendingQuery === pending) notifyStateChange();
     return accepted || handed;
   }
 
+  /** Push the protocol by taking its lease; the lease issues the escape. */
   function enableProtocol(): boolean {
-    // Fixed progressive-enhancement level: only disambiguate escape codes.
-    return writeControlOutput("push", `\x1b[>${KITTY_DISAMBIGUATE_ESCAPE_CODES}u`, () => {
-      enabled = true;
-      protocolMayBeEnabled = false;
-      protocolLease ??= terminal.acquire("kitty-keyboard");
-    });
+    protocolLease ??= terminal.acquire("kitty-keyboard");
+    return isProtocolSettled();
   }
 
-  function writeSyncPop(): boolean {
-    // No capability gate. This runs on the signal path and on the emergency
-    // restore, and the emergency restore is entered because coordinated output
-    // just failed -- so the stream's own `destroyed` flag is the least reliable
-    // signal available exactly when the pop matters most. `writeSync` tries the
-    // file descriptor first and gives up on its own if there is nothing to
-    // write to.
-    terminal.writeSync("stdout", "\x1b[<u");
-    enabled = false;
-    protocolMayBeEnabled = false;
-    protocolLease?.release();
-    protocolLease = undefined;
-    deferredDisableSync = false;
-    notifyStateChange();
-    return true;
-  }
-
+  /** Give the protocol lease back; the lease issues the pop. */
   function disableProtocol(sync = false): boolean {
-    if (!enabled && !protocolMayBeEnabled) return true;
-    if (pendingOutput) {
-      deferredDisableSync ||= sync;
-      return true;
-    }
-
-    const effectiveSync = sync || deferredDisableSync;
-    deferredDisableSync = false;
+    const lease = protocolLease;
+    protocolLease = undefined;
     try {
-      if (effectiveSync) {
-        return writeSyncPop();
-      } else if (canRestoreControlOutput()) {
-        return writeControlOutput("pop", "\x1b[<u", () => {
-          enabled = false;
-          protocolMayBeEnabled = false;
-          protocolLease?.release();
-          protocolLease = undefined;
-          deferredDisableSync = false;
-        });
-      } else {
-        return false;
-      }
+      lease?.release({ sync });
     } catch {
       // Terminal restoration is best-effort; a failed Kitty write must not
       // prevent the remaining cursor, screen, paste, or raw cleanup. The
       // rejected POP leaves the old level owned so active demand needs no new
       // PUSH, while suspension or teardown can retry the POP.
       return false;
+    }
+    return isProtocolSettled();
+  }
+
+  /** Retry a restore this controller no longer holds a lease for. */
+  function retryProtocolRestore(sync: boolean): void {
+    if (protocolLease) return;
+    try {
+      terminal.restoreMode("kitty-keyboard", { sync });
+    } catch {
+      // Bounded cleanup: dispose remains the final restoration backstop.
     }
   }
 
@@ -283,7 +240,7 @@ export function createKittyKeyboardController(
     let startingHostDetection = false;
     const onResult = (supported: boolean): void => {
       if (activeDetection !== detection || detection.settled) return;
-      if (pendingOutput?.kind === "query" && !detection.queryHanded) {
+      if (pendingQuery && !detection.queryHanded) {
         // The host detector that produced this result no longer owns ingress.
         // A captured QUERY can still be abandoned or wait before physical
         // handoff, so replace the detector now and keep continuous ownership of
@@ -339,7 +296,7 @@ export function createKittyKeyboardController(
     }
 
     try {
-      const accepted = writeControlOutput("query", "\x1b[?u", () => {
+      const accepted = writeQuery("\x1b[?u", () => {
         if (activeDetection !== detection) return;
         detection.queryHanded = true;
         if (detection.supportedBeforeHandoff) {
@@ -379,16 +336,9 @@ export function createKittyKeyboardController(
   }
 
   function reconcileDesiredOnce(sync: boolean): "settled" | "blocked" {
-    if (pendingOutput) {
-      deferredDisableSync ||= sync && !wantsManagedInput();
-      return "settled";
-    }
+    if (pendingQuery) return "settled";
 
-    const wantsInput = wantsManagedInput();
-    if (protocolMayBeEnabled) {
-      return disableProtocol(sync) ? "settled" : "blocked";
-    }
-    if (!wantsInput) {
+    if (!wantsManagedInput()) {
       let cancellationError: unknown;
       if (activeDetection) {
         try {
@@ -401,7 +351,7 @@ export function createKittyKeyboardController(
           cancellationError = error;
         }
       }
-      const disabled = !enabled || disableProtocol(sync);
+      const disabled = disableProtocol(sync);
       if (cancellationError !== undefined) throw cancellationError;
       return disabled ? "settled" : "blocked";
     }
@@ -410,7 +360,7 @@ export function createKittyKeyboardController(
       if (activeDetection) cancelDetection({ discard: !activeDetection.queryHanded });
       return "settled";
     }
-    if (enabled) return "settled";
+    if (isProtocolEnabled()) return "settled";
 
     if (configuredMode === "enabled" || autoSupport === "supported") {
       return enableProtocol() ? "settled" : "blocked";
@@ -423,27 +373,14 @@ export function createKittyKeyboardController(
   function reconcileDesired(sync = false): void {
     if (reconciling) {
       reconcileRequested = true;
-      deferredDisableSync ||= sync;
       return;
     }
 
     reconciling = true;
-    let effectiveSync = sync || deferredDisableSync;
-    deferredDisableSync = false;
     try {
       for (;;) {
         reconcileRequested = false;
-        const result = reconcileDesiredOnce(effectiveSync);
-        const nextSync = deferredDisableSync;
-        deferredDisableSync = false;
-        if (pendingOutput) {
-          // A synchronous suspend/dispose may arrive after an async PUSH was
-          // captured. Preserve that restore requirement until PUSH handoff (or
-          // abandonment) decides whether this controller owns a level to POP.
-          deferredDisableSync ||= nextSync;
-          break;
-        }
-        effectiveSync = nextSync;
+        const result = reconcileDesiredOnce(sync);
         if (result === "blocked" || !reconcileRequested) break;
       }
     } finally {
@@ -463,9 +400,7 @@ export function createKittyKeyboardController(
         // synchronous throw rejects the pop before acceptance, so retry once at
         // the exact last-demand boundary instead of retaining the protocol until
         // whole-app teardown.
-        if ((enabled || protocolMayBeEnabled) && !pendingOutput && demandCount === 0) {
-          disableProtocol();
-        }
+        if (demandCount === 0) retryProtocolRestore(false);
       } catch {
         // A release is terminal cleanup. The ingress has already ended the
         // logical detector even if a hostile listener removal reports failure;
@@ -485,13 +420,13 @@ export function createKittyKeyboardController(
         return true;
       }
       if (configuredMode === "enabled" || autoSupport === "supported") {
-        return enabled && pendingOutput?.kind !== "pop";
+        return isProtocolEnabled() && isProtocolSettled();
       }
       return activeDetection?.queryHanded === true;
     },
 
     get isEnabled() {
-      return enabled;
+      return isProtocolEnabled();
     },
 
     reconcile() {
@@ -499,11 +434,9 @@ export function createKittyKeyboardController(
     },
 
     abandonPendingOutput() {
-      const pending = pendingOutput;
-      if (!pending) return;
-      pendingOutput = null;
-      if (pending.kind === "push" && pending.attempted) protocolMayBeEnabled = true;
-      if (pending.kind === "query" && activeDetection) {
+      if (!pendingQuery) return;
+      pendingQuery = null;
+      if (activeDetection) {
         try {
           cancelDetection({ discard: true });
         } catch {
@@ -560,13 +493,7 @@ export function createKittyKeyboardController(
         // the escape was not accepted. Retry once before suspension completes;
         // a re-entrant resume clears `suspended` and protects its replacement
         // level from this retry.
-        if (
-          (enabled || protocolMayBeEnabled) &&
-          !pendingOutput &&
-          (disposed || suspended || demandCount === 0)
-        ) {
-          disableProtocol(sync);
-        }
+        if (disposed || suspended || demandCount === 0) retryProtocolRestore(sync);
       }
     },
 
@@ -595,7 +522,7 @@ export function createKittyKeyboardController(
       // A synchronous stream failure normally means the first pop was not
       // accepted. Retry once inside the same terminal-cleanup pass, and keep
       // repeated dispose calls useful if a hostile stream fails more than once.
-      if ((enabled || protocolMayBeEnabled) && !pendingOutput) disableProtocol(sync);
+      retryProtocolRestore(sync);
       suspended = false;
     },
   };

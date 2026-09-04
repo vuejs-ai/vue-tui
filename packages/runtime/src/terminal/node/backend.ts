@@ -9,12 +9,14 @@ import type {
   TerminalInputEvent,
   TerminalLease,
   TerminalMode,
+  TerminalModeReleaseOptions,
+  TerminalModeWrite,
   TerminalOutput,
   TerminalOutputCapabilities,
   TerminalOutputEvent,
   TerminalSize,
 } from "../backend.ts";
-import { createModeLedger } from "../backend.ts";
+import { createTerminalModeLeases, type TerminalModeLeases } from "../mode-leases.ts";
 import {
   probeControllingTerminalSize,
   type TerminalSizeProbe,
@@ -186,7 +188,7 @@ export class NodeTerminalBackend implements TerminalBackend {
   readonly #stdout: NodeWritable;
   readonly #stderr: NodeWritable;
   readonly #dataListeners = new Set<(data: string | Uint8Array) => void>();
-  private readonly modes = createModeLedger();
+  private readonly modes: TerminalModeLeases = createTerminalModeLeases(this);
   readonly #colorDepths = new Map<TerminalOutput, number | undefined>();
   #inputFlowOwned = false;
   #reconcilingInputFlow = false;
@@ -323,7 +325,39 @@ export class NodeTerminalBackend implements TerminalBackend {
   }
 
   isModeHeld(mode: TerminalMode): boolean {
-    return this.modes.isModeHeld(mode);
+    return this.modes.isHeld(mode);
+  }
+
+  isModeActive(mode: TerminalMode): boolean {
+    return this.modes.isActive(mode);
+  }
+
+  isModeSettled(mode: TerminalMode): boolean {
+    return this.modes.isSettled(mode);
+  }
+
+  attachModeWrites(write: TerminalModeWrite | null): void {
+    this.modes.attachWrites(write);
+  }
+
+  abandonModeOutput(options?: { readonly physicalStateUncertain?: boolean }): void {
+    this.modes.abandonPendingOutput(options);
+  }
+
+  reconcileModes(): void {
+    this.modes.reconcile();
+  }
+
+  restoreMode(mode: TerminalMode, options?: TerminalModeReleaseOptions): void {
+    this.modes.restore(mode, options);
+  }
+
+  restoreModes(options?: TerminalModeReleaseOptions): void {
+    this.modes.restoreAll(options);
+  }
+
+  onModeChange(listener: ((mode: TerminalMode) => void) | null): void {
+    this.modes.onChange(listener);
   }
 
   write(

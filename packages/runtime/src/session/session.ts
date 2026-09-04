@@ -1,6 +1,11 @@
 import { type Component, type ComponentPublicInstance, type App as VueApp, nextTick } from "vue";
 import { createRenderer } from "vue";
-import type { TerminalBackend, TerminalLease, TerminalOutput } from "../terminal/backend.ts";
+import type {
+  TerminalBackend,
+  TerminalLease,
+  TerminalMode,
+  TerminalOutput,
+} from "../terminal/backend.ts";
 import { createNodeTerminalBackend } from "../terminal/node/backend.ts";
 import {
   INTERNAL_KITTY_KEYBOARD,
@@ -45,8 +50,8 @@ import {
   registerConsoleSink,
   type ConsoleSinkRegistration,
 } from "../terminal/node/console-manager.ts";
-import { nextLineEscape } from "../surface/cursor-helpers.ts";
-import { bsu, esu, shouldSynchronize } from "../terminal/write-synchronized.ts";
+import { nextLineEscape } from "../surface/line-helpers.ts";
+import { shouldSynchronize } from "../terminal/write-synchronized.ts";
 import { emitTestEvent, hasTestEventSink, RUNTIME_TEST_EVENT } from "./test-events.ts";
 import {
   AppContextKey,
@@ -305,7 +310,6 @@ class Session implements SessionMember {
   kittyController: ReturnType<typeof createKittyKeyboardController> | null = null;
   emergencyKittyController: ReturnType<typeof createKittyKeyboardController> | null = null;
   emergencyStdinController: StdinController | null = null;
-  synchronizedOutputReleases: Set<() => void> | null = null;
   abandonPendingTerminalOutput:
     | ((options?: { readonly physicalStateUncertain?: boolean }) => void)
     | null = null;
@@ -489,26 +493,14 @@ class Session implements SessionMember {
     emitTestEvent(RUNTIME_TEST_EVENT.terminalReleased);
   }
 
-  acquireSynchronizedOutputLease(): () => void {
-    const releases = this.synchronizedOutputReleases;
-    const lease: TerminalLease<"synchronized-output"> | undefined =
-      this.terminal?.acquire("synchronized-output");
-    let active = true;
-    const release = (): void => {
-      if (!active) return;
-      active = false;
-      releases?.delete(release);
-      lease?.release();
-    };
-    releases?.add(release);
-    return release;
-  }
-
+  /** Close a synchronized block this session opened but has not been able to end. */
   closeOutstandingSynchronizedOutput(): void {
-    const releases = this.synchronizedOutputReleases;
-    if (!releases || releases.size === 0) return;
-    if (this.terminal) this.writeBestEffort("stdout", esu, true);
-    for (const release of releases) release();
+    try {
+      this.terminal?.restoreMode("synchronized-output", { sync: true });
+    } catch {
+      // Closing the block is best effort: a stream that refuses the end marker
+      // must not stop the remaining terminal restoration.
+    }
   }
 
   writeBestEffort(
@@ -689,6 +681,10 @@ class Session implements SessionMember {
         this.surface?.dispose(this.surfaceRuntime!, { cleanExit: false, sync: true }),
       );
     }
+
+    // One sweep behind every owner: a lease whose restore was queued behind a
+    // failed segment is still owed to the terminal.
+    runBestEffort(() => this.terminal?.restoreModes({ sync: true }));
   }
 
   #performTeardown(sync = false, immediateTermination = false): void {
@@ -797,6 +793,9 @@ class Session implements SessionMember {
 
     const completeTeardown = (): void => {
       if (this.isTornDown()) return;
+      // The output gate closes with the session; later restores write directly.
+      this.terminal?.attachModeWrites(null);
+      this.terminal?.onModeChange(null);
       if (this.asOwner && this.terminal) {
         liveInstances.delete(this.terminal.outputOwnerFor("stdout"));
         this.asOwner = false;
@@ -812,7 +811,6 @@ class Session implements SessionMember {
       this.abandonPendingTerminalOutput = null;
       this.terminalReconcile = null;
       this.closeOutstandingSynchronizedOutput();
-      this.synchronizedOutputReleases = null;
       this.transition("torn-down");
       this.reportTerminalReleased();
       this.surface = null;
@@ -973,6 +971,10 @@ class Session implements SessionMember {
         runBestEffort(() => stdinController.dispose(sync, immediateTermination));
         stdinController.setCleanupErrorSink(null);
       }
+      // Every owner above has released what it holds. One sweep restores a mode
+      // an owner could not, so "restored on a clean exit, not on suspension or
+      // a failure" cannot come back.
+      runBestEffort(() => this.terminal?.restoreModes({ sync }));
       if (this.renderSession) {
         const renderSession = this.renderSession;
         runBestEffort(() => renderSession.dispose());
@@ -1140,10 +1142,6 @@ export function createSessionApp(
 
   function reportTerminalReleased(): void {
     session?.reportTerminalReleased();
-  }
-
-  function acquireSynchronizedOutputLease(): () => void {
-    return session?.acquireSynchronizedOutputLease() ?? (() => {});
   }
 
   function closeOutstandingSynchronizedOutput(): void {
@@ -1503,7 +1501,7 @@ export function createSessionApp(
       requestedMode,
       stdout: stdoutFacts,
     });
-    const outputSurface = createSurface(resolvedSurface.kind, colorCapability);
+    const outputSurface = createSurface(resolvedSurface.kind, colorCapability, terminal);
 
     // Deterministic option, stream, capability, ownership, and surface
     // preflight ends here. From this point every consumed operation is covered
@@ -1554,10 +1552,26 @@ export function createSessionApp(
       });
       failureOutputCoordinator = outputCoordinator;
       session!.outputCoordinator = outputCoordinator;
-      session!.synchronizedOutputReleases = new Set();
+      // Mode leases issue their bytes through this session's output gate, so a
+      // mode change keeps its place among the frames it belongs between.
+      terminal.attachModeWrites(writeTerminalOutput);
+      terminal.onModeChange(onTerminalModeChange);
       let terminalReconcileTurn: Promise<void> | null = null;
       let terminalReconcileRequested = false;
       let reconcileManagedTerminalOutput: () => void = () => {};
+
+      /**
+       * One mode reached, or was refused by, the device. Managed input depends on
+       * the surface's own modes, so ownership is reported from here rather than
+       * from the commit that happened to trigger the write.
+       */
+      function onTerminalModeChange(mode: TerminalMode): void {
+        // Synchronized output opens and closes inside one frame. No reconciler
+        // waits on it, and reporting it would schedule a turn per frame.
+        if (mode === "synchronized-output") return;
+        if (outputSurface.isInputReady && !terminalResumeInProgress) reportTerminalAcquired();
+        requestTerminalReconcile();
+      }
 
       function requestTerminalReconcile(): void {
         if (isTearingDown()) return;
@@ -1692,7 +1706,7 @@ export function createSessionApp(
       let surfaceRuntime: SurfaceRuntime | null = null;
       let rejectedFullscreenStatic = false;
       session!.abandonPendingTerminalOutput = (abandonment) => {
-        outputSurface.abandonPendingOutput(abandonment);
+        terminal.abandonModeOutput(abandonment);
         (session!.kittyController ?? session!.emergencyKittyController)?.abandonPendingOutput();
         (
           session!.stdinController ?? session!.emergencyStdinController
@@ -1748,6 +1762,7 @@ export function createSessionApp(
           runSuspensionStep(() => session!.kittyController?.suspend(true));
           runSuspensionStep(() => session!.stdinController?.suspend(true));
           releaseOutputSurfaceForSuspension();
+          runSuspensionStep(() => terminal.restoreModes({ sync: true }));
         });
       }
 
@@ -2073,7 +2088,6 @@ export function createSessionApp(
         acquireKittyKeyboard() {
           return kittyController?.acquireDemand() ?? (() => {});
         },
-        writeTerminal: writeTerminalOutput,
         requestTerminalReconcile,
         reportManagedInputFailure(error) {
           requestRuntimeFailure(error);
@@ -2118,6 +2132,9 @@ export function createSessionApp(
           try {
             kittyController?.reconcile();
             stdinController.reconcileTerminalState();
+            // Retry the device transitions a blocked or failed gate refused,
+            // once the demand above has settled.
+            terminal.reconcileModes();
           } catch (error) {
             if (!isTearingDown()) {
               requestRuntimeFailure(error);
@@ -2173,20 +2190,14 @@ export function createSessionApp(
         }
 
         let error: unknown;
-        let releaseSynchronizedOutput: (() => void) | undefined;
+        const synchronized = terminal.acquire("synchronized-output");
         try {
-          writeRuntimeOutput("stdout", bsu, undefined, () => {
-            releaseSynchronizedOutput ??= acquireSynchronizedOutputLease();
-          });
           body();
         } catch (caught) {
           error = caught;
         } finally {
           try {
-            writeRuntimeOutput("stdout", esu, undefined, () => {
-              releaseSynchronizedOutput?.();
-              releaseSynchronizedOutput = undefined;
-            });
+            synchronized.release();
           } catch (caught) {
             error ??= caught;
           }
@@ -2197,15 +2208,9 @@ export function createSessionApp(
       function runCoordinatedWrite(body: () => void, finalize: () => void): void {
         let error: unknown;
         let bodyStarted = false;
-        let syncStarted = false;
-        let releaseSynchronizedOutput: (() => void) | undefined;
+        let synchronized: TerminalLease<"synchronized-output"> | undefined;
         try {
-          if (synchronize) {
-            writeRuntimeOutput("stdout", bsu, undefined, () => {
-              releaseSynchronizedOutput ??= acquireSynchronizedOutputLease();
-            });
-            syncStarted = true;
-          }
+          if (synchronize) synchronized = terminal.acquire("synchronized-output");
           bodyStarted = true;
           body();
         } catch (caught) {
@@ -2218,12 +2223,9 @@ export function createSessionApp(
               error ??= caught;
             }
           }
-          if (syncStarted) {
+          if (synchronized) {
             try {
-              writeRuntimeOutput("stdout", esu, undefined, () => {
-                releaseSynchronizedOutput?.();
-                releaseSynchronizedOutput = undefined;
-              });
+              synchronized.release();
             } catch (caught) {
               error ??= caught;
             }
@@ -2233,11 +2235,7 @@ export function createSessionApp(
       }
 
       surfaceRuntime = {
-        terminal,
         stdout: "stdout",
-        get isResumeInProgress() {
-          return terminalResumeInProgress;
-        },
         get isStdoutTty() {
           return terminal.capabilities.stdout.isTTY;
         },
@@ -2254,12 +2252,9 @@ export function createSessionApp(
           return writeRuntimeOutput(output, data, undefined, onHandoff);
         },
         writeBestEffort,
-        writeTerminal: writeTerminalOutput,
         runCoordinatedWrite,
         runLifecycleTransaction,
         runSynchronizedOutput,
-        requestTerminalReconcile,
-        reportTerminalAcquired,
         reportTerminalReleased,
         setSurfaceAvailable(available) {
           session!.geometry?.setSurfaceAvailable(available);

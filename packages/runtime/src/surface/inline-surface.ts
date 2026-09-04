@@ -1,6 +1,6 @@
-import { hideCursorEscape, nextLineEscape, showCursorEscape } from "./cursor-helpers.ts";
+import { nextLineEscape } from "./line-helpers.ts";
 import { Frame } from "../frame/frame.ts";
-import type { TerminalOutput } from "../terminal/backend.ts";
+import type { TerminalLease, TerminalOutput } from "../terminal/backend.ts";
 import { encodeFrame } from "./frame-encoder.ts";
 import {
   SurfaceBase,
@@ -17,6 +17,7 @@ export class InlineSurface extends SurfaceBase {
   readonly isLive = true;
 
   private regionStarted = false;
+  private cursorVisibilityLease: TerminalLease<"cursor-visibility"> | undefined;
 
   layoutHeight(viewportRows: number | null): SurfaceLayoutHeight {
     return viewportRows === null ? { mode: "unbounded" } : { mode: "at-most", rows: viewportRows };
@@ -62,11 +63,15 @@ export class InlineSurface extends SurfaceBase {
         writer.clear();
         presentation.history.handoff(presentation.onHistoryHandoff);
         presentation.onHistoryPrepared?.();
+        this.hideCursorForRegion();
         writer.write(frameToRender);
       });
     } else {
       frameWritten = true;
-      runtime.runSynchronizedOutput(() => writer.write(frameToRender));
+      runtime.runSynchronizedOutput(() => {
+        this.hideCursorForRegion();
+        writer.write(frameToRender);
+      });
     }
 
     this.rememberFrame(frame, frameToRender !== "" && !frameToRender.endsWith("\n"));
@@ -85,7 +90,7 @@ export class InlineSurface extends SurfaceBase {
         // creates a physical boundary without relying on LF/CRLF translation.
         if (
           !data.endsWith("\n") &&
-          (output === runtime.stdout || runtime.terminal.capabilities[output].isTTY)
+          (output === runtime.stdout || this.terminal.capabilities[output].isTTY)
         ) {
           runtime.write(output, nextLineEscape);
         }
@@ -101,11 +106,9 @@ export class InlineSurface extends SurfaceBase {
     if (this.needsTerminalLineAdvance) {
       runtime.writeBestEffort(runtime.stdout, nextLineEscape, true);
     }
-    const cursorWasHidden = writer.isCursorHidden();
-    const cursorShown =
-      !cursorWasHidden || runtime.writeBestEffort(runtime.stdout, showCursorEscape, true);
+    this.releaseCursorVisibility(true);
     try {
-      writer.reset({ cursorHidden: cursorWasHidden && !cursorShown });
+      writer.reset();
     } catch {
       // Suspension must release the remaining resources even if writer state is
       // already unusable after an interrupted stream transaction.
@@ -125,11 +128,9 @@ export class InlineSurface extends SurfaceBase {
     if (this.needsTerminalLineAdvance) {
       runtime.writeBestEffort(runtime.stdout, nextLineEscape, options.sync);
     }
+    this.releaseCursorVisibility(options.sync);
     if (options.sync) {
-      if (writer.isCursorHidden()) {
-        runtime.writeBestEffort(runtime.stdout, showCursorEscape, true);
-      }
-      writer.reset({ cursorHidden: false });
+      writer.reset();
       return;
     }
     writer.done();
@@ -142,7 +143,8 @@ export class InlineSurface extends SurfaceBase {
       // Reflow can make the old relative baseline point at terminal history.
       // Preserve it, anchor a fresh region, and repaint from scratch.
       runtime.runSynchronizedOutput(() => {
-        runtime.write(runtime.stdout, hideCursorEscape);
+        // The fresh region restates the hidden cursor at its own head.
+        this.cursorVisibilityLease?.reassert();
         if (resize.currentRows === null) return;
         runtime.write(runtime.stdout, `\u001b[${resize.currentRows}B${nextLineEscape}`);
         writer.reset();
@@ -166,6 +168,21 @@ export class InlineSurface extends SurfaceBase {
       rollbackBase();
       this.regionStarted = previousRegionStarted;
     };
+  }
+
+  /** Hold the hidden cursor for as long as this surface owns a live region. */
+  private hideCursorForRegion(): void {
+    this.cursorVisibilityLease ??= this.terminal.acquire("cursor-visibility");
+  }
+
+  private releaseCursorVisibility(sync: boolean): void {
+    const lease = this.cursorVisibilityLease;
+    this.cursorVisibilityLease = undefined;
+    try {
+      lease?.release({ sync });
+    } catch {
+      // Revealing the cursor is best effort; the remaining release still runs.
+    }
   }
 
   private ensureRegionStart(runtime: SurfaceRuntime): void {

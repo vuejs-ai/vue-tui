@@ -6,7 +6,7 @@ import type {
   TerminalOutputEvent,
   TerminalSize,
 } from "../backend.ts";
-import { createModeLedger } from "../backend.ts";
+import { createTerminalModeLeases, type TerminalModeLeases } from "../mode-leases.ts";
 
 export interface TestTerminalBackendOptions {
   readonly capabilities?: Partial<{
@@ -59,7 +59,9 @@ export function createTestTerminalBackend(
     Map<TerminalOutputEvent, Set<(error?: unknown) => void>>
   >();
   const resizeListeners = new Set<() => void>();
-  const modes = createModeLedger();
+  // The controller writes through the backend below, which is complete before
+  // any mode can be acquired.
+  let modes!: TerminalModeLeases;
   // Separate default owners model the ordinary two-stream mount so observers
   // exercise both channels. Callers may still share one owner explicitly.
   const stdoutOwner = {};
@@ -96,7 +98,31 @@ export function createTestTerminalBackend(
       return modes.acquire(mode);
     },
     isModeHeld(mode) {
-      return modes.isModeHeld(mode);
+      return modes.isHeld(mode);
+    },
+    isModeActive(mode) {
+      return modes.isActive(mode);
+    },
+    isModeSettled(mode) {
+      return modes.isSettled(mode);
+    },
+    attachModeWrites(write) {
+      modes.attachWrites(write);
+    },
+    abandonModeOutput(options) {
+      modes.abandonPendingOutput(options);
+    },
+    reconcileModes() {
+      modes.reconcile();
+    },
+    restoreMode(mode, options) {
+      modes.restore(mode, options);
+    },
+    restoreModes(options) {
+      modes.restoreAll(options);
+    },
+    onModeChange(listener) {
+      modes.onChange(listener);
     },
     setRawMode() {
       // Test mode ownership is modeled through acquire(); raw transitions are inert.
@@ -165,5 +191,6 @@ export function createTestTerminalBackend(
       emit(resizeListeners);
     },
   };
+  modes = createTerminalModeLeases(backend);
   return Object.freeze(backend);
 }

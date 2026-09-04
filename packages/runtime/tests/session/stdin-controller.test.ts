@@ -15,16 +15,16 @@ test("bracketed paste is disabled when its enable write may have succeeded", () 
     isManagedInputReady: true,
     acquireKittyKeyboard: () => () => {},
     isKittyKeyboardReady: true,
-    writeTerminal(data, onHandoff, onAttempt) {
-      writes.push(data);
-      onAttempt?.();
-      if (data === "\x1b[?2004h") throw new Error("accepted then threw");
-      onHandoff?.();
-      return true;
-    },
     requestTerminalReconcile() {},
     reportManagedInputFailure() {},
   };
+  terminal.attachModeWrites((data, onHandoff, onAttempt) => {
+    writes.push(data);
+    onAttempt?.();
+    if (data === "\x1b[?2004h") throw new Error("accepted then threw");
+    onHandoff?.();
+    return true;
+  });
   const controller = createStdinController(terminal, stdin, session, {
     exitOnCtrlC: false,
     exit() {},
