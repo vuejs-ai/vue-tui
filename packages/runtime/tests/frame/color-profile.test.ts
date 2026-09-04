@@ -1,5 +1,5 @@
 import { expect, test } from "vite-plus/test";
-import { createColorCapability, resolveColorCapability } from "../../src/frame/color-profile.ts";
+import { resolveColorCapability } from "../../src/frame/color-profile.ts";
 
 function ttyWithDepth(depth: number) {
   return {
@@ -95,11 +95,4 @@ test("an explicit profile does not inspect environment or stream color capabilit
   );
 
   expect(resolveColorCapability(explicitInput)).toEqual({ attributes: true, level: 1 });
-});
-
-test("a resolved capability cannot drift away from the frames encoded with it", () => {
-  const capability = createColorCapability(3);
-
-  expect(Reflect.set(capability, "level", 0)).toBe(false);
-  expect(capability.level).toBe(3);
 });

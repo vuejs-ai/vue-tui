@@ -138,8 +138,8 @@ describe("Kitty keyboard output handoff", () => {
       return true;
     };
     attachModeWrites(terminal, writeOutput);
-    // The protocol is a mode now, so its transitions are reported by the
-    // backend exactly as the mounted session wires them.
+    // The protocol is a mode, so its transitions are reported by the backend
+    // exactly as the mounted session wires them.
     terminal.onModeChange(() => onStateChange());
     const controller = createKittyKeyboardController(
       terminal,

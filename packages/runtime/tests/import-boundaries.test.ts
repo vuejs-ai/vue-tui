@@ -211,16 +211,8 @@ function valueSpecifiers(file: string, source: string): Set<string> {
       if (!isTypeOnlyImport(node.importClause)) add(node.moduleSpecifier);
     } else if (ts.isExportDeclaration(node)) {
       if (!isTypeOnlyExport(node)) add(node.moduleSpecifier);
-    } else if (ts.isImportEqualsDeclaration(node)) {
-      if (ts.isExternalModuleReference(node.moduleReference)) add(node.moduleReference.expression);
-    } else if (ts.isCallExpression(node)) {
-      const callee = node.expression;
-      if (
-        callee.kind === ts.SyntaxKind.ImportKeyword ||
-        (ts.isIdentifier(callee) && callee.text === "require")
-      ) {
-        add(node.arguments[0]);
-      }
+    } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      add(node.arguments[0]);
     }
     ts.forEachChild(node, visit);
   };

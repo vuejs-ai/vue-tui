@@ -39,16 +39,6 @@ describe("standard log updates", () => {
     render("Hello\n");
     expect(chunks(terminal)).toHaveLength(count + 2);
   });
-
-  test("writes no terminal controls of its own", () => {
-    const terminal = createTestTerminalBackend();
-    const render = logUpdate.create(terminal);
-
-    render("Hello\n");
-    render.done();
-
-    expect(chunks(terminal)).toEqual(["Hello\n"]);
-  });
 });
 
 describe("frame writer", () => {

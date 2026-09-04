@@ -27,11 +27,15 @@ interface EscapeModePolicy {
   /** Whether the restore bytes may reach it, asked separately for the sync path. */
   canRestore(terminal: TerminalBackend, sync: boolean): boolean;
   /**
-   * Whether a write that reached `stream.write()` without confirming leaves the
-   * mode possibly applied. Synchronized output is the exception: its markers are
-   * written without an attempt hook, so an unconfirmed BSU closes nothing.
+   * Whether this mode is a demand that settles asynchronously rather than a
+   * bracket that closes inside one transaction. Synchronized output is the one
+   * bracket, and both consequences follow from that: its markers are written
+   * without an attempt hook, so a write that reached `stream.write()` without
+   * confirming leaves no uncertainty -- an unconfirmed BSU closes nothing --
+   * and a captured write never holds the opposite transition back, because its
+   * end marker always follows its begin marker in the same transaction.
    */
-  readonly tracksUncertainty: boolean;
+  readonly settlesAsynchronously: boolean;
   /**
    * Whether an abrupt restore re-sends the restore bytes for a mode that has
    * been applied at least once, even when the device already reads as restored.
@@ -39,13 +43,6 @@ interface EscapeModePolicy {
    * flushed, and re-disabling a disabled mode is a terminal no-op.
    */
   readonly reissueOnAbruptRestore: boolean;
-  /**
-   * Whether a captured write holds the opposite transition until it hands off.
-   * A mode whose demand settles asynchronously must not flip the device twice
-   * inside one transaction; synchronized output is the exception, because it is
-   * a bracket whose end marker always follows its begin marker in the same one.
-   */
-  readonly deferWhilePending: boolean;
 }
 
 /**
@@ -83,9 +80,8 @@ const modePolicies: Readonly<Record<TerminalMode, ModePolicy>> = {
     // report its own failure rather than silently skipping the switch.
     canEnable: () => true,
     canRestore: canWriteOutput,
-    tracksUncertainty: true,
+    settlesAsynchronously: true,
     reissueOnAbruptRestore: false,
-    deferWhilePending: true,
   },
   "cursor-visibility": {
     kind: "escape",
@@ -93,9 +89,8 @@ const modePolicies: Readonly<Record<TerminalMode, ModePolicy>> = {
     restore: "\x1b[?25h",
     canEnable: isLiveTty,
     canRestore: canWriteOutput,
-    tracksUncertainty: true,
+    settlesAsynchronously: true,
     reissueOnAbruptRestore: false,
-    deferWhilePending: true,
   },
   "synchronized-output": {
     kind: "escape",
@@ -103,9 +98,8 @@ const modePolicies: Readonly<Record<TerminalMode, ModePolicy>> = {
     restore: esu,
     canEnable: (terminal) => terminal.capabilities.stdout.isTTY,
     canRestore: (terminal) => terminal.capabilities.stdout.isTTY,
-    tracksUncertainty: false,
+    settlesAsynchronously: false,
     reissueOnAbruptRestore: false,
-    deferWhilePending: false,
   },
   "bracketed-paste": {
     kind: "escape",
@@ -113,9 +107,8 @@ const modePolicies: Readonly<Record<TerminalMode, ModePolicy>> = {
     restore: "\x1b[?2004l",
     canEnable: isLiveTty,
     canRestore: (terminal) => isLiveTty(terminal),
-    tracksUncertainty: true,
+    settlesAsynchronously: true,
     reissueOnAbruptRestore: true,
-    deferWhilePending: true,
   },
   "kitty-keyboard": {
     kind: "escape",
@@ -135,9 +128,8 @@ const modePolicies: Readonly<Record<TerminalMode, ModePolicy>> = {
     // because it runs on the signal path and on the emergency restore, where
     // the stream's own flags are least reliable.
     canRestore: (terminal, sync) => sync || canWriteOutput(terminal),
-    tracksUncertainty: true,
+    settlesAsynchronously: true,
     reissueOnAbruptRestore: false,
-    deferWhilePending: true,
   },
   raw: {
     kind: "device",
@@ -256,7 +248,7 @@ export function createTerminalModeLeases(terminal: TerminalBackend): TerminalMod
   function abandon(state: ModeState): void {
     let attempted = false;
     for (const pending of state.pending.splice(0)) attempted ||= pending.attempted;
-    if (attempted && state.policy.kind === "escape" && state.policy.tracksUncertainty) {
+    if (attempted && state.policy.kind === "escape" && state.policy.settlesAsynchronously) {
       state.uncertain = true;
     }
   }
@@ -292,7 +284,7 @@ export function createTerminalModeLeases(terminal: TerminalBackend): TerminalMod
       try {
         terminal.writeSync("stdout", data);
       } catch (error) {
-        if (policy.tracksUncertainty) state.uncertain = true;
+        if (policy.settlesAsynchronously) state.uncertain = true;
         throw error;
       }
       commit(state, target);
@@ -324,9 +316,10 @@ export function createTerminalModeLeases(terminal: TerminalBackend): TerminalMod
           notify(state.mode);
           reconcile(state, false);
         },
-        // A mode that records no uncertainty asks for no attempt hook, which
-        // also lets the gate keep combining its marker with the segment before.
-        policy.tracksUncertainty
+        // A bracket records no uncertainty and so asks for no attempt hook,
+        // which also lets the gate keep combining its marker with the segment
+        // before.
+        policy.settlesAsynchronously
           ? () => {
               pending.attempted = true;
             }
@@ -336,7 +329,7 @@ export function createTerminalModeLeases(terminal: TerminalBackend): TerminalMod
       const index = state.pending.indexOf(pending);
       if (index !== -1) {
         state.pending.splice(index, 1);
-        if (pending.attempted && policy.tracksUncertainty) state.uncertain = true;
+        if (pending.attempted && policy.settlesAsynchronously) state.uncertain = true;
       }
       throw error;
     }
@@ -363,7 +356,7 @@ export function createTerminalModeLeases(terminal: TerminalBackend): TerminalMod
     state.deferredSyncRestore = false;
     try {
       for (;;) {
-        if (state.pending.length > 0 && policy.deferWhilePending) {
+        if (state.pending.length > 0 && policy.settlesAsynchronously) {
           // A synchronous restore requested while a write is captured has to
           // wait: only that write's handoff decides whether this device owns
           // anything to restore.
