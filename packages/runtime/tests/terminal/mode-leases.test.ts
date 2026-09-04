@@ -37,7 +37,9 @@ test("a mode is restored only once its enable write has been handed off", () => 
 
   gate.handoffs.shift()?.();
   expect(terminal.isModeActive("alternate-screen")).toBe(false);
-  expect(terminal.isModeHeld("alternate-screen")).toBe(false);
+  // A restored device that is settled owes nothing: the released lease left no
+  // share of the mode behind.
+  expect(terminal.isModeSettled("alternate-screen")).toBe(true);
 });
 
 test("a mode whose enable write throws after reaching the stream is restored", () => {
@@ -54,8 +56,10 @@ test("a mode whose enable write throws after reaching the stream is restored", (
   expect(() => terminal.acquire("cursor-visibility")).toThrow("accepted then threw");
 
   expect(written).toEqual(["\x1b[?25l", "\x1b[?25h"]);
-  expect(terminal.isModeHeld("cursor-visibility")).toBe(false);
   expect(terminal.isModeActive("cursor-visibility")).toBe(false);
+  // The failed acquisition gave its share back, so the restored device matches
+  // what the mode's holders ask for.
+  expect(terminal.isModeSettled("cursor-visibility")).toBe(true);
 });
 
 test("an abandoned transaction restores only the mode whose write was attempted", () => {
@@ -114,7 +118,9 @@ test("the sweep restores every mode the session still owns", () => {
     "\x1b[?25h",
     "\x1b[?2004l",
   ]);
-  expect(terminal.isModeHeld("alternate-screen")).toBe(false);
-  expect(terminal.isModeHeld("cursor-visibility")).toBe(false);
-  expect(terminal.isModeHeld("bracketed-paste")).toBe(false);
+  // The sweep dropped the leases as well as restoring the device: each restored
+  // mode now matches its holders.
+  expect(terminal.isModeSettled("alternate-screen")).toBe(true);
+  expect(terminal.isModeSettled("cursor-visibility")).toBe(true);
+  expect(terminal.isModeSettled("bracketed-paste")).toBe(true);
 });

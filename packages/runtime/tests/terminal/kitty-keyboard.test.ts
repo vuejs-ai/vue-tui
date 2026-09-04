@@ -103,7 +103,9 @@ describe("Kitty keyboard output handoff", () => {
 
     expect(writes).toEqual(["\x1b[>1u", "\x1b[<u"]);
     expect(controller.isEnabled).toBe(false);
-    expect(terminal.isModeHeld("kitty-keyboard")).toBe(false);
+    // The failed push gave its share back: the popped device already matches
+    // the protocol's holders.
+    expect(controller.isReady).toBe(true);
     controller.dispose(true);
   });
 
@@ -118,9 +120,9 @@ describe("Kitty keyboard output handoff", () => {
     expect(terminalWrites(terminal)).toEqual(["\x1b[>1u"]);
     expect(controller.isEnabled).toBe(true);
     expect(controller.isReady).toBe(true);
-    expect(terminal.isModeHeld("kitty-keyboard")).toBe(true);
     controller.dispose();
-    expect(terminal.isModeHeld("kitty-keyboard")).toBe(false);
+    // The push was owned despite the false return, so disposal pops it.
+    expect(terminalWrites(terminal)).toEqual(["\x1b[>1u", "\x1b[<u"]);
   });
 
   test("retains blocked demand and reconciles it after the gate accepts writes", async () => {

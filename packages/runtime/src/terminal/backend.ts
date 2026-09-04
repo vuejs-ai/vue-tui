@@ -90,8 +90,6 @@ export interface TerminalBackend {
    * the mode's enable bytes and the last one's departure issues its restore.
    */
   acquire<Mode extends TerminalMode>(mode: Mode): TerminalLease<Mode>;
-  /** Whether any lease on this mode is outstanding. */
-  isModeHeld(mode: TerminalMode): boolean;
   /** Whether the device is known to carry this mode now. */
   isModeActive(mode: TerminalMode): boolean;
   /** Whether the device matches this mode's holders, with nothing outstanding. */

@@ -15,17 +15,24 @@ test("test backend records bytes, reports fixed facts, and issues a mode at its 
 
   expect(terminal.size).toEqual({ columns: 120, rows: 40 });
   expect(terminal.capabilities.stdout.isTTY).toBe(false);
+  // The enable is issued once, and the holder that left while another remains
+  // issues nothing.
   expect(terminal.writes).toEqual([
     { output: "stdout", data: "\x1b[?1049h\x1b[H" },
     { output: "stdout", data: "one" },
     { output: "stderr", data: "two" },
   ]);
-  expect(terminal.isModeHeld("alternate-screen")).toBe(true);
 
   second.release();
   second.release();
-  expect(terminal.isModeHeld("alternate-screen")).toBe(false);
-  expect(terminal.writes.at(-1)).toEqual({ output: "stdout", data: "\x1b[?1049l" });
+  // The restore is issued once, when the last holder leaves; the redundant
+  // release writes nothing.
+  expect(terminal.writes).toEqual([
+    { output: "stdout", data: "\x1b[?1049h\x1b[H" },
+    { output: "stdout", data: "one" },
+    { output: "stderr", data: "two" },
+    { output: "stdout", data: "\x1b[?1049l" },
+  ]);
 });
 
 test("test backend exposes deterministic input and resize events", () => {

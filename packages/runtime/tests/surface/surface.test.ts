@@ -149,9 +149,9 @@ test("Inline owns a bounded writer region and restores it around history", () =>
 
   expect(writes.map(({ data }) => data)).toEqual(["\x1bE", "note", "\x1bE"]);
   expect(frames).toEqual(["screen\n", "screen\n"]);
-  // The live region owns the hidden cursor for as long as it exists.
+  // The live region owns the hidden cursor for as long as it exists: nothing
+  // restores it while the region stands.
   expect(modeWrites).toEqual(["\x1b[?25l"]);
-  expect(terminal.isModeHeld("cursor-visibility")).toBe(true);
 
   surface.dispose(runtime, { cleanExit: true, sync: false });
   expect(modeWrites).toEqual(["\x1b[?25l", "\x1b[?25h"]);
@@ -169,32 +169,31 @@ test("Fullscreen owns its terminal lease and fixed-viewport presentation", () =>
   );
 
   expect(surface.isInputReady).toBe(true);
-  expect(terminal.isModeHeld("alternate-screen")).toBe(true);
-  expect(terminal.isModeHeld("cursor-visibility")).toBe(true);
   // The viewport enters, hides the cursor, then restates the hidden cursor at
   // the head of the frame it is about to paint.
   expect(modeWrites).toEqual(["\x1b[?1049h\x1b[H", "\x1b[?25l", "\x1b[?25l"]);
   expect(writes.at(-1)?.data).toContain("\x1b[2J");
   expect(frames).toEqual([]);
 
+  // Disposal gives both modes back, in the sweep's order.
   surface.dispose(runtime, { cleanExit: true, sync: true });
-  expect(terminal.isModeHeld("alternate-screen")).toBe(false);
-  expect(terminal.isModeHeld("cursor-visibility")).toBe(false);
   expect(terminal.writes.map(({ data }) => data)).toEqual(["\x1b[?1049l", "\x1b[?25h"]);
 });
 
 test("Fullscreen keeps post-snapshot physical acquisitions until disposal", () => {
-  const { runtime, terminal } = createHost();
+  const { runtime, terminal, modeWrites } = createHost();
   const surface = createSurface("fullscreen-terminal", truecolor, terminal);
   const rollback = surface.createRollback();
 
   expect(surface.resume(runtime)).toBe(true);
   rollback();
-  expect(terminal.isModeHeld("alternate-screen")).toBe(true);
+  // The rollback rewinds to the snapshot, which is before these acquisitions:
+  // neither mode is given back, so nothing is restored yet.
+  expect(modeWrites).toEqual(["\x1b[?1049h\x1b[H", "\x1b[?25l"]);
+
   surface.dispose(runtime, { cleanExit: false, sync: true });
 
-  expect(terminal.isModeHeld("alternate-screen")).toBe(false);
-  expect(terminal.isModeHeld("cursor-visibility")).toBe(false);
+  expect(terminal.writes.map(({ data }) => data)).toEqual(["\x1b[?1049l", "\x1b[?25h"]);
 });
 
 test("Document hands history off immediately and writes one final clean frame", () => {
@@ -212,7 +211,7 @@ test("Document hands history off immediately and writes one final clean frame", 
 });
 
 test("Fullscreen restores the screen when the writer throws on release", () => {
-  const { runtime, terminal } = createHost();
+  const { runtime, terminal, modeWrites } = createHost();
   const surface = createSurface("fullscreen-terminal", truecolor, terminal);
   const { writer } = createWriter();
   surface.attachWriter({
@@ -228,6 +227,5 @@ test("Fullscreen restores the screen when the writer throws on release", () => {
   expect(() => surface.dispose(runtime, { cleanExit: true, sync: false })).toThrow(
     "writer release failed",
   );
-  expect(terminal.isModeHeld("alternate-screen")).toBe(false);
-  expect(terminal.isModeHeld("cursor-visibility")).toBe(false);
+  expect(modeWrites.slice(-2)).toEqual(["\x1b[?1049l", "\x1b[?25h"]);
 });

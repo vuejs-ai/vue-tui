@@ -324,10 +324,6 @@ export class NodeTerminalBackend implements TerminalBackend {
     return this.modes.acquire(mode);
   }
 
-  isModeHeld(mode: TerminalMode): boolean {
-    return this.modes.isHeld(mode);
-  }
-
   isModeActive(mode: TerminalMode): boolean {
     return this.modes.isActive(mode);
   }

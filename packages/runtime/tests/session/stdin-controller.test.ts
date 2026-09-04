@@ -32,7 +32,10 @@ test("bracketed paste is disabled when its enable write may have succeeded", () 
 
   expect(() => controller.setBracketedPasteMode(true)).toThrow("accepted then threw");
   expect(writes).toEqual(["\x1b[?2004h", "\x1b[?2004l"]);
-  expect(terminal.isModeHeld("bracketed-paste")).toBe(false);
+  expect(terminal.isModeActive("bracketed-paste")).toBe(false);
+  // The failed enable gave its share back: the restored device matches what the
+  // mode's holders ask for, so nothing re-enables it.
+  expect(terminal.isModeSettled("bracketed-paste")).toBe(true);
 
   controller.dispose();
   stdin.destroy();

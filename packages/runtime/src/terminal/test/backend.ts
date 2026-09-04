@@ -97,9 +97,6 @@ export function createTestTerminalBackend(
     acquire(mode) {
       return modes.acquire(mode);
     },
-    isModeHeld(mode) {
-      return modes.isHeld(mode);
-    },
     isModeActive(mode) {
       return modes.isActive(mode);
     },

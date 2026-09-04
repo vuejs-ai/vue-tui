@@ -189,13 +189,12 @@ interface ModeState {
 /**
  * Reference-counted mode ownership for one device.
  *
- * The count a test observes is the count production keeps, and the bytes are
- * issued here: `acquire` writes a mode's enable sequence when its first holder
- * arrives, `release` writes the restore sequence when its last one leaves.
+ * The count stays here, where the bytes are issued: `acquire` writes a mode's
+ * enable sequence when its first holder arrives, `release` writes the restore
+ * sequence when its last one leaves, so the ledger is read through those bytes.
  */
 export interface TerminalModeLeases {
   acquire<Mode extends TerminalMode>(mode: Mode): TerminalLease<Mode>;
-  isHeld(mode: TerminalMode): boolean;
   isActive(mode: TerminalMode): boolean;
   isSettled(mode: TerminalMode): boolean;
   attachWrites(write: TerminalModeWrite | null): void;
@@ -418,6 +417,7 @@ export function createTerminalModeLeases(terminal: TerminalBackend): TerminalMod
     reconcile(state, sync);
   }
 
+  /** Module-private: the sweep below is the only thing that asks. */
   function isHeld(mode: TerminalMode): boolean {
     return stateFor(mode).holders > 0;
   }
@@ -497,7 +497,6 @@ export function createTerminalModeLeases(terminal: TerminalBackend): TerminalMod
       }
       return lease;
     },
-    isHeld,
     isActive,
     isSettled,
     attachWrites(write) {
