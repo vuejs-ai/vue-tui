@@ -1,7 +1,6 @@
 import { writeSync as fsWriteSync } from "node:fs";
 import process from "node:process";
 import type { Readable, Writable } from "node:stream";
-import { MAX_LAYOUT_VALUE } from "../../layout/numeric-limits.ts";
 import { createNodeProcessLifecycle, type NodeProcessLifecycle } from "./lifecycle.ts";
 import type { SuspensionHost } from "./process-suspension.ts";
 import type {
@@ -100,11 +99,21 @@ function canRead(stream: NodeReadable): boolean {
   return !stream.destroyed && !stream.readableEnded && stream.readable !== false;
 }
 
+/**
+ * The platform window-size contract carries rows and columns as unsigned 16-bit
+ * fields (`struct winsize`), so a reported dimension beyond this did not come
+ * from a terminal window. `terminal/` imports nothing, so this backend states
+ * its own limit; `layout/` keeps `MAX_LAYOUT_VALUE` for the layout envelope,
+ * and the two numbers coincide only because that envelope is chosen to hold a
+ * whole window.
+ */
+const MAX_WINDOW_DIMENSION = 65_535;
+
 function positiveCellCount(value: unknown): number | null {
   return typeof value === "number" &&
     Number.isSafeInteger(value) &&
     value > 0 &&
-    value <= MAX_LAYOUT_VALUE
+    value <= MAX_WINDOW_DIMENSION
     ? value
     : null;
 }
