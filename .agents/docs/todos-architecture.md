@@ -4,7 +4,7 @@ The work that moves `@vue-tui/runtime` from its current internal structure to th
 
 **This file deletes itself.** It exists only to hold the gap between the record and the code. When every task below has landed, delete this file and remove its route from [the records map](./README.md); nothing here needs to be preserved, because the architecture record already states the target and git keeps the history. Do not add ordinary follow-up work here — that belongs in [TODOs](./todos.md).
 
-Tasks 8 through 13 remain. Tasks 8 through 11 are independent. Tasks 12 and 13 both change paint's text path, and 13 lands first: while paint still applies a Text node's props by wrapping its content in SGR and parsing that string back into cells, runs carried on the node would have to be serialized into the same string again.
+Tasks 8, 9, 10, 12 and 13 remain. Tasks 8, 9 and 10 are independent. Tasks 12 and 13 both change paint's text path, and 13 lands first: while paint still applies a Text node's props by wrapping its content in SGR and parsing that string back into cells, runs carried on the node would have to be serialized into the same string again.
 
 ## 8. Route mode bytes through the lease
 
@@ -52,22 +52,6 @@ Tasks 8 through 13 remain. Tasks 8 through 11 are independent. Tasks 12 and 13 b
 **Verify.** The `tests/runtime/integration/render-to-string/` and `tests/runtime/integration/components/static/` suites are unchanged and green.
 
 **Watch for.** The two hosts differ after paint, not during it, and folding either difference into the shared function changes observable behavior: the string host accepts `Static` once the transaction is disposed so callbacks cannot observe temporary Yoga parentage, while the mounted commit accepts inside the transaction only once the write returned; and the mounted commit paints against a viewport derived from the height constraint and threads a geometry frame through paint, where the string host paints without either and clips by line count afterwards.
-
-## 11. Check the May-import tables with a test
-
-**Today.** `tests/runtime/integration/package-boundaries.test.ts` walks imports for package boundaries only; nothing checks a `src/` directory's imports against the record's tables. One import diverges from them: `packages/runtime/src/terminal/node/backend.ts` imports `MAX_LAYOUT_VALUE` from `layout/numeric-limits.ts`, while the record's `terminal/` row lists nothing.
-
-**Steps.**
-
-1. Stop the import: `terminal/node/backend.ts` validates a window size against its own unsigned 16-bit limit, the platform window-size contract, and no longer reads `layout/numeric-limits.ts`; `layout/` keeps `MAX_LAYOUT_VALUE` for its own envelope. The two numbers coincide because of that contract, and each unit states its own reason.
-2. Add a test under `packages/runtime/tests` that walks every file beneath `packages/runtime/src` and checks both kinds of specifier. A relative one resolves to the top-level directory it lands in, and the pair must appear in the two May-import tables. A bare one must be allowed by the row or by the Boundaries table: `node:*` and `process` as values only in `terminal/node/`, the layout-engine package only in `layout/`, the `vue` package only where a row names it, and `node:stream` in `api/` and `vue/` as types only.
-3. Restate the boundary test's `sourceFiles`, `moduleSpecifiers` and `isInside` beside the new test; they are module-private in the private `tests/runtime` workspace, which a package-local test does not reach into.
-
-**Done when.** A test under `packages/runtime/tests` fails on any import a directory may not have: a relative one whose directory pair is absent from the May-import tables, and a bare one outside the exemptions and the first two import rules in the Boundaries table.
-
-**Verify.** The test passes once step 1 has settled the `terminal/` divergence; a deliberate `paint/` → `terminal/` import fails it.
-
-**Watch for.** A row is an upper bound, not a requirement — `layout/` may import `frame/` and does not today — so the test must reject imports outside a row rather than assert a row's exact set. Type-only imports are the second trap: `vue/` needs `session/` for types alone, and `api/` and `vue/` name `node:stream` types by accepted public contract. `ts.preProcessFile` reports a specifier without saying whether the import was type-only, so a rule written "as types only" needs the AST or a narrow allowlist; a walk that carries neither will reject an accepted contract.
 
 ## 12. One content parse per revision, with the runs on the node
 
