@@ -19,7 +19,6 @@ import {
 } from "../text/text-style.ts";
 import type {
   TuiNode,
-  TuiContainer,
   TextProps,
   TuiText,
   TuiTextChunk,
@@ -793,12 +792,6 @@ function paintNode(
       // Comments are invisible.
       return;
   }
-}
-
-export function paintContainer(container: TuiContainer, layout: ComputedLayout): Frame {
-  // Used by Static channel and tests.
-  if (container.type === "root") return paint(container, { layout });
-  throw new Error("paintContainer currently only supports root");
 }
 
 export function paintStaticLayout(region: StaticLayoutRegion, layout: ComputedLayout): Frame {

@@ -72,6 +72,22 @@ const typeOnlyNodeImports: Readonly<Record<string, readonly string[]>> = {
 };
 const layoutEnginePackage = "yoga-layout";
 
+/**
+ * The directory pairs a row admits as types only, keyed by the importing unit.
+ * The `vue/` row reads "… `session/` and `node:stream` as types only", and
+ * the record says why: the composables reach what the session provides through
+ * injection keys rather than by importing it, so `vue/` needs `session/` for
+ * types alone, and both directions as values would be a cycle.
+ */
+const typeOnlyUnitImports: Readonly<Record<string, readonly string[]>> = {
+  vue: ["session"],
+};
+
+function isTypeOnlyUnitImport(unit: string | null, target: string | null): boolean {
+  if (unit === null || target === null) return false;
+  return (typeOnlyUnitImports[unit] ?? []).includes(target);
+}
+
 const sourceExtensions = new Set([
   ".cjs",
   ".cts",
@@ -214,7 +230,9 @@ function label(file: string, specifier: string): string {
 test("every relative import beneath src/ appears in the May-import tables", () => {
   for (const file of sourceFiles(runtimeSourceRoot)) {
     const unit = unitOf(file);
-    for (const specifier of moduleSpecifiers(readFileSync(file, "utf8"))) {
+    const source = readFileSync(file, "utf8");
+    const values = valueSpecifiers(file, source);
+    for (const specifier of moduleSpecifiers(source)) {
       if (!specifier.startsWith(".")) continue;
       const target = unitOf(resolve(dirname(file), specifier));
       // A row governs what one unit may import from another; a unit's own
@@ -224,6 +242,12 @@ test("every relative import beneath src/ appears in the May-import tables", () =
         rowOf(unit).directories,
         `${label(file, specifier)} is not an import the May-import table's ${unit ?? "(no)"} row allows`,
       ).toContain(target);
+      if (isTypeOnlyUnitImport(unit, target)) {
+        expect(
+          values.has(specifier),
+          `${label(file, specifier)} imports ${target ?? "(no)"}/ as a value; the May-import table's ${unit ?? "(no)"} row admits it as types only`,
+        ).toBe(false);
+      }
     }
   }
 });
