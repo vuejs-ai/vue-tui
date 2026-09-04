@@ -1,6 +1,7 @@
 // Authored style props resolved into the structured fields a cell holds. Every
 // colour is carried at full fidelity; the frame encoder owns degradation to the
 // host's resolved colour level, so nothing here reads a capability.
+import ansiStyles from "ansi-styles";
 import { StyleAttribute, type Color } from "../frame/style.ts";
 import { backgroundEndCode, foregroundEndCode } from "./cell-style.ts";
 
@@ -57,9 +58,6 @@ const namedColorIndex = new Map<string, number>([
 // ansi(N) is not an accepted form.
 const rgbRegex = /^rgb\(\s?(\d+),\s?(\d+),\s?(\d+)\s?\)$/;
 const ansi256Regex = /^ansi256\(\s?(\d+)\s?\)$/;
-// A hex color takes the first six- or three-digit run anywhere in the value and
-// expands the short form, so `#f80` and `#ff8800` name the same color.
-const hexDigitsRegex = /[a-f\d]{6}|[a-f\d]{3}/i;
 
 /** The colour a channel actively resets to the terminal's own. */
 const terminalDefaultColor: Color = { kind: "default" };
@@ -77,15 +75,6 @@ const attributeContributions = {
   inverse: { kind: "attribute", close: "\x1b[27m", attribute: StyleAttribute.inverse },
 } as const satisfies Record<string, TextStyleContribution>;
 
-function hexToRgb(value: string): readonly [number, number, number] {
-  const match = hexDigitsRegex.exec(value);
-  if (!match) return [0, 0, 0];
-  // The short form doubles each digit: `#f80` and `#ff8800` are the same color.
-  const digits = match[0].length === 3 ? match[0].replace(/./g, "$&$&") : match[0];
-  const packed = Number.parseInt(digits, 16);
-  return [(packed >> 16) & 0xff, (packed >> 8) & 0xff, packed & 0xff];
-}
-
 /** `default` actively selects the terminal's own color for one channel. */
 function isTerminalDefaultColor(color: unknown): boolean {
   return color === "default";
@@ -97,7 +86,10 @@ export function parseColorValue(color: unknown): Color | undefined {
   const named = namedColorIndex.get(color);
   if (named !== undefined) return { kind: "ansi16", index: named };
   if (color.startsWith("#")) {
-    const [red, green, blue] = hexToRgb(color);
+    // `hexToRgb` takes the first six- or three-digit run anywhere in the value
+    // and doubles each digit of the short form, so `#f80` and `#ff8800` name
+    // the same color.
+    const [red, green, blue] = ansiStyles.hexToRgb(color);
     return { kind: "rgb", red, green, blue };
   }
   if (color.startsWith("ansi256")) {

@@ -264,6 +264,9 @@ importers:
       ansi-escapes:
         specifier: 'catalog:'
         version: 7.3.0
+      ansi-styles:
+        specifier: ^6.2.3
+        version: 6.2.3
       cli-boxes:
         specifier: ^3.0.0
         version: 3.0.0

@@ -1,3 +1,4 @@
+import ansiStyles from "ansi-styles";
 import { Frame } from "../frame/frame.ts";
 import type { Hyperlink } from "../frame/cell.ts";
 import type { ColorCapability, ColorLevel } from "../frame/color-profile.ts";
@@ -42,10 +43,10 @@ function sameLink(a: Hyperlink | undefined, b: Hyperlink | undefined): boolean {
 }
 
 // Degradation from the color a cell holds to the color the host can show.
-// The 6x6x6 cube plus the grayscale ramp carries 24-bit down to 256 colors, and
-// the brightness classification below carries 256 down to 16. An indexed color
-// takes the same route through its palette entry, so one authored color reaches
-// one output color whichever form it was written in.
+// `ansi-styles` carries 24-bit down to 256 through the 6x6x6 cube plus the
+// grayscale ramp, and 256 down to 16 by brightness. An indexed color takes the
+// same route through its palette entry, so one authored color reaches one
+// output color whichever form it was written in.
 const ansi16Palette = [
   [0, 0, 0],
   [128, 0, 0],
@@ -80,44 +81,11 @@ function indexedColorToRgb(value: number): readonly [red: number, green: number,
   ];
 }
 
-function rgbToAnsi256(red: number, green: number, blue: number): number {
-  if (red === green && green === blue) {
-    if (red < 8) return 16;
-    if (red > 248) return 231;
-    return Math.round(((red - 8) / 247) * 24) + 232;
-  }
-  return (
-    16 +
-    36 * Math.round((red / 255) * 5) +
-    6 * Math.round((green / 255) * 5) +
-    Math.round((blue / 255) * 5)
-  );
-}
-
-function ansi256ToAnsi16Index(code: number): number {
-  let red: number;
-  let green: number;
-  let blue: number;
-  if (code >= 232) {
-    red = ((code - 232) * 10 + 8) / 255;
-    green = red;
-    blue = red;
-  } else {
-    const offset = code - 16;
-    const remainder = offset % 36;
-    red = Math.floor(offset / 36) / 5;
-    green = Math.floor(remainder / 6) / 5;
-    blue = (remainder % 6) / 5;
-  }
-
-  const value = Math.max(red, green, blue) * 2;
-  if (value === 0) return 0;
-  const index = (Math.round(blue) << 2) | (Math.round(green) << 1) | Math.round(red);
-  return value === 2 ? index + 8 : index;
-}
-
 function rgbToAnsi16Index(red: number, green: number, blue: number): number {
-  return ansi256ToAnsi16Index(rgbToAnsi256(red, green, blue));
+  // `ansi256ToAnsi` answers with a foreground SGR code — 30-37 for the first
+  // eight colors, 90-97 for the bright ones — while `Color` numbers them 0-15.
+  const code = ansiStyles.ansi256ToAnsi(ansiStyles.rgbToAnsi256(red, green, blue));
+  return code >= 90 ? code - 90 + 8 : code - 30;
 }
 
 /** Reduce one structured color to what `level` can encode. */
@@ -134,7 +102,7 @@ function degradeColor(color: Color, level: ColorLevel): Color {
     case "rgb": {
       if (level === 3) return color;
       return level === 2
-        ? { kind: "ansi256", index: rgbToAnsi256(color.red, color.green, color.blue) }
+        ? { kind: "ansi256", index: ansiStyles.rgbToAnsi256(color.red, color.green, color.blue) }
         : { kind: "ansi16", index: rgbToAnsi16Index(color.red, color.green, color.blue) };
     }
   }

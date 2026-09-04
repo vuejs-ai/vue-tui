@@ -57,6 +57,7 @@
   "dependencies": {
     "@alcalzone/ansi-tokenize": "catalog:",
     "ansi-escapes": "catalog:",
+    "ansi-styles": "^6.2.3",
     "cli-boxes": "^3.0.0",
     "cli-truncate": "^6.0.0",
     "patch-console": "catalog:",
