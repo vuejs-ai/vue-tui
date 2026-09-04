@@ -317,8 +317,18 @@ class Session implements SessionMember {
   // Tracks whether this Session owns the liveInstances entry for stdout. An
   // instance-reuse guard never constructs a Session, so its teardown is inert.
   asOwner = false;
+  // Whether this session has announced terminal ownership to the test-event
+  // sink, so `terminal:acquired` and `terminal:released` stay paired. The
+  // lifecycle cannot carry it: ownership is announced by the first write that
+  // actually reaches the device, and a running session that has not painted
+  // yet -- or one whose stdout is no terminal -- has announced nothing.
   terminalEventOwnershipActive = false;
-  lifecycle: SessionLifecycle = { state: "mounting", suspension: "none" };
+  lifecycle: SessionLifecycle = {
+    state: "mounting",
+    suspension: "none",
+    vueTree: "unstarted",
+    consoleWrites: "closed",
+  };
   exitSelection: ExitSelection = { kind: "open" };
   exitSettlement: ExitSettlement = "open";
   runtimeFailure: Error | null = null;
@@ -331,10 +341,6 @@ class Session implements SessionMember {
   // between two turns.
   #flushingDeferredLifecycle = false;
   lifecycleTransactionDepth = 0;
-  vueMountStarted = false;
-  vueMountCompleted = false;
-  vueCleanupCompleted = false;
-  consoleTeardownWritesAllowed = false;
   suspensionGate: { readonly ready: Promise<void>; readonly open: () => void } | null = null;
 
   constructor(terminal: TerminalBackend, surface: Surface, runtime: SessionRuntime) {
@@ -404,14 +410,14 @@ class Session implements SessionMember {
   deferSuspensionUntilMounted(): void {
     const mounted = this.#mounted();
     if (mounted?.state !== "mounting") return;
-    this.#setMounted({ state: "mounting", suspension: "pending" });
+    this.#setMounted({ ...mounted, suspension: "pending" });
   }
 
   /** Take that deferred suspension, if the mount transaction recorded one. */
   takeDeferredSuspension(): boolean {
     const mounted = this.#mounted();
     if (mounted?.state !== "mounting" || mounted.suspension === "none") return false;
-    this.#setMounted({ state: "mounting", suspension: "none" });
+    this.#setMounted({ ...mounted, suspension: "none" });
     return true;
   }
 
@@ -438,6 +444,57 @@ class Session implements SessionMember {
   #resumeStep(): ResumeStep {
     const mounted = this.#mounted();
     return mounted?.state === "suspended" ? mounted.resume : "idle";
+  }
+
+  /** How far Vue's own mount has got, and whether its tree has been released. */
+  vueTree(): VueTree {
+    const current = this.lifecycle;
+    if (current.state === "tearing-down") return current.vueTree;
+    if (current.state === "torn-down") return "released";
+    return mountedVueTree(current);
+  }
+
+  setVueTree(next: VueTree): void {
+    const current = this.lifecycle;
+    if (current.state === "mounting" || current.state === "tearing-down") {
+      this.lifecycle = { ...current, vueTree: next };
+    }
+    // Running and suspended imply a mounted tree and nothing writes it there:
+    // Vue's mount runs inside the mount transaction, and the release runs from
+    // the mount rollback or from teardown.
+  }
+
+  /** Whether Vue was asked to mount and its tree has not been released since. */
+  isVueTreeStarted(): boolean {
+    const tree = this.vueTree();
+    return tree === "mounting" || tree === "mounted";
+  }
+
+  /**
+   * Whether a console line written during teardown may still reach the
+   * terminal: the window that opens when Vue's cleanup path hands the tree
+   * over with a console sink installed, and closes when `#performTeardownNow`
+   * releases that sink. A mount rollback opens it even when Vue never mounted,
+   * because its own unmount hooks may still write; the teardown path does not,
+   * because there are no hooks to run.
+   */
+  allowsTeardownConsoleWrite(): boolean {
+    const current = this.lifecycle;
+    if (current.state === "mounting" || current.state === "tearing-down") {
+      return current.consoleWrites === "open";
+    }
+    return false;
+  }
+
+  openTeardownConsoleWrites(): void {
+    this.#setConsoleWrites(this.consoleSink === null ? "closed" : "open");
+  }
+
+  #setConsoleWrites(next: ConsoleTeardownWrites): void {
+    const current = this.lifecycle;
+    if (current.state === "mounting" || current.state === "tearing-down") {
+      this.lifecycle = { ...current, consoleWrites: next };
+    }
   }
 
   isTearingDown(): boolean {
@@ -819,7 +876,7 @@ class Session implements SessionMember {
       this.#updateTeardown({ finalCommit: "written" });
     }
 
-    if (!immediateTermination && !this.vueCleanupCompleted) {
+    if (!immediateTermination && this.vueTree() !== "released") {
       this.#runtime.runMountedVueCleanup(this);
     }
     if (!sync && !immediateTermination && this.consoleSink?.isIdle() === false) {
@@ -957,7 +1014,7 @@ class Session implements SessionMember {
         this.consoleSink = null;
         runBestEffort(consoleSink.release);
       }
-      this.consoleTeardownWritesAllowed = false;
+      this.#setConsoleWrites("closed");
       if (this.renderedTargets) {
         const renderedTargets = this.renderedTargets;
         this.renderedTargets = null;
@@ -988,7 +1045,9 @@ class Session implements SessionMember {
       if (this.root) runBestEffort(() => detachYoga(this.root!));
       this.root = null;
       this.hostYogaLedger = null;
-      this.vueMountCompleted = false;
+      // Yoga no longer holds the tree. A teardown that skipped Vue's unmount --
+      // a non-returning exit -- still leaves no mounted tree behind.
+      this.setVueTree("released");
       if (this.resizeHandler) {
         const unsubscribeResize = this.resizeHandler;
         runBestEffort(unsubscribeResize);
@@ -1052,6 +1111,17 @@ class Session implements SessionMember {
 type MountSuspension = "none" | "pending";
 
 /**
+ * How far Vue's own mount has got inside this session's mount, and whether the
+ * tree has been released since. `mounting` and `tearing-down` carry it; running
+ * and suspended imply `"mounted"`, because reaching either means Vue's mount
+ * returned.
+ */
+type VueTree = "unstarted" | "mounting" | "mounted" | "released";
+
+/** Whether a console line written during teardown may still reach the terminal. */
+type ConsoleTeardownWrites = "closed" | "open";
+
+/**
  * Where the resume transaction stands. It prepares the next frame while the
  * terminal is still released, re-enters the screen, writes that frame, and only
  * then reacquires input, rolling every step back when one of them fails.
@@ -1075,7 +1145,12 @@ type TeardownStep =
 
 /** The states a session tears down from. Teardown keeps the one it began in. */
 type MountedLifecycle =
-  | { readonly state: "mounting"; readonly suspension: MountSuspension }
+  | {
+      readonly state: "mounting";
+      readonly suspension: MountSuspension;
+      readonly vueTree: VueTree;
+      readonly consoleWrites: ConsoleTeardownWrites;
+    }
   | { readonly state: "running" }
   | { readonly state: "suspended"; readonly resume: ResumeStep };
 
@@ -1090,6 +1165,10 @@ interface TeardownLifecycle {
   readonly finalCommit: "owed" | "written";
   /** Whether a non-returning exit already swept this session's terminal state. */
   readonly emergency: "none" | "restored";
+  /** The Vue tree's progress, which teardown owns once it has begun. */
+  readonly vueTree: VueTree;
+  /** Whether the console sink's teardown window is open. */
+  readonly consoleWrites: ConsoleTeardownWrites;
 }
 
 type SessionLifecycle = MountedLifecycle | TeardownLifecycle | { readonly state: "torn-down" };
@@ -1151,7 +1230,24 @@ function beginTeardown(from: MountedLifecycle): TeardownLifecycle {
     nextAttempt: "async",
     finalCommit: "owed",
     emergency: "none",
+    vueTree: mountedVueTree(from),
+    // Only a mount rollback opens the window before teardown begins; running
+    // and suspended have run no cleanup, so nothing is owed to the console.
+    consoleWrites: from.state === "mounting" ? from.consoleWrites : "closed",
   };
+}
+
+/** Reaching running or suspended means Vue's mount returned. */
+function mountedVueTree(mounted: MountedLifecycle): VueTree {
+  switch (mounted.state) {
+    case "mounting":
+      return mounted.vueTree;
+    case "running":
+    case "suspended":
+      return "mounted";
+    default:
+      return unreachableLifecycle(mounted);
+  }
 }
 
 /**
@@ -1530,11 +1626,11 @@ export function createSessionApp(
   const originalUnmount = baseApp.unmount.bind(baseApp);
 
   function runMountedVueCleanup(activeSession: Session): void {
-    if (activeSession.vueCleanupCompleted) return;
-    activeSession.vueCleanupCompleted = true;
-    if (!activeSession.vueMountStarted) return;
-    activeSession.vueMountStarted = false;
-    activeSession.consoleTeardownWritesAllowed = activeSession.consoleSink !== null;
+    const tree = activeSession.vueTree();
+    if (tree === "released") return;
+    activeSession.setVueTree("released");
+    if (tree === "unstarted") return;
+    activeSession.openTeardownConsoleWrites();
     try {
       originalUnmount();
     } catch (error) {
@@ -1543,10 +1639,10 @@ export function createSessionApp(
   }
 
   function rollbackPartialVueMount(activeSession: Session): void {
-    if (activeSession.vueCleanupCompleted) return;
-    activeSession.vueCleanupCompleted = true;
-    activeSession.vueMountStarted = false;
-    activeSession.consoleTeardownWritesAllowed = activeSession.consoleSink !== null;
+    const tree = activeSession.vueTree();
+    if (tree === "released") return;
+    activeSession.setVueTree("released");
+    activeSession.openTeardownConsoleWrites();
     // Vue-side rollback goes exactly as far as Vue itself does, and no further.
     // If app.mount() returned and a later Runtime step failed, the ordinary Vue
     // unmount tears the tree down. If Vue's own mount threw, Vue never took
@@ -1555,8 +1651,7 @@ export function createSessionApp(
     // missing ownership link out of Vue-private state to do more. Runtime-owned
     // resources are still released: the Yoga ledger below frees every
     // allocation, and the caller's rollback restores terminal and stream state.
-    if (activeSession.vueMountCompleted) {
-      activeSession.vueMountCompleted = false;
+    if (tree === "mounted") {
       try {
         originalUnmount();
       } catch (error) {
@@ -1798,7 +1893,7 @@ export function createSessionApp(
        */
       function refuseSideChannelWrite(): CoordinatedWriteResult | undefined {
         if (isTearingDown()) {
-          const allowed = session!.consoleTeardownWritesAllowed && !isTerminalSuspended();
+          const allowed = session!.allowsTeardownConsoleWrite() && !isTerminalSuspended();
           return allowed ? undefined : acceptedCoordinatedWrite;
         }
         if (!isTerminalSuspended()) return undefined;
@@ -2758,10 +2853,10 @@ export function createSessionApp(
       // and Vue-propagated initial failures through partial-tree cleanup and the
       // same idempotent terminal rollback before preserving the original error.
       let proxy: ComponentPublicInstance;
-      session!.vueMountStarted = true;
+      session!.setVueTree("mounting");
       try {
         proxy = originalMount(tuiRoot);
-        session!.vueMountCompleted = true;
+        session!.setVueTree("mounted");
         // A semantic route created during Vue setup can begin Kitty detection,
         // but its shared stdin ingress already exists. Ordinary input beside a
         // synchronous reply is retained until setup has installed the complete
@@ -2979,7 +3074,7 @@ export function createSessionApp(
 
   // The app owner can wait for Vue, console, renderer, and stream work to settle.
   async function waitUntilRenderFlush(): Promise<void> {
-    if (!session?.appContext || !session.vueMountStarted || isTearingDown()) {
+    if (!session?.appContext || !session.isVueTreeStarted() || isTearingDown()) {
       if (isTearingDown() && !isTornDown()) {
         await exitPromise.catch(() => {});
       }
