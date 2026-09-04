@@ -8,6 +8,7 @@ This project adheres to [Semantic Versioning](https://semver.org/). While on `0.
 
 ### Added
 
+- **`usePasteInput()`** — subscribes only to complete paste events while preserving empty payloads, newlines, control characters, and reactive `useInput()` activation semantics.
 - **`useKeyInput()`** — subscribes only to the exact key event member while preserving the original event and reactive `useInput()` activation semantics.
 - **`useTextInput()`** — subscribes only to the exact text event member while preserving the original event and optional enhanced key information.
 - **Mounted input type selection** — `useInputWhileMounted()` accepts a static `type` option, and `<UseInputWhileMounted>` accepts a reactive `type` prop. Both filter `"text"`, `"key"`, or `"paste"` events and narrow their handler or emitted event type.
