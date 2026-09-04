@@ -16,6 +16,12 @@ const runtimeSourceRoot = resolve(fileURLToPath(new URL("../src", import.meta.ur
  * - `packages` mirrors the bare npm packages the row names; in the record's
  *   `May import` column `vue` without a slash always means the npm package.
  *
+ * Beyond the directories themselves, these tables govern only `vue` and the
+ * Boundaries rules only Node's builtins and the layout engine; a unit's other
+ * npm dependencies — `cli-boxes` in `paint/`, `ansi-escapes` in `surface/`, the
+ * text packages in `text/` — are not their subject, so no check below reads
+ * them.
+ *
  * A row is an upper bound, never a requirement: `layout/` may import `frame/`
  * and does not today, so the checks below reject what a row omits rather than
  * asserting a row's exact set.
@@ -46,10 +52,9 @@ const mayImport: Readonly<Record<string, UnitRow>> = {
   // Shared data and utilities.
   frame: { directories: [], packages: [] },
   text: { directories: ["frame"], packages: [] },
-  // Above both paths. The `api/` row reads "everything, plus `node:stream` as
-  // types only"; it is the package-entry directory that builds `createApp` on
-  // Vue's own renderer, so "everything" is read here as every unit and the
-  // `vue` package too.
+  // Above both paths. The `api/` row reads "everything, plus `vue`, and
+  // `node:stream` as types only", where "everything" is every unit the tables
+  // list.
   api: { directories: everyUnit, packages: ["vue"] },
   dev: { directories: ["session", "vue"], packages: ["vue"] },
   session: { directories: [...everyUnitBelowSession, "vue"], packages: ["vue"] },

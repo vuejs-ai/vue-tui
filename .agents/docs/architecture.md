@@ -74,7 +74,7 @@ Two facts fall out of the shape rather than out of policy. The render path never
 
 ### Units and what they may import
 
-Each directory may import only what its row lists, and the direction is strictly downward. In the **May import** column `vue` always means the npm package; a directory is written with its slash.
+Each directory may import only what its row lists, and the direction is strictly downward. In the **May import** column `vue` always means the npm package; a directory is written with its slash. Beyond the directories themselves, these tables govern only `vue` and the [Boundaries](#boundaries) rules only Node's builtins and the layout engine; a unit's other npm dependencies — `cli-boxes` in `paint/`, `ansi-escapes` in `surface/`, the text packages in `text/` — are not their subject.
 
 The render and input stages, in pipeline order:
 
@@ -111,7 +111,7 @@ A leaf both of them need lives in the lower one. Coercing an unknown thrown valu
 
 ## Scheduling
 
-A commit is synchronous and runs after Vue's flush, as a post-flush callback, so it sees the tree settled; input arrives on the stream's data path between commits and is never delivered inside one. Commits are throttled to a frame budget with leading, trailing and maximum-wait edges: the first change commits at once, later changes re-arm one trailing commit, and sustained change commits at the budget's cadence rather than waiting for quiet. Not every commit comes through the throttle: a resize or continuation cancels the pending commit, lets Vue consumers see the new size, then runs one authoritative commit, and teardown runs a final one. Input that arrives before mount has activated delivery is held and delivered in order at activation, and dropped instead if no subscription is listening by then; input that arrives while the terminal is suspended is not delivered, because the input resources are released. What each surface does on resize, suspension and console output is the subject of [Rendering modes](./rendering-modes.md).
+A commit is synchronous; the scheduler runs the leading and maximum-wait commits as a Vue post-flush callback, so they see the tree settled, and the trailing commit from its timer; input arrives on the stream's data path between commits and is never delivered inside one. Commits are throttled to a frame budget with leading, trailing and maximum-wait edges: the first change commits at once, later changes re-arm one trailing commit, and sustained change commits at the budget's cadence rather than waiting for quiet. Not every commit comes through the throttle: a resize or continuation cancels the pending commit, lets Vue consumers see the new size, then runs one authoritative commit, and teardown runs a final one. Input that arrives before mount has activated delivery is held and delivered in order at activation, and dropped instead if no subscription is listening by then; input that arrives while the terminal is suspended is not delivered, because the input resources are released. What each surface does on resize, suspension and console output is the subject of [Rendering modes](./rendering-modes.md).
 
 ## Data structures
 
@@ -233,7 +233,7 @@ Vue already supplies three things a terminal framework otherwise has to build: c
 
 ## Evidence
 
-- [`import-boundaries.test.ts`](../../packages/runtime/tests/import-boundaries.test.ts) checks every import beneath `src/` against the two May-import tables and the first two rules of the Boundaries table, including the pairs a row admits as types only.
+- [`import-boundaries.test.ts`](../../packages/runtime/tests/import-boundaries.test.ts) checks every import beneath `src/` against the two May-import tables and the first two rules of the Boundaries table, including the pairs a row admits as types only. The test carries its own copy of the tables, so a row change is made in both places.
 - [`sanitize-ansi.test.ts`](../../packages/runtime/tests/text/sanitize-ansi.test.ts) pins the OSC 8 hyperlink and SGR preservation that `Cell` must not narrow.
 - [`single-pass-text-measurement.test.ts`](../../packages/runtime/tests/layout/layout-transaction/single-pass-text-measurement.test.ts) asserts `layoutCalls === 1`, which a `ComputedLayout` without wrapped lines would break.
 - [`render-session.test.ts`](../../packages/runtime/tests/session/render-session.test.ts) pins the three-variant surface resolution the three `Surface` implementations take over.
