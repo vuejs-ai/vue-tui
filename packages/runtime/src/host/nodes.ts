@@ -41,26 +41,46 @@ export interface TuiBox extends NodeBase {
   props: BoxProps;
 }
 
-/**
- * One SGR pair active on a parsed run: the code that opens it and the code that
- * ends it.
- */
+/** One authored SGR pair with no structured field, and the code that ends it. */
+export interface TuiTextRunSgrPair {
+  readonly code: string;
+  readonly endCode: string;
+}
+
+/** One terminal colour, stored independently from its ANSI encoding. */
+export type TuiTextRunColor =
+  | { readonly kind: "default" }
+  | { readonly kind: "ansi16"; readonly index: number }
+  | { readonly kind: "ansi256"; readonly index: number }
+  | { readonly kind: "rgb"; readonly red: number; readonly green: number; readonly blue: number };
+
+/** The inline visual state one parsed run resolved from the content's SGR. */
 export interface TuiTextRunStyle {
-  type: "ansi";
-  code: string;
-  endCode: string;
+  readonly foreground: TuiTextRunColor;
+  readonly background: TuiTextRunColor;
+  readonly attrs: number;
+  readonly extraSgr: readonly TuiTextRunSgrPair[];
+}
+
+/** The OSC 8 hyperlink one parsed run carries. */
+export interface TuiTextRunLink {
+  readonly parameters: string;
+  readonly target: string;
 }
 
 /**
- * One grapheme of a Text node's parsed content, with the SGR the content itself
- * has active on it. `text/` produces these and `layout/` stores them here, but
- * `host/` imports nothing, so the shape is declared rather than imported.
+ * One grapheme of a Text node's parsed content, already in the shape paint
+ * writes into a frame: this is field for field a `frame/` cell. `text/`
+ * produces these and `layout/` stores them here, but `host/` imports nothing,
+ * so the shape is declared rather than imported — assigning a cell into a node
+ * and a run back out keeps the two declarations in agreement.
  */
 export interface TuiTextRun {
-  type: "char";
-  value: string;
-  fullWidth: boolean;
-  styles: TuiTextRunStyle[];
+  readonly grapheme: string;
+  /** The columns this grapheme displays, which is zero for a combining mark. */
+  readonly width: number;
+  readonly style: TuiTextRunStyle;
+  readonly link: TuiTextRunLink | undefined;
 }
 
 /**

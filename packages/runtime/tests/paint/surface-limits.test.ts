@@ -4,7 +4,7 @@ import { createRoot } from "../../src/host/nodes.ts";
 import { runLayoutTransaction } from "../../src/layout/layout-transaction.ts";
 import { attachYoga, detachYoga } from "../../src/layout/yoga.ts";
 import { MAX_PAINT_SURFACE_CELLS, assertPaintSurfaceSize } from "../../src/paint/surface-limits.ts";
-import { paint, releasePaintCaches } from "../../src/paint/paint.ts";
+import { paint } from "../../src/paint/paint.ts";
 
 test("accepts the exact paint-surface resource boundary without allocating it", () => {
   expect(() => assertPaintSurfaceSize(1_024, 1_024)).not.toThrow();
@@ -36,7 +36,6 @@ test("paint rejects an oversized surface with a Runtime error before grid alloca
     );
   } finally {
     layout.dispose();
-    releasePaintCaches(root);
     detachYoga(root);
   }
 });

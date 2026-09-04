@@ -29,7 +29,6 @@ import {
 } from "../layout/yoga-allocation-ledger.ts";
 import { createCommitScheduler } from "./scheduler.ts";
 import { runRenderCommit } from "./render-commit.ts";
-import { releasePaintCaches } from "../paint/paint.ts";
 import type { Frame } from "../frame/frame.ts";
 import { sanitizeAnsiMultiline } from "../text/sanitize-ansi.ts";
 import { resolveColorCapability, type ColorCapability } from "../frame/color-profile.ts";
@@ -984,7 +983,6 @@ class Session implements SessionMember {
           this.surface?.dispose(this.surfaceRuntime!, { cleanExit: !this.hasExitFailure(), sync }),
         );
       }
-      if (this.root) runBestEffort(() => releasePaintCaches(this.root!));
       runBestEffort(() => this.hostYogaLedger?.rollback());
       if (this.root) runBestEffort(() => detachYoga(this.root!));
       this.root = null;

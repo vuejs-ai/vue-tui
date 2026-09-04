@@ -10,15 +10,24 @@ import {
 } from "../../src/host/nodes.ts";
 import {
   measureTextNatural,
-  safeSliceEnd,
   sliceAnsiPreservingIntensity,
   styledGraphemesFromAnsi,
   styleMeasuredTextLines,
   wrapText,
 } from "../../src/text/text-measure.ts";
+import { cellsFromStyledChars } from "../../src/text/cell-style.ts";
+import type { Cell } from "../../src/frame/cell.ts";
 import { renderToString } from "../../src/api/render-to-string.ts";
 import Box from "../../src/vue/components/box.vue";
 import Text from "../../src/vue/components/text.vue";
+
+/** The graphemes one painted line holds, which is what a layout plan decides. */
+function graphemesOf(line: readonly Cell[]): string {
+  return line.map((cell) => cell.grapheme).join("");
+}
+
+const parsedCells = (styled: string): Cell[] =>
+  cellsFromStyledChars(styledGraphemesFromAnsi(styled));
 
 // Minimal ANSI-stripping helper for test assertions (avoids strip-ansi dep).
 function stripAnsi(s: string): string {
@@ -112,7 +121,6 @@ test("ANSI slicing preserves independent bold and dim intensity at the first ret
   expect(sliceAnsiPreservingIntensity(styled, 0, 3)).toBe(
     "\x1b[1m\x1b[2mAA\x1b[22m\x1b[2mB\x1b[22m",
   );
-  expect(safeSliceEnd(styled, 3)).toBe("\x1b[1m\x1b[2mAA\x1b[22m\x1b[2mB\x1b[22m");
   expect(wrapText("\x1b[1m\x1b[2mA\x1b[22m\x1b[2mB\x1b[22m", 0, "wrap")).toEqual([
     "",
     "\x1b[1m\x1b[2mA\x1b[22m",
@@ -250,14 +258,12 @@ test("styleMeasuredTextLines restores ANSI spans over layout's width-zero line p
   const layoutPlan = wrapText(raw, 0, "wrap");
 
   // The plan comes from unstyled layout text. Paint receives it verbatim and
-  // only restores ANSI around its rows; it does not choose the split itself.
-  expect(styleMeasuredTextLines(styledGraphemesFromAnsi(styled), layoutPlan, "wrap", 0)).toEqual([
-    "",
-    "\x1b[41mA\x1b[49m",
-    "\x1b[41m​\x1b[49m",
-    "",
-    "\x1b[41mB\x1b[49m",
-  ]);
+  // only carries the parsed style onto its rows; it does not choose the split.
+  const lines = styleMeasuredTextLines(parsedCells(styled), layoutPlan, "wrap", 0);
+  expect(lines.map(graphemesOf)).toEqual(["", "A", "​", "", "B"]);
+  expect(lines.flat().map((cell) => cell.style.background)).toEqual(
+    Array.from({ length: 3 }, () => ({ kind: "ansi16", index: 1 })),
+  );
 });
 
 test("styleMeasuredTextLines accepts Yoga's zero-line plan for empty text", () => {
@@ -269,9 +275,18 @@ test("styleMeasuredTextLines restores styles for a layout-selected truncation", 
   const styled = "\x1b[31mabcdef\x1b[39m";
   const layoutPlan = wrapText(raw, 5, "truncate-middle");
 
-  expect(
-    styleMeasuredTextLines(styledGraphemesFromAnsi(styled), layoutPlan, "truncate-middle", 5),
-  ).toEqual(wrapText(styled, 5, "truncate-middle"));
+  const lines = styleMeasuredTextLines(parsedCells(styled), layoutPlan, "truncate-middle", 5);
+  expect(lines.map(graphemesOf)).toEqual(layoutPlan);
+  // Every retained grapheme keeps the style its source run carried. The
+  // ellipsis belongs to no source run, and takes whatever the truncation left
+  // active where it was inserted.
+  expect(lines[0]!.map((cell) => `${cell.grapheme}:${cell.style.foreground.kind}`)).toEqual([
+    "a:ansi16",
+    "b:ansi16",
+    "\u2026:default",
+    "e:ansi16",
+    "f:ansi16",
+  ]);
 });
 
 test("styleMeasuredTextLines preserves wrap-ansi's normalized graphemes", () => {
@@ -280,7 +295,7 @@ test("styleMeasuredTextLines preserves wrap-ansi's normalized graphemes", () => 
 
   expect(layoutPlan).toEqual(["é", "x"]);
   expect(
-    styleMeasuredTextLines(styledGraphemesFromAnsi(styled), layoutPlan, "wrap", 1).map(stripAnsi),
+    styleMeasuredTextLines(parsedCells(styled), layoutPlan, "wrap", 1).map(graphemesOf),
   ).toEqual(layoutPlan);
 });
 

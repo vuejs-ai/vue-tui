@@ -10,7 +10,9 @@ import {
   type StyledChar,
   type Token,
 } from "@alcalzone/ansi-tokenize";
+import type { Cell } from "../frame/cell.ts";
 import { hasAnsiControlCharacters, tokenizeAnsi } from "./ansi-tokenizer.ts";
+import { cellsFromStyledChars, graphemeSegmenter, styledCharFromCell } from "./cell-style.ts";
 
 export type WrapMode = "wrap" | "hard" | "truncate" | "truncate-middle" | "truncate-start";
 
@@ -51,28 +53,6 @@ export function sliceAnsiPreservingIntensity(text: string, start: number, end: n
   const missing = expected.styles.filter((style) => !actualCodes.has(style.code));
   return missing.length === 0 ? sliced : ansiCodesToString(missing) + sliced;
 }
-
-/**
- * Slice `text` from the start so the result is at most `maxCols` columns wide.
- * `slice-ansi` can overshoot when a wide character straddles the boundary, so
- * we reduce the slice position until the result fits.
- */
-export function safeSliceEnd(text: string, maxCols: number): string {
-  if (maxCols <= 0) return "";
-  let end = maxCols;
-  let sliced = sliceAnsiPreservingIntensity(text, 0, end);
-  let w = stringWidth(sliced);
-  while (w > maxCols && end > 0) {
-    end--;
-    sliced = sliceAnsiPreservingIntensity(text, 0, end);
-    w = stringWidth(sliced);
-  }
-  return sliced;
-}
-
-// Grapheme segmenter shared across calls (constructing one is non-trivial). Locale-independent:
-// we only segment, never collate, so the default locale's segmentation rules suffice.
-const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 /**
  * Strip ALL ANSI from `text`, returning only its visible code points. Reuses the paint
@@ -207,10 +187,7 @@ function tokenizeSgrParameters(parameterString: string): Token[] {
   return tokens;
 }
 
-export function reduceStyledCodes(
-  active: readonly AnsiCode[],
-  next: readonly AnsiCode[],
-): AnsiCode[] {
+function reduceStyledCodes(active: readonly AnsiCode[], next: readonly AnsiCode[]): AnsiCode[] {
   let result = [...active];
   for (const pair of next) {
     if (pair.code === "\x1b[0m") {
@@ -499,20 +476,20 @@ export function wrapText(text: string, width: number, mode: WrapMode = "wrap"): 
 }
 
 /**
- * Apply terminal styling to line structure which layout has already chosen.
+ * Project the runs onto the line structure which layout has already chosen.
  *
- * `wrappedLines` comes from `wrapText()` during the Yoga
- * measure pass. Paint must not call `wrapText` again: the layout result is the
- * one authoritative whole-cell budget for this frame. The runs carry the style
- * of every grapheme, so project them over that existing structure instead of
- * deciding where any line ends here.
+ * `wrappedLines` comes from `wrapText()` during the Yoga measure pass. Paint
+ * must not call `wrapText` again: the layout result is the one authoritative
+ * whole-cell budget for this frame. The runs carry the style of every grapheme,
+ * so they are distributed over that existing structure rather than re-wrapped,
+ * and each line comes back as the cells paint writes.
  */
 export function styleMeasuredTextLines(
-  runs: readonly StyledChar[],
+  runs: readonly Cell[],
   wrappedLines: readonly string[],
   mode: WrapMode,
   wrapWidth: number,
-): string[] {
+): Cell[][] {
   if (wrappedLines.length === 0) {
     if (runs.length !== 0) {
       throw new Error("Measured text plan does not match styled source.");
@@ -529,21 +506,21 @@ export function styleMeasuredTextLines(
 }
 
 /** Split runs at the physical line breaks the content carries. */
-function splitRunLines(runs: readonly StyledChar[]): (readonly StyledChar[])[] {
-  if (!runs.some((run) => run.value === "\n")) return [runs];
-  const lines: StyledChar[][] = [[]];
+function splitRunLines(runs: readonly Cell[]): (readonly Cell[])[] {
+  if (!runs.some((run) => run.grapheme === "\n")) return [runs];
+  const lines: Cell[][] = [[]];
   for (const run of runs) {
-    if (run.value === "\n") lines.push([]);
+    if (run.grapheme === "\n") lines.push([]);
     else lines[lines.length - 1]!.push(run);
   }
   return lines;
 }
 
 function styleMeasuredWrappedLines(
-  sourceLines: readonly (readonly StyledChar[])[],
+  sourceLines: readonly (readonly Cell[])[],
   wrappedLines: readonly string[],
-): string[] {
-  const styledLines: string[] = [];
+): Cell[][] {
+  const styledLines: Cell[][] = [];
   let wrappedLineIndex = 0;
 
   for (const sourceGraphemes of sourceLines) {
@@ -554,7 +531,7 @@ function styleMeasuredWrappedLines(
       if (measuredLine === undefined || visibleText(measuredLine) !== "") {
         throw new Error("Measured text plan does not match styled source.");
       }
-      styledLines.push("");
+      styledLines.push([]);
       continue;
     }
 
@@ -566,7 +543,7 @@ function styleMeasuredWrappedLines(
       }
       const measuredGraphemes = [...graphemeSegmenter.segment(visibleText(measuredLine))];
       if (measuredGraphemes.length === 0) {
-        styledLines.push("");
+        styledLines.push([]);
         continue;
       }
 
@@ -574,15 +551,16 @@ function styleMeasuredWrappedLines(
       if (endGrapheme > sourceGraphemes.length) {
         throw new Error("Measured text plan does not match styled source.");
       }
-      const projected = measuredGraphemes.map(({ segment }, index) => {
-        const source = sourceGraphemes[consumedGraphemes + index]!;
-        // wrap-ansi can compose a grapheme its source spelled differently, and
-        // only then does the run need rebuilding around the measured segment.
-        return segment === source.value
-          ? source
-          : { ...source, value: segment, fullWidth: stringWidth(segment) > 1 };
-      });
-      styledLines.push(styledGraphemesToString(projected));
+      styledLines.push(
+        measuredGraphemes.map(({ segment }, index) => {
+          const source = sourceGraphemes[consumedGraphemes + index]!;
+          // wrap-ansi can compose a grapheme its source spelled differently, and
+          // only then does the run need rebuilding around the measured segment.
+          return segment === source.grapheme
+            ? source
+            : { ...source, grapheme: segment, width: stringWidth(segment) };
+        }),
+      );
       consumedGraphemes = endGrapheme;
     }
   }
@@ -594,11 +572,11 @@ function styleMeasuredWrappedLines(
 }
 
 function styleMeasuredTruncatedLines(
-  sourceLines: readonly (readonly StyledChar[])[],
+  sourceLines: readonly (readonly Cell[])[],
   wrappedLines: readonly string[],
   mode: Extract<WrapMode, "truncate" | "truncate-middle" | "truncate-start">,
   wrapWidth: number,
-): string[] {
+): Cell[][] {
   if (sourceLines.length !== wrappedLines.length) {
     throw new Error("Measured text plan does not match styled source.");
   }
@@ -607,17 +585,25 @@ function styleMeasuredTruncatedLines(
   return sourceLines.map((sourceGraphemes, index) => {
     const measuredLine = wrappedLines[index]!;
     const measuredPlain = visibleText(measuredLine);
-    if (measuredPlain === "") return "";
+    if (measuredPlain === "") return [];
+    const sourcePlain = sourceGraphemes.map((run) => run.grapheme).join("");
     // The measured line already carries the ellipsis, which no run holds, so
     // this branch truncates the styled line rather than projecting onto it.
-    const styledSourceLine = styledGraphemesToString(sourceGraphemes);
-    if (measuredPlain === visibleText(styledSourceLine)) return styledSourceLine;
+    if (measuredPlain === sourcePlain) return [...sourceGraphemes];
 
-    const styled = cliTruncate(styledSourceLine, Math.max(0, wrapWidth), { position });
+    // `cli-truncate` decides which graphemes survive and what the ellipsis
+    // inherits, and it works on a string. Serializing this line's cells and
+    // reading the result back is the one place style leaves structured form; it
+    // stays inside text/, beside the wrap plan the same library produced.
+    const styled = cliTruncate(
+      styledGraphemesToString(sourceGraphemes.map((run) => styledCharFromCell(run))),
+      Math.max(0, wrapWidth),
+      { position },
+    );
     if (visibleText(styled) !== measuredPlain) {
       throw new Error("Measured text plan does not match styled source.");
     }
-    return styled;
+    return cellsFromStyledChars(styledGraphemesFromAnsi(styled));
   });
 }
 

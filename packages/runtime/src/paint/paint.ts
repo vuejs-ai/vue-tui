@@ -1,30 +1,24 @@
-import stringWidth from "string-width";
 import cliBoxes from "cli-boxes";
-import { type AnsiCode, type StyledChar } from "@alcalzone/ansi-tokenize";
-import { blankCell, type Cell, type Hyperlink } from "../frame/cell.ts";
+import { blankCell, type Cell } from "../frame/cell.ts";
 import { Frame } from "../frame/frame.ts";
 import {
   defaultColor,
   defaultStyle,
+  noExtraSgr,
   StyleAttribute,
-  type Color,
-  type SgrPair,
   type Style,
 } from "../frame/style.ts";
-import {
-  applySgrSpan,
-  applyTextStyle,
-  colorSpan,
-  dimSpan,
-  explicitTextStyleChannels,
-  textStyleSpans,
-  type SgrSpan,
-} from "../text/text-style.ts";
+import { cellsFromPlainText } from "../text/cell-style.ts";
 import { styleContentRuns } from "../text/text-content.ts";
-import { sanitizeAnsi } from "../text/sanitize-ansi.ts";
+import { styleMeasuredTextLines } from "../text/text-measure.ts";
+import {
+  explicitTextStyleChannels,
+  parseColorValue,
+  textStyleContributions,
+  type TextStyleContribution,
+} from "../text/text-style.ts";
 import type {
   TuiNode,
-  TuiRoot,
   TuiContainer,
   TextProps,
   TuiText,
@@ -34,12 +28,6 @@ import type {
   BoxProps,
 } from "../host/nodes.ts";
 import { isContainer } from "../host/nodes.ts";
-import {
-  safeSliceEnd,
-  sliceAnsiPreservingIntensity,
-  styledGraphemesFromAnsi,
-  styleMeasuredTextLines,
-} from "../text/text-measure.ts";
 import type {
   ComputedLayout,
   ComputedNodeLayout,
@@ -65,550 +53,235 @@ function intersectClipRects(a: ClipRect | undefined, b: ClipRect): ClipRect {
   };
 }
 
-interface WriteOp {
-  type: "write";
-  x: number;
-  y: number;
-  lines: string[];
+/** One structural row of a write: one cell per grapheme, wide cells not yet expanded. */
+type CellRow = readonly Cell[];
+
+/**
+ * The grid columns one cell occupies. A grapheme that displays nothing still
+ * gets a cell of its own, which is how `slice-ansi` numbers its slots and what
+ * the frame's width has to account for.
+ */
+function gridColumns(cell: Cell): number {
+  return cell.width === 0 ? 1 : cell.width;
 }
 
-interface ClipOp {
-  type: "clip";
-  clip: ClipRect;
+/** The columns these cells display, which is what a clip edge is measured in. */
+function displayedColumns(cells: CellRow): number {
+  let total = 0;
+  for (const cell of cells) total += cell.width;
+  return total;
 }
 
-interface UnclipOp {
-  type: "unclip";
+/**
+ * The longest leading run of `cells` that fits `maxColumns`.
+ *
+ * A cell claims a column even when it displays nothing, while the fit is
+ * measured in displayed columns, so both counts bound the result: a wide
+ * grapheme straddling the edge is dropped whole rather than half-painted.
+ */
+function fittingCells(cells: CellRow, maxColumns: number): CellRow {
+  if (maxColumns <= 0) return [];
+  let claimed = 0;
+  let displayed = 0;
+  for (let index = 0; index < cells.length; index++) {
+    const cell = cells[index]!;
+    if (claimed >= maxColumns) return cells.slice(0, index);
+    const next = displayed + cell.width;
+    if (next > maxColumns) return cells.slice(0, index);
+    claimed += gridColumns(cell);
+    displayed = next;
+  }
+  return cells;
 }
 
-type Op = WriteOp | ClipOp | UnclipOp;
-
-interface CellVisual {
-  readonly style: Style;
-  readonly link: Hyperlink | undefined;
-}
-
-const attributeBySgrCode = new Map<number, number>([
-  [1, StyleAttribute.bold],
-  [2, StyleAttribute.dim],
-  [3, StyleAttribute.italic],
-  [4, StyleAttribute.underline],
-  [5, StyleAttribute.blink],
-  [6, StyleAttribute.rapidBlink],
-  [7, StyleAttribute.inverse],
-  [8, StyleAttribute.conceal],
-  [9, StyleAttribute.strikethrough],
-  [53, StyleAttribute.overline],
-]);
-
-function osc8Link(code: string): Hyperlink | undefined {
-  if (!code.startsWith("\x1b]8;")) return undefined;
-  const parametersEnd = code.indexOf(";", 4);
-  if (parametersEnd === -1) return undefined;
-  const parameters = code.slice(4, parametersEnd);
-  let target = code.slice(parametersEnd + 1);
-  if (target.endsWith("\x1b\\")) target = target.slice(0, -2);
-  else if (target.endsWith("\x07") || target.endsWith("\x9c")) target = target.slice(0, -1);
-  return target === "" ? undefined : { parameters, target };
-}
-
-function sgrByte(value: number | undefined): number | undefined {
-  if (value === undefined || !Number.isInteger(value) || value < 0 || value > 255) return undefined;
-  return value;
-}
-
-function sgrColor(
-  code: string,
-): { readonly channel: "foreground" | "background"; readonly color: Color } | undefined {
-  if (!code.startsWith("\x1b[") || !code.endsWith("m")) return undefined;
-  const parameters = code.slice(2, -1).split(";").map(Number);
-  const first = parameters[0];
-  if (first === undefined) return undefined;
-  if (first >= 30 && first <= 37) {
-    return { channel: "foreground", color: { kind: "ansi16", index: first - 30 } };
-  }
-  if (first >= 90 && first <= 97) {
-    return { channel: "foreground", color: { kind: "ansi16", index: first - 90 + 8 } };
-  }
-  if (first >= 40 && first <= 47) {
-    return { channel: "background", color: { kind: "ansi16", index: first - 40 } };
-  }
-  if (first >= 100 && first <= 107) {
-    return { channel: "background", color: { kind: "ansi16", index: first - 100 + 8 } };
-  }
-  if ((first !== 38 && first !== 48) || parameters.length < 3) return undefined;
-  const channel = first === 38 ? "foreground" : "background";
-  if (parameters[1] === 5) {
-    const index = sgrByte(parameters[2]);
-    return index === undefined ? undefined : { channel, color: { kind: "ansi256", index } };
-  }
-  if (parameters[1] === 2) {
-    const red = sgrByte(parameters[2]);
-    const green = sgrByte(parameters[3]);
-    const blue = sgrByte(parameters[4]);
-    if (red === undefined || green === undefined || blue === undefined) return undefined;
-    return {
-      channel,
-      color: {
-        kind: "rgb",
-        red,
-        green,
-        blue,
-      },
-    };
-  }
-  return undefined;
-}
-
-function cellVisualFromAnsiCodes(codes: readonly AnsiCode[]): CellVisual {
-  let foreground = defaultColor;
-  let background = defaultColor;
-  let attrs = 0;
-  const extraSgr: SgrPair[] = [];
-  let link: Hyperlink | undefined;
-
-  for (const { code, endCode } of codes) {
-    const nextLink = osc8Link(code);
-    if (nextLink !== undefined) {
-      link = nextLink;
-      continue;
-    }
-    const color = sgrColor(code);
-    if (color) {
-      if (color.channel === "foreground") foreground = color.color;
-      else background = color.color;
-      continue;
-    }
-    if (!code.startsWith("\x1b[") || !code.endsWith("m")) continue;
-    const attribute = attributeBySgrCode.get(Number(code.slice(2, -1)));
-    if (attribute !== undefined) {
-      attrs |= attribute;
-    } else {
-      extraSgr.push({ code, endCode });
-    }
-  }
-
-  const style =
-    foreground === defaultColor &&
-    background === defaultColor &&
-    attrs === 0 &&
-    extraSgr.length === 0
-      ? defaultStyle
-      : { foreground, background, attrs, extraSgr };
-  return { style, link };
-}
-
-interface OutputCacheLimits {
-  readonly styledEntries: number;
-  readonly styledUnits: number;
-  readonly widthEntries: number;
-  readonly widthUnits: number;
-}
-
-const defaultOutputCacheLimits: OutputCacheLimits = {
-  styledEntries: 2_048,
-  styledUnits: 65_536,
-  widthEntries: 4_096,
-  widthUnits: 262_144,
-};
-
-class BoundedLruCache<Value> {
-  private readonly values = new Map<string, { value: Value; weight: number }>();
-  private totalWeight = 0;
-
-  constructor(
-    private readonly maxEntries: number,
-    private readonly maxWeight: number,
-    private readonly weightOf: (key: string, value: Value) => number,
-  ) {}
-
-  get(key: string): Value | undefined {
-    const cached = this.values.get(key);
-    if (cached === undefined) return undefined;
-    this.values.delete(key);
-    this.values.set(key, cached);
-    return cached.value;
-  }
-
-  set(key: string, value: Value): void {
-    const weight = this.weightOf(key, value);
-    if (this.maxEntries <= 0 || weight > this.maxWeight) return;
-
-    const previous = this.values.get(key);
-    if (previous) {
-      this.values.delete(key);
-      this.totalWeight -= previous.weight;
-    }
-    while (this.values.size >= this.maxEntries || this.totalWeight + weight > this.maxWeight) {
-      const oldestKey = this.values.keys().next().value;
-      if (oldestKey === undefined) break;
-      const oldest = this.values.get(oldestKey)!;
-      this.values.delete(oldestKey);
-      this.totalWeight -= oldest.weight;
-    }
-    this.values.set(key, { value, weight });
-    this.totalWeight += weight;
-  }
-
-  clear(): void {
-    this.values.clear();
-    this.totalWeight = 0;
-  }
-}
-
-export class OutputCaches {
-  private readonly widths: BoundedLruCache<number>;
-  private readonly styledCharsCache: BoundedLruCache<StyledChar[]>;
-  private readonly cellVisuals: BoundedLruCache<CellVisual>;
-
-  constructor(limits: Partial<OutputCacheLimits> = {}) {
-    const resolved = { ...defaultOutputCacheLimits, ...limits };
-    this.widths = new BoundedLruCache(
-      resolved.widthEntries,
-      resolved.widthUnits,
-      (text) => text.length,
-    );
-    this.styledCharsCache = new BoundedLruCache(
-      resolved.styledEntries,
-      resolved.styledUnits,
-      (line, characters) => Math.max(line.length, characters.length),
-    );
-    this.cellVisuals = new BoundedLruCache(
-      resolved.styledEntries,
-      resolved.styledUnits,
-      (key) => key.length,
-    );
-  }
-
-  getStyledChars(line: string): StyledChar[] {
-    let cached = this.styledCharsCache.get(line);
-    if (cached === undefined) {
-      cached = styledGraphemesFromAnsi(line);
-      this.styledCharsCache.set(line, cached);
-    }
-    return cached;
-  }
-
-  getStringWidth(text: string): number {
-    let cached = this.widths.get(text);
-    if (cached === undefined) {
-      cached = stringWidth(text);
-      this.widths.set(text, cached);
-    }
-    return cached;
-  }
-
-  getCellVisual(codes: readonly AnsiCode[]): CellVisual {
-    const key = codes.map(({ code }) => code).join("\0");
-    let cached = this.cellVisuals.get(key);
-    if (cached === undefined) {
-      cached = cellVisualFromAnsiCodes(codes);
-      this.cellVisuals.set(key, cached);
-    }
-    return cached;
-  }
-
-  getSliceStart(text: string, requestedStart: number): number {
-    let column = 0;
-
-    for (const character of this.getStyledChars(text)) {
-      if (column >= requestedStart) return column;
-      column += Math.max(1, this.getStringWidth(character.value));
-    }
-
-    return column;
-  }
-
-  clear(): void {
-    this.widths.clear();
-    this.styledCharsCache.clear();
-    this.cellVisuals.clear();
-  }
-}
-
-const rootOutputCaches = new WeakMap<TuiRoot, OutputCaches>();
-
-function getRootOutputCaches(root: TuiRoot): OutputCaches {
-  let caches = rootOutputCaches.get(root);
-  if (!caches) {
-    caches = new OutputCaches();
-    rootOutputCaches.set(root, caches);
-  }
-  return caches;
-}
-
-export function releasePaintCaches(root: TuiRoot): void {
-  rootOutputCaches.get(root)?.clear();
-  rootOutputCaches.delete(root);
-}
-
-class Output {
-  readonly width: number;
-  readonly height: number;
-  private ops: Op[] = [];
-  private readonly caches: OutputCaches;
+/**
+ * One picture's cells, written by index and materialized once the frame's width
+ * is known. Nothing here survives the call that built it.
+ */
+class CellGrid {
+  private readonly height: number;
+  private readonly rows: (Cell | undefined)[][];
+  private readonly clips: ClipRect[] = [];
   private readonly hardClip: ClipRect | undefined;
+  private readonly boundedWidth: number;
+  private columns: number;
 
-  constructor(width: number, height: number, clipToBounds = false, caches = new OutputCaches()) {
+  constructor(width: number, height: number, clipToBounds = false) {
     assertPaintSurfaceSize(width, height);
-    this.width = width;
     this.height = height;
+    this.boundedWidth = width;
+    this.columns = width;
     this.hardClip = clipToBounds ? { x1: 0, x2: width, y1: 0, y2: height } : undefined;
-    this.caches = caches;
-  }
-
-  write(x: number, y: number, lines: string[]): void {
-    this.ops.push({ type: "write", x, y, lines });
+    this.rows = Array.from({ length: height }, () => []);
   }
 
   clip(rect: ClipRect): void {
-    this.ops.push({ type: "clip", clip: rect });
+    this.clips.push(rect);
   }
 
   unclip(): void {
-    this.ops.push({ type: "unclip" });
+    this.clips.pop();
   }
 
-  get(): Frame {
-    const frameWidth = this.frameWidth();
-    assertPaintSurfaceSize(frameWidth, this.height);
-    const frame = new Frame(frameWidth, this.height);
+  write(x: number, y: number, rows: readonly CellRow[]): void {
+    // Every overflow boundary remains authoritative. Intersect the complete
+    // ancestor stack so a larger nested overflow box cannot reopen cells that
+    // its narrower ancestor already excluded. The viewport is one additional
+    // hard boundary over the same accumulated clip.
+    const stackedClip = this.clips.reduce<ClipRect | undefined>(
+      (current, next) => intersectClipRects(current, next),
+      undefined,
+    );
+    const clip = this.hardClip ? intersectClipRects(stackedClip, this.hardClip) : stackedClip;
 
-    const clips: ClipRect[] = [];
+    let lines = rows;
+    let top = y;
+    if (clip && typeof clip.y1 === "number" && typeof clip.y2 === "number") {
+      if (top + lines.length < clip.y1 || top > clip.y2) return;
+      const from = top < clip.y1 ? clip.y1 - top : 0;
+      const to = top + lines.length > clip.y2 ? clip.y2 - top : lines.length;
+      lines = lines.slice(from, to);
+      if (top < clip.y1) top = clip.y1;
+    }
 
-    for (const op of this.ops) {
-      if (op.type === "clip") {
-        clips.push(op.clip);
-        continue;
-      }
-      if (op.type === "unclip") {
-        clips.pop();
-        continue;
-      }
+    const clipH =
+      clip && typeof clip.x1 === "number" && typeof clip.x2 === "number"
+        ? { x1: clip.x1, x2: clip.x2 }
+        : null;
 
-      // op.type === "write"
-      let { x, y } = op;
-      let lines = op.lines;
+    // Safe early skip: entire write starts strictly PAST the right clip edge.
+    // This must be strict `>` (not `>=`). The inner per-line clip below already
+    // uses strict `>`, so x === clip.x2 clips to an empty write normally.
+    if (clipH && x > clipH.x2) return;
 
-      // Every overflow boundary remains authoritative. Intersect the complete
-      // ancestor stack so a larger nested overflow box cannot reopen cells that
-      // its narrower ancestor already excluded. The viewport is one additional
-      // hard boundary over the same accumulated clip.
-      const stackedClip = clips.reduce<ClipRect | undefined>(
-        (current, next) => intersectClipRects(current, next),
-        undefined,
-      );
-      const clip = this.hardClip ? intersectClipRects(stackedClip, this.hardClip) : stackedClip;
+    let offsetY = 0;
+    for (const line of lines) {
+      const row = top + offsetY;
 
-      if (clip) {
-        const clipV = typeof clip.y1 === "number" && typeof clip.y2 === "number";
+      // A row can fall outside the picture when text is taller than the
+      // computed layout. `offsetY` deliberately does not advance here: a write
+      // that begins above the surface keeps every later row on that same
+      // out-of-range index rather than sliding up into view.
+      if (row < 0 || row >= this.height) continue;
 
-        // Vertical early skip
-        if (clipV) {
-          const height = lines.length;
-          if (y + height < clip.y1! || y > clip.y2!) continue;
-        }
-
-        // Vertical clip
-        if (clipV) {
-          const from = y < clip.y1! ? clip.y1! - y : 0;
-          const height = lines.length;
-          const to = y + height > clip.y2! ? clip.y2! - y : height;
-          lines = lines.slice(from, to);
-          if (y < clip.y1!) y = clip.y1!;
-        }
-      }
-
-      const clipH =
-        clip && typeof clip.x1 === "number" && typeof clip.x2 === "number"
-          ? { x1: clip.x1, x2: clip.x2 }
-          : null;
-
-      // Safe early skip: entire write starts strictly PAST the right clip edge.
-      // This must be strict `>` (not `>=`). The inner per-line clip below already
-      // uses strict `>`, so x === clip.x2 clips to an empty write normally.
-      if (clipH && x > clipH.x2) continue;
-
-      let offsetY = 0;
-
-      for (let line of lines) {
-        // Every write operation is already split into structural rows. Remove
-        // C0/DEL and unsafe terminal controls before width calculation or
-        // clipping so the measured grid and emitted bytes stay identical.
-        line = sanitizeAnsi(line, { singleLine: true });
-        const row = y + offsetY;
-
-        // Line can be outside the pre-initialized picture if text is taller
-        // than the computed layout. Keep the frame size fixed for this pass.
-        if (row < 0 || row >= frame.height) {
-          continue;
-        }
-
-        let lineX = x;
-        if (clipH) {
-          const lineWidth = this.caches.getStringWidth(line);
-          // Skip line entirely if outside horizontal clip
-          if (lineX + lineWidth < clipH.x1 || lineX > clipH.x2) {
-            offsetY++;
-            continue;
-          }
-          const from = lineX < clipH.x1 ? clipH.x1 - lineX : 0;
-          const to = lineX + lineWidth > clipH.x2 ? clipH.x2 - lineX : lineWidth;
-          // slice-ansi drops a grapheme whole when the requested left edge lands
-          // inside it. Keep the first retained grapheme at its original surface
-          // column instead of reflowing it left over the dropped cells. For
-          // example, "中x" written at x=-1 drops "中" but keeps "x" at x=1,
-          // leaving x=0 blank.
-          if (lineX < clipH.x1) lineX += this.caches.getSliceStart(line, from);
-          const maxWidth = clipH.x2 - lineX;
-          if (from > 0 || to < lineWidth) {
-            const sliced = sliceAnsiPreservingIntensity(line, from, to);
-            line = safeSliceEnd(sliced, maxWidth);
-          }
-        }
-
-        const characters = this.caches.getStyledChars(line);
-        let offsetX = lineX;
-
-        // Nothing to write (e.g. line was clipped away)
-        if (characters.length === 0) {
+      let cells = line;
+      let lineX = x;
+      if (clipH) {
+        const displayedWidth = displayedColumns(cells);
+        if (lineX + displayedWidth < clipH.x1 || lineX > clipH.x2) {
           offsetY++;
           continue;
         }
-
-        // Wide characters (e.g. CJK) occupy two cells: a leading cell with
-        // the character and a trailing placeholder with an empty grapheme. When an
-        // overlapping write lands in the middle of a wide character, the
-        // boundary cells need cleanup so the terminal never renders a
-        // half-visible wide character.
-        const currentCell = this.cellAt(frame, offsetX, row);
-        if (
-          currentCell?.grapheme === "" &&
-          offsetX > 0 &&
-          this.caches.getStringWidth(this.cellAt(frame, offsetX - 1, row)?.grapheme ?? "") > 1
-        ) {
-          this.setCell(frame, offsetX - 1, row, blankCell);
-        }
-
-        // Normal relative output has no x-bounds check here. A wide character
-        // whose leading cell is in bounds but whose trailing cell exceeds the
-        // width still renders its leading cell and overflows the row; the
-        // past-width placeholder remains outside this row's original width,
-        // while the Frame expands only enough to retain the leading glyph.
-        // A whole-glyph width guard would drop the character, including its valid
-        // leading cell, when only its trailing cell exceeds the edge. Box-level
-        // overflow:hidden clipping is handled separately above (the clipH sliceAnsi
-        // path); this loop must not re-implement a second, glyph-truncating clip.
-        // The one exception is the explicit fullscreen hard boundary below: a
-        // glyph beyond the addressable viewport would make the terminal wrap.
-        for (const character of characters) {
-          const characterWidth = Math.max(1, this.caches.getStringWidth(character.value));
-
-          // A transformer runs after the line-level clip and may expand the
-          // text again. A wide glyph may also straddle the final cell. Keep the
-          // viewport as a hard cell boundary in both cases so the terminal
-          // cannot auto-wrap an extra glyph and scroll the fullscreen surface.
-          if (this.hardClip && (offsetX < 0 || offsetX + characterWidth > this.width)) {
-            offsetX += characterWidth;
-            continue;
+        const from = lineX < clipH.x1 ? clipH.x1 - lineX : 0;
+        const to = lineX + displayedWidth > clipH.x2 ? clipH.x2 - lineX : displayedWidth;
+        if (from > 0 || to < displayedWidth) {
+          // A grapheme the left edge lands inside is dropped whole, and the
+          // first retained one keeps its original surface column instead of
+          // reflowing left over the dropped cells. For example, "中x" written
+          // at x=-1 drops "中" but keeps "x" at x=1, leaving x=0 blank.
+          let column = 0;
+          let first = 0;
+          while (first < cells.length && column < from) {
+            column += gridColumns(cells[first]!);
+            first++;
           }
-
-          const cell = this.cellFromStyledCharacter(character, characterWidth);
-          this.setCell(frame, offsetX, row, cell);
-
-          if (characterWidth > 1) {
-            for (let i = 1; i < characterWidth; i++) {
-              this.setCell(frame, offsetX + i, row, {
-                grapheme: "",
-                width: 0,
-                style: cell.style,
-                link: cell.link,
-              });
-            }
+          const start = column;
+          let last = first;
+          while (last < cells.length && column < to) {
+            column += gridColumns(cells[last]!);
+            last++;
           }
-
-          offsetX += characterWidth;
+          lineX += start;
+          cells = fittingCells(cells.slice(first, last), clipH.x2 - lineX);
         }
-
-        if (this.cellAt(frame, offsetX, row)?.grapheme === "") {
-          this.setCell(frame, offsetX, row, blankCell);
-        }
-
-        offsetY++;
       }
-    }
 
+      this.blit(cells, lineX, row);
+      offsetY++;
+    }
+  }
+
+  toFrame(): Frame {
+    const frameWidth = Math.max(1, this.hardClip ? this.boundedWidth : this.columns);
+    assertPaintSurfaceSize(frameWidth, this.height);
+    const frame = new Frame(frameWidth, this.height);
+    for (let row = 0; row < this.height; row++) {
+      this.rows[row]!.forEach((cell, column) => {
+        if (cell !== undefined && column < frameWidth) frame.set(column, row, cell);
+      });
+    }
     return frame;
   }
 
-  private frameWidth(): number {
-    if (this.hardClip) return this.width;
-    let width = this.width;
-    const clips: ClipRect[] = [];
+  private blit(cells: CellRow, lineX: number, row: number): void {
+    // Nothing to write (e.g. the line was clipped away).
+    if (cells.length === 0) return;
 
-    for (const op of this.ops) {
-      if (op.type === "clip") {
-        clips.push(op.clip);
-        continue;
-      }
-      if (op.type === "unclip") {
-        clips.pop();
-        continue;
-      }
+    let offsetX = lineX;
 
-      const stackedClip = clips.reduce<ClipRect | undefined>(
-        (current, next) => intersectClipRects(current, next),
-        undefined,
-      );
-      const clipH =
-        stackedClip && typeof stackedClip.x1 === "number" && typeof stackedClip.x2 === "number"
-          ? { x1: stackedClip.x1, x2: stackedClip.x2 }
-          : undefined;
-      const clipV =
-        stackedClip && typeof stackedClip.y1 === "number" && typeof stackedClip.y2 === "number"
-          ? { y1: stackedClip.y1, y2: stackedClip.y2 }
-          : undefined;
-
-      if (clipH && op.x > clipH.x2) continue;
-      for (let offset = 0; offset < op.lines.length; offset++) {
-        const row = op.y + offset;
-        if (row < 0 || row >= this.height) continue;
-        if (clipV && (row < clipV.y1 || row >= clipV.y2)) continue;
-
-        const rawLine = op.lines[offset]!;
-        const line = sanitizeAnsi(rawLine, { singleLine: true });
-        const lineWidth = this.caches
-          .getStyledChars(line)
-          .reduce(
-            (total, character) => total + Math.max(1, this.caches.getStringWidth(character.value)),
-            0,
-          );
-        if (clipH && op.x + lineWidth < clipH.x1) continue;
-        const rightEdge = clipH ? Math.min(op.x + lineWidth, clipH.x2) : op.x + lineWidth;
-        width = Math.max(width, Math.ceil(rightEdge));
-      }
+    // Wide characters (e.g. CJK) occupy two cells: a leading cell with the
+    // character and a trailing placeholder with an empty grapheme. When an
+    // overlapping write lands in the middle of a wide character, the boundary
+    // cells need cleanup so the terminal never renders a half-visible wide
+    // character.
+    if (
+      this.cellAt(offsetX, row)?.grapheme === "" &&
+      offsetX > 0 &&
+      (this.cellAt(offsetX - 1, row)?.width ?? 0) > 1
+    ) {
+      this.setCell(offsetX - 1, row, blankCell);
     }
-    return Math.max(1, width);
+
+    // Normal relative output has no x-bounds check here. A wide character whose
+    // leading cell is in bounds but whose trailing cell exceeds the width still
+    // renders its leading cell and overflows the row. A whole-glyph width guard
+    // would drop the character, including its valid leading cell, when only its
+    // trailing cell exceeds the edge. Box-level overflow:hidden clipping is
+    // handled in `write`; this loop must not re-implement a second,
+    // glyph-truncating clip. The one exception is the explicit fullscreen hard
+    // boundary below: a glyph beyond the addressable viewport would make the
+    // terminal wrap.
+    for (const cell of cells) {
+      const cellWidth = gridColumns(cell);
+
+      // A wide glyph may straddle the final cell. Keep the viewport as a hard
+      // cell boundary so the terminal cannot auto-wrap an extra glyph and
+      // scroll the fullscreen surface.
+      if (this.hardClip && (offsetX < 0 || offsetX + cellWidth > this.boundedWidth)) {
+        offsetX += cellWidth;
+        continue;
+      }
+
+      // A grapheme that displays nothing owns its cell in the grid, and the
+      // encoder reads a zero width as the trailing half of a wide cell, so it
+      // enters the frame claiming the one column it was given.
+      this.setCell(offsetX, row, cell.width === 0 ? { ...cell, width: 1 } : cell);
+      for (let index = 1; index < cellWidth; index++) {
+        this.setCell(offsetX + index, row, {
+          grapheme: "",
+          width: 0,
+          style: cell.style,
+          link: cell.link,
+        });
+      }
+      offsetX += cellWidth;
+    }
+
+    if (this.cellAt(offsetX, row)?.grapheme === "") {
+      this.setCell(offsetX, row, blankCell);
+    }
   }
 
-  private cellAt(frame: Frame, x: number, y: number): Cell | undefined {
-    if (x < 0 || x >= frame.width || y < 0 || y >= frame.height) return undefined;
-    return frame.get(x, y);
+  private cellAt(x: number, y: number): Cell | undefined {
+    if (x < 0) return undefined;
+    return this.rows[y]?.[x];
   }
 
-  private setCell(frame: Frame, x: number, y: number, cell: Cell): void {
-    if (x < 0 || x >= frame.width || y < 0 || y >= frame.height) return;
-    frame.set(x, y, cell);
-  }
-
-  private cellFromStyledCharacter(character: StyledChar, width: number): Cell {
-    const visual = this.caches.getCellVisual(character.styles);
-    return {
-      grapheme: character.value,
-      width,
-      style: visual.style,
-      link: visual.link,
-    };
+  private setCell(x: number, y: number, cell: Cell): void {
+    if (x < 0 || y < 0 || y >= this.height) return;
+    if (this.hardClip && x >= this.boundedWidth) return;
+    this.rows[y]![x] = cell;
+    if (x + 1 > this.columns) this.columns = x + 1;
   }
 }
 
@@ -625,12 +298,14 @@ function composeTextRuns(
   node: TuiText,
   content: TuiTextContent,
   inheritedBg: string | undefined,
-): readonly StyledChar[] {
-  const spans = content.chunks.map((chunk) => textStyleSpansForChunk(node, chunk, inheritedBg));
+): readonly Cell[] {
+  const chunkStyles = content.chunks.map((chunk) =>
+    textStyleContributionsForChunk(node, chunk, inheritedBg),
+  );
   // Content that no enclosing Text styles is already its own composition.
-  if (spans.every((list) => list.length === 0)) return content.runs;
+  if (chunkStyles.every((list) => list.length === 0)) return content.runs;
 
-  const composed: StyledChar[] = [];
+  const composed: Cell[] = [];
   const blocked = content.chunks.map((chunk) =>
     chunk.nesting.reduce((mask, nested) => mask | explicitTextStyleChannels(nested.props), 0),
   );
@@ -638,23 +313,31 @@ function composeTextRuns(
   let groupStart = 0;
   for (let index = 0; index < content.chunks.length; index++) {
     const chunk = content.chunks[index]!;
-    // One span wraps every neighbouring chunk this node styles identically, so
-    // a reset written in one of them keeps cancelling that span through the
+    // One group covers every neighbouring chunk this node styles identically, so
+    // a reset written in one of them keeps cancelling that style through the
     // rest of the group, exactly as one wrap around the joined text did.
     if (index === 0 || blocked[index] !== blocked[index - 1]) groupStart = start;
     const end = start + chunk.runs;
-    styleContentRuns(content.runs, content.reset, start, end, groupStart, spans[index]!, composed);
+    styleContentRuns(
+      content.runs,
+      content.reset,
+      start,
+      end,
+      groupStart,
+      chunkStyles[index]!,
+      composed,
+    );
     start = end;
   }
   return composed;
 }
 
-/** The spans the enclosing Text hosts open around one chunk, outermost first. */
-function textStyleSpansForChunk(
+/** The channels the enclosing Text hosts resolve around one chunk, outermost first. */
+function textStyleContributionsForChunk(
   node: TuiText,
   chunk: TuiTextChunk,
   inheritedBg: string | undefined,
-): SgrSpan[] {
+): TextStyleContribution[] {
   const levels: readonly (TuiText | TuiVirtualText)[] = [node, ...chunk.nesting];
   // Every explicit value resolves its channel for the complete subtree, so a
   // level skips the channels any level inside it sets.
@@ -665,7 +348,7 @@ function textStyleSpansForChunk(
     inner |= explicitTextStyleChannels(levels[index]!.props);
   }
 
-  const spans: SgrSpan[] = [];
+  const contributions: TextStyleContribution[] = [];
   for (let index = 0; index < levels.length; index++) {
     const props = levels[index]!.props;
     // A surrounding Box supplies only the outermost Text's base background.
@@ -674,9 +357,9 @@ function textStyleSpansForChunk(
     const ownBg = props.backgroundColor;
     const styleProps =
       index === 0 && typeof ownBg !== "string" ? { ...props, backgroundColor: inheritedBg } : props;
-    spans.push(...textStyleSpans(styleProps, blockedBelow[index]!));
+    contributions.push(...textStyleContributions(styleProps, blockedBelow[index]!));
   }
-  return spans;
+  return contributions;
 }
 
 type BoxStyle = (typeof cliBoxes)[keyof cliBoxes.Boxes];
@@ -685,8 +368,16 @@ function isBoxStyleName(style: string): style is keyof cliBoxes.Boxes {
   return Object.prototype.hasOwnProperty.call(cliBoxes, style);
 }
 
+/** The cell style one authored background color selects, ignoring what it cannot parse. */
+function backgroundStyle(color: unknown): Style {
+  const background = parseColorValue(color);
+  return background === undefined
+    ? defaultStyle
+    : { foreground: defaultColor, background, attrs: 0, extraSgr: noExtraSgr };
+}
+
 function drawBorder(
-  output: Output,
+  grid: CellGrid,
   x: number,
   y: number,
   w: number,
@@ -727,7 +418,7 @@ function drawBorder(
   const generalDim = props["borderDimColor"] as boolean | undefined;
   const borderBackgroundColor = stringProp("borderBackgroundColor");
 
-  function colorizeEdge(s: string, edge: "top" | "bottom" | "left" | "right"): string {
+  function edgeStyle(edge: "top" | "bottom" | "left" | "right"): Style {
     const capEdge = edge.charAt(0).toUpperCase() + edge.slice(1);
     const edgeColor = stringProp(`border${capEdge}Color`) ?? borderColor;
     // Use nullish coalescing (not ||) so an explicit per-edge `false` wins over
@@ -736,40 +427,40 @@ function drawBorder(
     // An edge's background comes only from the per-edge or general border
     // background, never from the Box's content backgroundColor.
     const edgeBg = stringProp(`border${capEdge}BackgroundColor`) ?? borderBackgroundColor;
-    // Border SGR nesting deliberately differs from Text: foreground is
-    // innermost, then background, with dim outermost. Routing edges through
-    // applyTextStyle would emit the channels in the wrong order for borders.
-    let styled = s;
-    const edgeForeground = colorSpan(edgeColor, false);
-    if (edgeForeground) styled = applySgrSpan(styled, edgeForeground);
-    const edgeBackground = colorSpan(edgeBg, true);
-    if (edgeBackground) styled = applySgrSpan(styled, edgeBackground);
-    if (edgeDim) styled = applySgrSpan(styled, dimSpan);
-    return styled;
+    const foreground = parseColorValue(edgeColor) ?? defaultColor;
+    const background = parseColorValue(edgeBg) ?? defaultColor;
+    const attrs = edgeDim ? StyleAttribute.dim : 0;
+    return foreground === defaultColor && background === defaultColor && attrs === 0
+      ? defaultStyle
+      : { foreground, background, attrs, extraSgr: noExtraSgr };
   }
 
   if (top) {
-    const tl = left ? chars.topLeft : chars.top;
-    const tr = right ? chars.topRight : chars.top;
-    const fill = Math.max(0, w - stringWidth(tl) - stringWidth(tr));
-    const raw = tl + chars.top.repeat(fill) + tr;
-    output.write(x, y, [colorizeEdge(safeSliceEnd(raw, w), "top")]);
+    const style = edgeStyle("top");
+    const tl = cellsFromPlainText(left ? chars.topLeft : chars.top, style);
+    const tr = cellsFromPlainText(right ? chars.topRight : chars.top, style);
+    const fill = Math.max(0, w - displayedColumns(tl) - displayedColumns(tr));
+    const row = [...tl, ...cellsFromPlainText(chars.top.repeat(fill), style), ...tr];
+    grid.write(x, y, [fittingCells(row, w)]);
   }
   if (bottom) {
-    const bl = left ? chars.bottomLeft : chars.bottom;
-    const br = right ? chars.bottomRight : chars.bottom;
-    const fill = Math.max(0, w - stringWidth(bl) - stringWidth(br));
-    const raw = bl + chars.bottom.repeat(fill) + br;
-    output.write(x, y + h - 1, [colorizeEdge(safeSliceEnd(raw, w), "bottom")]);
+    const style = edgeStyle("bottom");
+    const bl = cellsFromPlainText(left ? chars.bottomLeft : chars.bottom, style);
+    const br = cellsFromPlainText(right ? chars.bottomRight : chars.bottom, style);
+    const fill = Math.max(0, w - displayedColumns(bl) - displayedColumns(br));
+    const row = [...bl, ...cellsFromPlainText(chars.bottom.repeat(fill), style), ...br];
+    grid.write(x, y + h - 1, [fittingCells(row, w)]);
   }
 
   // Vertical sides begin below a visible top edge, or at row zero when the top
   // edge is absent. Their run length excludes whichever horizontal edges exist.
   const offsetY = top ? 1 : 0;
   const verticalRun = Math.max(0, h - (top ? 1 : 0) - (bottom ? 1 : 0));
+  const leftRow = left ? cellsFromPlainText(chars.left, edgeStyle("left")) : undefined;
+  const rightRow = right ? cellsFromPlainText(chars.right, edgeStyle("right")) : undefined;
   for (let i = 0; i < verticalRun; i++) {
-    if (left) output.write(x, y + offsetY + i, [colorizeEdge(chars.left, "left")]);
-    if (right) output.write(x + w - 1, y + offsetY + i, [colorizeEdge(chars.right, "right")]);
+    if (leftRow) grid.write(x, y + offsetY + i, [leftRow]);
+    if (rightRow) grid.write(x + w - 1, y + offsetY + i, [rightRow]);
   }
 }
 
@@ -791,8 +482,17 @@ function getBoxContentMetrics(
   };
 }
 
+function spaceCells(count: number, style: Style): Cell[] {
+  return Array.from({ length: count }, () => ({
+    grapheme: " ",
+    width: 1,
+    style,
+    link: undefined,
+  }));
+}
+
 function fillBackground(
-  output: Output,
+  grid: CellGrid,
   x: number,
   y: number,
   w: number,
@@ -804,27 +504,31 @@ function fillBackground(
   const height = Math.max(0, Math.floor(h));
   if (width === 0 || height === 0) return;
 
-  const line = applyTextStyle(" ".repeat(width), { backgroundColor: color });
-  for (let i = 0; i < height; i++) output.write(x, y + i, [line]);
+  const row = spaceCells(width, backgroundStyle(color));
+  for (let i = 0; i < height; i++) grid.write(x, y + i, [row]);
 }
 
 function alignTextLine(
-  line: string,
+  cells: CellRow,
   width: number,
   textAlign: NonNullable<TextProps["textAlign"]>,
   inheritedBg: string | undefined,
-): string {
-  const remaining = Math.max(0, width - stringWidth(line));
+): CellRow {
+  // Left-aligned text with no background behind it pads nothing, so the line
+  // never has to be measured.
+  if (textAlign === "left" && !inheritedBg) return cells;
+
+  const remaining = Math.max(0, width - displayedColumns(cells));
   const leading =
     textAlign === "right" ? remaining : textAlign === "center" ? Math.floor(remaining / 2) : 0;
   const trailing = remaining - leading;
 
-  if (!inheritedBg) return " ".repeat(leading) + line;
+  if (!inheritedBg) {
+    return leading === 0 ? cells : [...spaceCells(leading, defaultStyle), ...cells];
+  }
 
-  const padProps: TextProps = { backgroundColor: inheritedBg };
-  const pad = (columns: number): string =>
-    columns === 0 ? "" : applyTextStyle(" ".repeat(columns), padProps);
-  return pad(leading) + line + pad(trailing);
+  const padStyle = backgroundStyle(inheritedBg);
+  return [...spaceCells(leading, padStyle), ...cells, ...spaceCells(trailing, padStyle)];
 }
 
 /** Style the node's runs, split them over the measured lines, and align each. */
@@ -834,7 +538,7 @@ function paintedTextLines(
   inheritedBg: string | undefined,
   wrapWidth: number,
   wrappedLines: readonly string[],
-): string[] {
+): CellRow[] {
   const composed = composeTextRuns(node, content, inheritedBg);
   return styleMeasuredTextLines(composed, wrappedLines, node.props.wrap ?? "wrap", wrapWidth).map(
     (line) => alignTextLine(line, wrapWidth, node.props.textAlign ?? "left", inheritedBg),
@@ -900,16 +604,16 @@ export function paint(root: TuiNode, options: PaintOptions): Frame {
   if (!rootLayout) throw new Error("paint requires the root ComputedLayout");
   const width = Math.max(1, Math.floor(options.viewport?.width ?? rootLayout.rect.width));
   const height = Math.max(1, Math.floor(options.viewport?.height ?? rootLayout.rect.height));
-  const out = new Output(width, height, options.viewport !== undefined, getRootOutputCaches(root));
+  const grid = new CellGrid(width, height, options.viewport !== undefined);
   const viewportClip = options.viewport ? { x: 0, y: 0, width, height } : undefined;
-  paintNode(root, options.layout, out, 0, 0, undefined, viewportClip, options.geometry);
-  return out.get();
+  paintNode(root, options.layout, grid, 0, 0, undefined, viewportClip, options.geometry);
+  return grid.toFrame();
 }
 
 function paintNode(
   node: TuiNode,
   computedLayout: ComputedLayout,
-  output: Output,
+  grid: CellGrid,
   x0: number,
   y0: number,
   inheritedBg?: string,
@@ -934,7 +638,7 @@ function paintNode(
   switch (node.type) {
     case "root": {
       for (const child of node.children) {
-        paintNode(child, computedLayout, output, x0, y0, undefined, clip, geometry);
+        paintNode(child, computedLayout, grid, x0, y0, undefined, clip, geometry);
       }
       return;
     }
@@ -953,7 +657,7 @@ function paintNode(
       const ownBg = typeof rawBg === "string" ? rawBg : undefined;
       const childBg = ownBg ? ownBg : inheritedBg;
       if (node.props["borderStyle"]) {
-        drawBorder(output, x, y, w, h, node.props);
+        drawBorder(grid, x, y, w, h, node.props);
       }
       if (ownBg) {
         const hasBorder = !!node.props["borderStyle"];
@@ -961,7 +665,7 @@ function paintNode(
         const bb = hasBorder && node.props["borderBottom"] !== false ? 1 : 0;
         const bl = hasBorder && node.props["borderLeft"] !== false ? 1 : 0;
         const br = hasBorder && node.props["borderRight"] !== false ? 1 : 0;
-        fillBackground(output, x + bl, y + bt, w - bl - br, h - bt - bb, ownBg);
+        fillBackground(grid, x + bl, y + bt, w - bl - br, h - bt - bb, ownBg);
       }
 
       // Overflow clipping limits children to the box content area (inside
@@ -972,13 +676,13 @@ function paintNode(
       const overflowX = (node.props["overflowX"] as string | undefined) ?? overflow ?? "visible";
       const overflowY = (node.props["overflowY"] as string | undefined) ?? overflow ?? "visible";
       // Axis-specific values override the broad shorthand. Active ancestor
-      // clips remain on Output's stack, so a visible inner axis cannot reopen
+      // clips remain on the grid's stack, so a visible inner axis cannot reopen
       // a region hidden by an outer Box.
       const clipH = overflowX === "hidden";
       const clipV = overflowY === "hidden";
       const { left: bl, right: br, top: bt, bottom: bb } = computed.border;
       if (clipH || clipV) {
-        output.clip({
+        grid.clip({
           x1: clipH ? x + bl : undefined,
           x2: clipH ? x + w - br : undefined,
           y1: clipV ? y + bt : undefined,
@@ -1007,20 +711,20 @@ function paintNode(
       if (contentMetrics.width === 0 || contentMetrics.height === 0) {
         for (const child of node.children) {
           if (computedLayout.get(child)?.isAbsolute) {
-            paintNode(child, computedLayout, output, x, y, childBg, childClip, geometry);
+            paintNode(child, computedLayout, grid, x, y, childBg, childClip, geometry);
           } else {
             recordZeroContentGeometry(child, computedLayout, geometry);
           }
         }
-        if (clipped) output.unclip();
+        if (clipped) grid.unclip();
         return;
       }
 
       for (const child of node.children) {
-        paintNode(child, computedLayout, output, x, y, childBg, childClip, geometry);
+        paintNode(child, computedLayout, grid, x, y, childBg, childClip, geometry);
       }
 
-      if (clipped) output.unclip();
+      if (clipped) grid.unclip();
       return;
     }
     case "tui-text": {
@@ -1033,12 +737,12 @@ function paintNode(
       const top = Math.floor(computed.rect.top);
       const y = y0 + top;
       // This span is only an early-clip bound. Text geometry can retain a
-      // positive fractional height, so round outward here; Output remains the
+      // positive fractional height, so round outward here; the grid remains the
       // authority for clipping the actual rows written below.
       const h = Math.max(0, Math.ceil(computed.rect.height));
       // A Text entirely above or below an authoritative clip cannot affect the
-      // output grid. Skip composition and write-op allocation as well. Limit
-      // this to Text: a clipped Box may still contain an absolutely positioned or
+      // output grid. Skip composition and cell allocation as well. Limit this to
+      // Text: a clipped Box may still contain an absolutely positioned or
       // overflow-visible descendant that re-enters the viewport.
       if (clip && (y + h <= clip.y || y >= clip.y + clip.height)) {
         return;
@@ -1046,7 +750,7 @@ function paintNode(
       // Thread the INHERITED Box bg (NOT a pre-computed effective bg) into the
       // composition. The Text's own backgroundColor — including an explicit ""
       // opt-out — is resolved against this inherited bg while the enclosing
-      // spans are collected, alongside its boolean styles.
+      // levels are collected, alongside its boolean styles.
       // Layout already chose the whole-cell budget and every physical line.
       // Paint only applies terminal styles and alignment to that immutable plan;
       // re-wrapping here would let a second budget diverge from Yoga's measure.
@@ -1058,20 +762,22 @@ function paintNode(
       // Empty text has no cells to write.
       if (!content || content.text === "") return;
       const { wrapWidth, wrappedLines } = textLayout;
-      const wrapped = paintedTextLines(node, content, inheritedBg, wrapWidth, wrappedLines);
       // Pad each line to the cell width with the INHERITED Box background only —
       // this fills the space behind the text with the Box's bg (the Box also fills
       // it via fillBackground), and is the reason a Box bg pads to full width while
       // a text-only bg does not. The padding uses `inheritedBg`, NOT the effective
       // bg: a Text that overrides or opts out (backgroundColor / "") only recolors
-      // its OWN glyphs, never the surrounding Box fill. The already-rendered glyphs
-      // in `wrapped[i]` keep their effective bg, so a `backgroundColor=""` Text
-      // stays bare even though we pad the trailing cells with the inherited bg.
-      // Pad to wrapWidth (not a ≥1-clamped width): at width 0 there is nothing to
-      // pad. Clamping to 1 here would
-      // bg-pad the empty leading wrap line "" into a stray 1-cell fill that
-      // collides with a row-sibling at the 0-width box origin.
-      output.write(x0 + left, y0 + top, wrapped);
+      // its OWN glyphs, never the surrounding Box fill. The already-styled cells
+      // keep their effective bg, so a `backgroundColor=""` Text stays bare even
+      // though we pad the trailing cells with the inherited bg.
+      // Pad to wrapWidth (not a >=1-clamped width): at width 0 there is nothing to
+      // pad. Clamping to 1 here would bg-pad the empty leading wrap line into a
+      // stray 1-cell fill that collides with a row-sibling at the 0-width box origin.
+      grid.write(
+        x0 + left,
+        y0 + top,
+        paintedTextLines(node, content, inheritedBg, wrapWidth, wrappedLines),
+      );
       return;
     }
     case "tui-static": {
@@ -1096,9 +802,9 @@ export function paintContainer(container: TuiContainer, layout: ComputedLayout):
 }
 
 export function paintStaticLayout(region: StaticLayoutRegion, layout: ComputedLayout): Frame {
-  const out = new Output(region.width, region.height);
+  const grid = new CellGrid(region.width, region.height);
   for (const child of region.children) {
-    paintNode(child, layout, out, region.offsetX, region.offsetY);
+    paintNode(child, layout, grid, region.offsetX, region.offsetY);
   }
-  return out.get();
+  return grid.toFrame();
 }
