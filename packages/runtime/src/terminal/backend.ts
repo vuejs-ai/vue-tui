@@ -92,7 +92,12 @@ export interface TerminalBackend {
   acquire<Mode extends TerminalMode>(mode: Mode): TerminalLease<Mode>;
   /** Whether the device is known to carry this mode now. */
   isModeActive(mode: TerminalMode): boolean;
-  /** Whether the device matches this mode's holders, with nothing outstanding. */
+  /**
+   * Whether this mode has no transition left to make: the state it will carry
+   * once every captured write has been handed off already matches its holders.
+   * A write still queued counts as its target, so this can be true before the
+   * device has taken the switch.
+   */
   isModeSettled(mode: TerminalMode): boolean;
   /** Install the gate mode writes travel through while a session owns output. */
   attachModeWrites(write: TerminalModeWrite | null): void;
