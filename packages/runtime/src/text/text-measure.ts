@@ -641,10 +641,19 @@ function ellipsisCell(style: Style): Cell {
  *   budget of zero, which the rule below would otherwise empty;
  * - a budget under 1 keeps nothing, and a budget of exactly 1 is the bare
  *   ellipsis carrying no style at all, whatever the line held;
- * - `end` keeps what fits in `width - 1` columns from the left, `start` the same
- *   from the right, and `middle` keeps `floor(width / 2)` columns from the left
- *   and the rest from the right. A grapheme a cut would split is dropped whole,
- *   so a line of wide graphemes can come back narrower than the budget;
+ * - the budget buys slots, the unit {@link sliceCells} walks, where every
+ *   grapheme claims `max(1, width)` of them: `end` keeps the graphemes inside
+ *   the first `width - 1` slots, `start` those inside the `width - 1` slots
+ *   ending at the line's column total, and `middle` splits the budget, keeping
+ *   `floor(width / 2)` slots from the left and the rest at that same end. A
+ *   grapheme a cut would split is dropped whole, so a line of wide graphemes can
+ *   come back narrower than the budget. The right-hand window ends at the
+ *   columns the line displays rather than at the slots it occupies, so each
+ *   zero-width grapheme in the line moves that window one slot to the left:
+ *   `truncate-start` over `"ab\u200bcdef"` in four columns keeps `"…cde"`, not
+ *   `"…def"`. That is the arithmetic `0b781b41` performed through `cli-truncate`
+ *   and `slice-ansi`, which walked this same slot model, and the truncation
+ *   suite pins it;
  * - the ellipsis inherits the complete style of the retained grapheme it
  *   touches — the last one for `end`, the first one for `start` — including a
  *   colon-form sequence Runtime carries as an exact pair. In `middle` it

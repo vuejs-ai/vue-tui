@@ -181,16 +181,82 @@ test("the ellipsis inherits a colon-form sequence like any other style", () => {
   expect(line("truncate-middle")).toBe(`${ESC}[4:3mab${ESC}[24m…${ESC}[4:3mf${ESC}[24m`);
 });
 
+// What a grapheme costs the budget. Runtime measures every grapheme with
+// `string-width` and gives it `max(1, width)` slots, so a zero-width grapheme
+// spends no column of the budget while still holding a slot of its own, and a
+// wide one spends two. Every byte below is `0b781b41`'s too, except the
+// variation-selector cases: `string-width` reads `"a\ufe0f"` as the one column
+// its base displays, while the string round trip `0b781b41` truncated with took
+// the width from `@alcalzone/ansi-tokenize`, which calls any cluster holding
+// U+FE0F full-width — so `0b781b41` renders `"a\ufe0f…"` for the first case.
+//
+// The invisible characters are written as escapes: a literal one in a source
+// string cannot be read, and every expectation here turns on exactly which one
+// is present.
+
+const VS16 = "\ufe0f";
+const ZWSP = "\u200b";
+const SOFT_HYPHEN = "\u00ad";
+const COMBINING_ACUTE = "\u0301";
+const ZWJ = "\u200d";
+const IDEOGRAPHIC_SPACE = "\u3000";
+const FAMILY = `\u{1f468}${ZWJ}\u{1f469}${ZWJ}\u{1f467}${ZWJ}\u{1f466}`;
+
+const truncatedText = (
+  width: number,
+  wrap: "truncate" | "truncate-start" | "truncate-middle",
+  text: string,
+): string =>
+  truncated(width, () => (
+    <Box width={width}>
+      <Text wrap={wrap}>{text}</Text>
+    </Box>
+  ));
+
+test("a variation selector after a non-emoji base spends no column", () => {
+  expect(truncatedText(4, "truncate", `a${VS16}bcde`)).toBe(`a${VS16}bc…`);
+  expect(truncatedText(4, "truncate-start", `abcde${VS16}f`)).toBe(`…de${VS16}f`);
+  expect(truncatedText(4, "truncate-middle", `a${VS16}bcdef`)).toBe(`a${VS16}b…f`);
+});
+
+// The right-hand windows end at the columns the line displays, not at the slots
+// it occupies, so a zero-width grapheme anywhere in the line shifts them one
+// slot to the left: the `truncate-start` case below keeps `cde`, not `def`.
+test("a zero-width grapheme spends no column but holds a slot", () => {
+  expect(truncatedText(4, "truncate", `ab${ZWSP}cdef`)).toBe("ab…");
+  expect(truncatedText(4, "truncate-start", `ab${ZWSP}cdef`)).toBe("…cde");
+  expect(truncatedText(5, "truncate-middle", `ab${ZWSP}cdefgh`)).toBe("ab…fg");
+  expect(truncatedText(4, "truncate", `ab${SOFT_HYPHEN}cdef`)).toBe("ab…");
+});
+
+test("a combining mark is cut with the base it marks", () => {
+  const marked = `abc${COMBINING_ACUTE}def`;
+
+  expect(truncatedText(4, "truncate", marked)).toBe(`abc${COMBINING_ACUTE}…`);
+  expect(truncatedText(4, "truncate-start", marked)).toBe("…def");
+  expect(truncatedText(5, "truncate-middle", `abc${COMBINING_ACUTE}defgh`)).toBe("ab…gh");
+});
+
+test("a ZWJ emoji sequence is cut whole, at the two columns it displays", () => {
+  expect(truncatedText(5, "truncate", `${FAMILY}abcdefgh`)).toBe(`${FAMILY}ab…`);
+  expect(truncatedText(5, "truncate-start", `abcdefgh${FAMILY}`)).toBe(`…gh${FAMILY}`);
+  expect(truncatedText(6, "truncate-middle", `ab${FAMILY}cdefgh`)).toBe("ab…gh");
+});
+
+test("a CJK glyph and an ideographic space each spend two columns", () => {
+  expect(truncatedText(5, "truncate", "中文中文中文")).toBe("中文…");
+  expect(truncatedText(5, "truncate-start", "中文中文中文")).toBe("…中文");
+  expect(truncatedText(6, "truncate", `ab${IDEOGRAPHIC_SPACE}cdefgh`)).toBe(
+    `ab${IDEOGRAPHIC_SPACE}c…`,
+  );
+});
+
 // A line that displays no columns at all still fits every budget, so
 // truncation leaves it alone: the modes shorten a line that is too wide, and
 // nothing here is too wide. Zero-width graphemes reach a Text through pasted
 // text, an editor's invisible characters, or a lone combining mark, and the
 // three modes must keep painting what the author wrote — with the props and the
 // hyperlink around it.
-const ZWSP = "\u200b";
-const VS16 = "\ufe0f";
-const COMBINING_ACUTE = "\u0301";
-
 test.each(["truncate", "truncate-start", "truncate-middle"] as const)(
   "%s keeps a line that displays no columns",
   (wrap) => {
