@@ -83,9 +83,22 @@ export interface TuiTextRun {
   readonly link: TuiTextRunLink | undefined;
 }
 
+/** One SGR sequence a chunk's content writes, with the pair it opens. */
+export interface TuiTextSgrToken {
+  readonly code: string;
+  readonly endCode: string;
+  /** The exact sequence written, which one pair may share with others. */
+  readonly source: string;
+}
+
 /** The runs one nested inline host contributes, in content order. */
 export interface TuiTextChunk {
   readonly runs: number;
+  /**
+   * The SGR this chunk writes, in the order it writes it: entry `k` stands
+   * between run `k - 1` and run `k`, so there is one more entry than runs.
+   */
+  readonly codes: readonly (readonly TuiTextSgrToken[])[];
   /** The nested inline hosts enclosing this chunk, outermost first. */
   readonly nesting: readonly TuiVirtualText[];
 }
@@ -98,13 +111,6 @@ export interface TuiTextContent {
   readonly text: string;
   readonly runs: readonly TuiTextRun[];
   readonly chunks: readonly TuiTextChunk[];
-  /**
-   * What the content's own SGR leaves open at each chunk boundary, one entry per
-   * chunk plus the state after the last. Composition reads them to tell a
-   * channel a chunk's own content resolved from one it inherited from the text
-   * before it.
-   */
-  readonly chunkBoundaryStyles: readonly TuiTextRunStyle[];
 }
 
 export interface TuiText extends NodeBase {

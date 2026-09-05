@@ -2,8 +2,13 @@
 // colour is carried at full fidelity; the frame encoder owns degradation to the
 // host's resolved colour level, so nothing here reads a capability.
 import ansiStyles from "ansi-styles";
-import { StyleAttribute, type Color } from "../frame/style.ts";
-import { backgroundEndCode, foregroundEndCode } from "./cell-style.ts";
+import type { Color } from "../frame/style.ts";
+import {
+  backgroundEndCode,
+  foregroundEndCode,
+  sgrCodeForColor,
+  type SgrToken,
+} from "./cell-style.ts";
 
 /** The Text prop subset that contributes visual cell style. */
 export interface TextStyleProps {
@@ -18,39 +23,36 @@ export interface TextStyleProps {
 }
 
 /**
- * One channel a Text's props resolve for its subtree.
+ * One channel a Text's props resolve for its subtree, as the two sequences that
+ * open and end it.
  *
- * `close` is the SGR sequence that ends the channel. A colour prop selecting
- * the terminal's own colour writes exactly that sequence: an actively reset
- * channel has no structured field to carry it, so the pair it opens is its own
- * close.
+ * `reopens` says whether the span repairs itself around content that would end
+ * it early: a written close is followed by a fresh open, and a hard newline
+ * closes the span before the break and opens it again after. Every styled
+ * channel does both. A colour prop set to `default` does neither: it selects
+ * the terminal's own colour by writing that channel's end sequence at each edge
+ * of the content, and a bare pair has nothing to repair.
  */
-export type TextStyleContribution =
-  | {
-      readonly kind: "foreground" | "background";
-      readonly close: string;
-      readonly color: Color;
-    }
-  | { readonly kind: "attribute"; readonly close: string; readonly attribute: number };
+export interface TextStyleContribution {
+  readonly open: SgrToken;
+  readonly close: SgrToken;
+  readonly reopens: boolean;
+}
 
 /**
- * One contribution as it stands over a stretch of content: which host's props
- * opened it, and which channels the hosts inside that one resolve for the same
- * stretch.
+ * One inline host as it stands over one chunk of content: which host it is,
+ * which channels its own props set, and the style it opens around this chunk.
  *
- * Both are identity, not style. Two neighbouring chunks continue one span only
- * when they name the same `owner` and the same `enclosed` channels — that is
- * exactly the stretch the string pipeline wrapped in one open and one close,
- * and content SGR left open at the end of the first chunk survives into the
- * second only there. `owner` is an opaque object because the hosts live in
- * `host/`, which `text/` may not import.
+ * `owner` is identity, not style, and is an opaque object because the hosts
+ * live in `host/`, which `text/` may not import. Composition reads it to tell
+ * which neighbouring chunks the same host encloses. `ownChannels` is every
+ * channel the props set, whatever they set it to, which decides where one host
+ * ends a stretch of content and the next begins.
  */
-export interface TextStyleSpan {
-  readonly contribution: TextStyleContribution;
-  /** The inline host whose props opened this span. */
+export interface TextStyleLevel {
   readonly owner: object;
-  /** The channels the hosts inside `owner` resolve for this chunk. */
-  readonly enclosed: number;
+  readonly ownChannels: number;
+  readonly contributions: readonly TextStyleContribution[];
 }
 
 const namedColorIndex = new Map<string, number>([
@@ -80,20 +82,22 @@ const namedColorIndex = new Map<string, number>([
 const rgbRegex = /^rgb\(\s?(\d+),\s?(\d+),\s?(\d+)\s?\)$/;
 const ansi256Regex = /^ansi256\(\s?(\d+)\s?\)$/;
 
-/** The colour a channel actively resets to the terminal's own. */
-const terminalDefaultColor: Color = { kind: "default" };
+/** A pair whose written form is the sequence itself, which is every pair here. */
+function sgrToken(code: string, endCode: string): SgrToken {
+  return { code, endCode, source: code };
+}
+
+function attributeContribution(open: string, close: string): TextStyleContribution {
+  return { open: sgrToken(open, close), close: sgrToken(close, close), reopens: true };
+}
 
 const attributeContributions = {
-  dimColor: { kind: "attribute", close: "\x1b[22m", attribute: StyleAttribute.dim },
-  bold: { kind: "attribute", close: "\x1b[22m", attribute: StyleAttribute.bold },
-  italic: { kind: "attribute", close: "\x1b[23m", attribute: StyleAttribute.italic },
-  underline: { kind: "attribute", close: "\x1b[24m", attribute: StyleAttribute.underline },
-  strikethrough: {
-    kind: "attribute",
-    close: "\x1b[29m",
-    attribute: StyleAttribute.strikethrough,
-  },
-  inverse: { kind: "attribute", close: "\x1b[27m", attribute: StyleAttribute.inverse },
+  dimColor: attributeContribution("\x1b[2m", "\x1b[22m"),
+  bold: attributeContribution("\x1b[1m", "\x1b[22m"),
+  italic: attributeContribution("\x1b[3m", "\x1b[23m"),
+  underline: attributeContribution("\x1b[4m", "\x1b[24m"),
+  strikethrough: attributeContribution("\x1b[9m", "\x1b[29m"),
+  inverse: attributeContribution("\x1b[7m", "\x1b[27m"),
 } as const satisfies Record<string, TextStyleContribution>;
 
 /** `default` actively selects the terminal's own color for one channel. */
@@ -190,9 +194,10 @@ export function colorContribution(
   background: boolean,
 ): TextStyleContribution | undefined {
   if (!color) return undefined;
-  const kind = background ? "background" : "foreground";
-  const close = background ? backgroundEndCode : foregroundEndCode;
-  if (isTerminalDefaultColor(color)) return { kind, close, color: terminalDefaultColor };
+  const end = background ? backgroundEndCode : foregroundEndCode;
+  const close = sgrToken(end, end);
+  if (isTerminalDefaultColor(color)) return { open: close, close, reopens: false };
   const parsed = parseColorValue(color);
-  return parsed === undefined ? undefined : { kind, close, color: parsed };
+  if (parsed === undefined) return undefined;
+  return { open: sgrToken(sgrCodeForColor(parsed, background), end), close, reopens: true };
 }

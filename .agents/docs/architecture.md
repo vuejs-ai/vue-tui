@@ -89,10 +89,10 @@ The render and input stages, in pipeline order:
 
 Shared data and utilities, on no stage of their own:
 
-| Directory | Owns                                                                                                                  | May import |
-| --------- | --------------------------------------------------------------------------------------------------------------------- | ---------- |
-| `frame/`  | `Cell`, `Style`, `Frame`, `diff`, and the resolved colour capability. **No encoding**                                 | —          |
-| `text/`   | Measurement, wrapping, and parsing user strings (including ANSI) into styled runs, produced once per content revision | `frame/`   |
+| Directory | Owns                                                                                                                                                        | May import |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| `frame/`  | `Cell`, `Style`, `Frame`, `diff`, and the resolved colour capability. **No encoding**                                                                       | —          |
+| `text/`   | Measurement, wrapping, and parsing user strings (including ANSI) into styled runs and the sequences written around them, produced once per content revision | `frame/`   |
 
 Above both paths:
 

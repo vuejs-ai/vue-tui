@@ -5,10 +5,20 @@ import {
   TextStyleChannel,
   textStyleContributions,
 } from "../../src/text/text-style.ts";
-import { StyleAttribute } from "../../src/frame/style.ts";
 
 // Props resolve every color at full fidelity; reducing it to the host's
-// capability is the frame encoder's job, so nothing here selects a level.
+// capability is the frame encoder's job, so nothing here selects a level. A
+// contribution is the pair of sequences the channel opens and ends with, which
+// is what composition replays.
+
+const pair = (
+  code: string,
+  endCode: string,
+): { code: string; endCode: string; source: string } => ({
+  code,
+  endCode,
+  source: code,
+});
 
 test("named color resolves the ANSI 16 index it names", () => {
   expect(parseColorValue("red")).toEqual({ kind: "ansi16", index: 1 });
@@ -30,16 +40,36 @@ test("unknown color name falls back to no color", () => {
   expect(parseColorValue("not-a-real-color")).toBeUndefined();
 });
 
-test("default colors select the terminal's own color for their channel", () => {
+// The string pipeline wrote this pair directly rather than through Chalk, so
+// the span never repaired itself around a close or a hard newline.
+test("default colors write their channel's end sequence at both edges", () => {
   expect(colorContribution("default", false)).toEqual({
-    kind: "foreground",
-    close: "\x1b[39m",
-    color: { kind: "default" },
+    open: pair("\x1b[39m", "\x1b[39m"),
+    close: pair("\x1b[39m", "\x1b[39m"),
+    reopens: false,
   });
   expect(colorContribution("default", true)).toEqual({
-    kind: "background",
-    close: "\x1b[49m",
-    color: { kind: "default" },
+    open: pair("\x1b[49m", "\x1b[49m"),
+    close: pair("\x1b[49m", "\x1b[49m"),
+    reopens: false,
+  });
+});
+
+test("a color contribution opens the sequence its structured value spells", () => {
+  expect(colorContribution("#ff8800", false)).toEqual({
+    open: pair("\x1b[38;2;255;136;0m", "\x1b[39m"),
+    close: pair("\x1b[39m", "\x1b[39m"),
+    reopens: true,
+  });
+  expect(colorContribution("ansi256(194)", true)).toEqual({
+    open: pair("\x1b[48;5;194m", "\x1b[49m"),
+    close: pair("\x1b[49m", "\x1b[49m"),
+    reopens: true,
+  });
+  expect(colorContribution("blueBright", false)).toEqual({
+    open: pair("\x1b[94m", "\x1b[39m"),
+    close: pair("\x1b[39m", "\x1b[39m"),
+    reopens: true,
   });
 });
 
@@ -65,8 +95,8 @@ test("ansi(194) is not a supported form", () => {
 
 test("multiple modifiers each contribute their own attribute, outermost first", () => {
   expect(textStyleContributions({ bold: true, underline: true }, 0)).toEqual([
-    { kind: "attribute", close: "\x1b[24m", attribute: StyleAttribute.underline },
-    { kind: "attribute", close: "\x1b[22m", attribute: StyleAttribute.bold },
+    { open: pair("\x1b[4m", "\x1b[24m"), close: pair("\x1b[24m", "\x1b[24m"), reopens: true },
+    { open: pair("\x1b[1m", "\x1b[22m"), close: pair("\x1b[22m", "\x1b[22m"), reopens: true },
   ]);
 });
 
@@ -74,22 +104,22 @@ test("multiple modifiers each contribute their own attribute, outermost first", 
 // so the outermost contribution comes first.
 test("color and bold contribute in nesting order, bold outside color", () => {
   expect(textStyleContributions({ color: "red", bold: true }, 0)).toEqual([
-    { kind: "attribute", close: "\x1b[22m", attribute: StyleAttribute.bold },
-    { kind: "foreground", close: "\x1b[39m", color: { kind: "ansi16", index: 1 } },
+    { open: pair("\x1b[1m", "\x1b[22m"), close: pair("\x1b[22m", "\x1b[22m"), reopens: true },
+    { open: pair("\x1b[31m", "\x1b[39m"), close: pair("\x1b[39m", "\x1b[39m"), reopens: true },
   ]);
 });
 
 test("dim and bold are independent intensity attributes", () => {
   expect(textStyleContributions({ dimColor: true, bold: true }, 0)).toEqual([
-    { kind: "attribute", close: "\x1b[22m", attribute: StyleAttribute.bold },
-    { kind: "attribute", close: "\x1b[22m", attribute: StyleAttribute.dim },
+    { open: pair("\x1b[1m", "\x1b[22m"), close: pair("\x1b[22m", "\x1b[22m"), reopens: true },
+    { open: pair("\x1b[2m", "\x1b[22m"), close: pair("\x1b[22m", "\x1b[22m"), reopens: true },
   ]);
 });
 
 test("color and backgroundColor contribute with background outside color", () => {
   expect(textStyleContributions({ color: "red", backgroundColor: "blue" }, 0)).toEqual([
-    { kind: "background", close: "\x1b[49m", color: { kind: "ansi16", index: 4 } },
-    { kind: "foreground", close: "\x1b[39m", color: { kind: "ansi16", index: 1 } },
+    { open: pair("\x1b[44m", "\x1b[49m"), close: pair("\x1b[49m", "\x1b[49m"), reopens: true },
+    { open: pair("\x1b[31m", "\x1b[39m"), close: pair("\x1b[39m", "\x1b[39m"), reopens: true },
   ]);
 });
 

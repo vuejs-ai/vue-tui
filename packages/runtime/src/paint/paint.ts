@@ -15,7 +15,7 @@ import {
   explicitTextStyleChannels,
   parseColorValue,
   textStyleContributions,
-  type TextStyleSpan,
+  type TextStyleLevel,
 } from "../text/text-style.ts";
 import type {
   TuiNode,
@@ -298,46 +298,48 @@ function composeTextRuns(
   content: TuiTextContent,
   inheritedBg: string | undefined,
 ): readonly Cell[] {
-  const chunkSpans = content.chunks.map((chunk) =>
-    textStyleSpansForChunk(node, chunk, inheritedBg),
+  const chunkLevels = content.chunks.map((chunk) =>
+    textStyleLevelsForChunk(node, chunk, inheritedBg),
   );
   // Content that no enclosing Text styles is already its own composition.
-  if (chunkSpans.every((spans) => spans.length === 0)) return content.runs;
-  return composeContentRuns(content, chunkSpans);
+  if (chunkLevels.every((levels) => levels.every((level) => level.contributions.length === 0))) {
+    return content.runs;
+  }
+  return composeContentRuns(content, chunkLevels);
 }
 
-/** The spans the enclosing Text hosts hold open around one chunk, outermost first. */
-function textStyleSpansForChunk(
+/** The enclosing Text hosts one chunk sits inside, outermost first. */
+function textStyleLevelsForChunk(
   node: TuiText,
   chunk: TuiTextChunk,
   inheritedBg: string | undefined,
-): TextStyleSpan[] {
-  const levels: readonly (TuiText | TuiVirtualText)[] = [node, ...chunk.nesting];
+): TextStyleLevel[] {
+  const hosts: readonly (TuiText | TuiVirtualText)[] = [node, ...chunk.nesting];
   // Every explicit value resolves its channel for the complete subtree, so a
-  // level skips the channels any level inside it sets.
+  // host skips the channels any host inside it sets.
   const blockedBelow: number[] = [];
   let inner = 0;
-  for (let index = levels.length - 1; index >= 0; index--) {
+  for (let index = hosts.length - 1; index >= 0; index--) {
     blockedBelow[index] = inner;
-    inner |= explicitTextStyleChannels(levels[index]!.props);
+    inner |= explicitTextStyleChannels(hosts[index]!.props);
   }
 
-  const spans: TextStyleSpan[] = [];
-  for (let index = 0; index < levels.length; index++) {
-    const level = levels[index]!;
-    const props = level.props;
+  return hosts.map((host, index) => {
+    const props = host.props;
     // A surrounding Box supplies only the outermost Text's base background.
     // Public Text background values are strings, including the active `default`
     // reset. Unsupported raw-host values do not replace the base.
     const ownBg = props.backgroundColor;
     const styleProps =
       index === 0 && typeof ownBg !== "string" ? { ...props, backgroundColor: inheritedBg } : props;
-    const enclosed = blockedBelow[index]!;
-    for (const contribution of textStyleContributions(styleProps, enclosed)) {
-      spans.push({ contribution, owner: level, enclosed });
-    }
-  }
-  return spans;
+    return {
+      owner: host,
+      // The mask reads this host's own props: a Box background substituted
+      // above is not a value this Text set.
+      ownChannels: explicitTextStyleChannels(props),
+      contributions: textStyleContributions(styleProps, blockedBelow[index]!),
+    };
+  });
 }
 
 type BoxStyle = (typeof cliBoxes)[keyof cliBoxes.Boxes];

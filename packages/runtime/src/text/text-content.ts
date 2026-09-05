@@ -1,15 +1,12 @@
 import type { Cell } from "../frame/cell.ts";
-import {
-  defaultColor,
-  defaultStyle,
-  type Color,
-  type SgrPair,
-  type Style,
-} from "../frame/style.ts";
-import { cellsFromStyledChars } from "./cell-style.ts";
+import { cellsFromStyledChars, cellVisualFromAnsiCodes, type SgrToken } from "./cell-style.ts";
 import { sanitizeAnsiMultiline } from "./sanitize-ansi.ts";
-import { chunkBoundaryStyles, styledGraphemesFromAnsi, visibleText } from "./text-measure.ts";
-import type { TextStyleSpan } from "./text-style.ts";
+import {
+  reduceStyledCodes,
+  styledGraphemesFromTokens,
+  styledTokensFromAnsi,
+} from "./text-measure.ts";
+import type { TextStyleContribution, TextStyleLevel } from "./text-style.ts";
 
 export interface ParsedTextContent {
   /** The sanitized source text, which measurement and wrapping work on. */
@@ -18,280 +15,258 @@ export interface ParsedTextContent {
   /** Runs contributed by each source chunk, in order. */
   readonly chunkRuns: readonly number[];
   /**
-   * The content's own SGR state at each chunk boundary: entry `i` is what the
-   * content has open entering chunk `i`, and the final entry is what it leaves
-   * open at the end. Composition reads them to tell a channel a chunk's own
-   * content resolved from one it merely inherited from the text before it.
+   * The SGR each chunk writes, in the order it writes it: entry `k` stands
+   * between the chunk's run `k - 1` and its run `k`, so a chunk with `n` runs
+   * has `n + 1` entries and the last one is what it leaves behind.
    */
-  readonly chunkBoundaryStyles: readonly Style[];
+  readonly chunkCodes: readonly (readonly (readonly SgrToken[])[])[];
 }
 
 /**
- * Parse one Text node's content into styled runs.
+ * Parse one Text node's content into styled runs and the sequences around them.
  *
- * Each chunk is sanitized on its own so the runs a chunk contributes are
- * countable, then the joined text is parsed once: SGR spans opened in one chunk
- * stay active over the ones that follow.
+ * Each chunk is sanitized and tokenized on its own, so the runs and the SGR a
+ * chunk contributes are both countable and a sequence written at the end of one
+ * chunk stays in that chunk. The graphemes come from the joined stream: one
+ * spanning a boundary is a single cell, belonging to the chunk its first code
+ * point came from.
  */
 export function parseTextContent(chunks: readonly string[]): ParsedTextContent {
   const sanitized = chunks.map((chunk) => sanitizeAnsiMultiline(chunk));
   const text = sanitized.join("");
-  const runs = cellsFromStyledChars(styledGraphemesFromAnsi(text));
+  const chunkTokens = sanitized.map((chunk) => styledTokensFromAnsi(chunk));
+  const { graphemes, leadingCharacters } = styledGraphemesFromTokens(chunkTokens.flat());
+  const runs = cellsFromStyledChars(graphemes);
 
   const chunkRuns: number[] = [];
-  let index = 0;
-  let consumed = 0;
-  let boundary = 0;
-  for (const chunk of sanitized) {
-    boundary += visibleText(chunk).length;
-    const start = index;
-    // A grapheme that spans a boundary belongs to the chunk its first code
-    // point came from, which is how the parse assigns its style too.
-    while (index < runs.length && consumed < boundary) {
-      consumed += runs[index]!.grapheme.length;
-      index++;
+  const chunkCodes: SgrToken[][][] = [];
+  let character = 0;
+  let run = 0;
+  for (const tokens of chunkTokens) {
+    const codes: SgrToken[][] = [[]];
+    for (const token of tokens) {
+      if (token.type === "ansi") {
+        codes[codes.length - 1]!.push(token);
+        continue;
+      }
+      if (token.type !== "char") continue;
+      // A sequence written between the code points of one grapheme lands after
+      // it: the cell already took the style its leading code point carried.
+      if (run < leadingCharacters.length && leadingCharacters[run] === character) {
+        codes.push([]);
+        run++;
+      }
+      character++;
     }
-    chunkRuns.push(index - start);
-  }
-  if (index < runs.length && chunkRuns.length > 0) {
-    chunkRuns[chunkRuns.length - 1] += runs.length - index;
+    chunkRuns.push(codes.length - 1);
+    chunkCodes.push(codes);
   }
 
-  return { text, runs, chunkRuns, chunkBoundaryStyles: chunkBoundaryStyles(sanitized) };
+  return { text, runs, chunkRuns, chunkCodes };
 }
 
 /** What composition reads off a parsed content that a node is holding. */
 export interface ContentRunSource {
   readonly runs: readonly Cell[];
-  readonly chunks: readonly { readonly runs: number }[];
-  readonly chunkBoundaryStyles: readonly Style[];
-}
-
-function sameColor(left: Color, right: Color): boolean {
-  if (left === right) return true;
-  if (left.kind !== right.kind) return false;
-  switch (left.kind) {
-    case "default":
-      return true;
-    case "ansi16":
-    case "ansi256":
-      return left.index === (right as { readonly index: number }).index;
-    case "rgb": {
-      const other = right as {
-        readonly red: number;
-        readonly green: number;
-        readonly blue: number;
-      };
-      return left.red === other.red && left.green === other.green && left.blue === other.blue;
-    }
-  }
-}
-
-function sameSgrPairs(left: readonly SgrPair[], right: readonly SgrPair[]): boolean {
-  if (left === right) return true;
-  return (
-    left.length === right.length &&
-    left.every(
-      (pair, index) => pair.code === right[index]!.code && pair.endCode === right[index]!.endCode,
-    )
-  );
-}
-
-/** The channels one chunk's enclosing hosts resolve, and what they resolve them to. */
-interface ChunkStyle {
-  /** What every run of the chunk starts from, before the chunk's own content SGR. */
-  readonly base: Style;
-  /** Whether the enclosing props, rather than the text before the chunk, decided each colour. */
-  readonly foregroundFromProps: boolean;
-  readonly backgroundFromProps: boolean;
-  /** Attribute bits the enclosing props open over this chunk. */
-  readonly attrsFromProps: number;
-  /** The pair a colour prop that actively resets writes, ahead of the content's own pairs. */
-  readonly backgroundReset: SgrPair | undefined;
-  readonly foregroundReset: SgrPair | undefined;
-}
-
-const noSpans: readonly TextStyleSpan[] = [];
-
-function continuesSpan(other: readonly TextStyleSpan[], span: TextStyleSpan): boolean {
-  return other.some(
-    (candidate) =>
-      candidate.owner === span.owner &&
-      candidate.enclosed === span.enclosed &&
-      candidate.contribution.kind === span.contribution.kind &&
-      (span.contribution.kind !== "attribute" ||
-        candidate.contribution.kind !== "attribute" ||
-        candidate.contribution.attribute === span.contribution.attribute),
-  );
+  readonly chunks: readonly {
+    readonly runs: number;
+    readonly codes: readonly (readonly SgrToken[])[];
+  }[];
 }
 
 /**
- * The state one chunk begins from: what the content before it left open, with
- * the spans that ended closed and the spans that begin here opened over it.
- *
- * Entering a host resolves the channels its props set, so a nested value wins
- * over content state inherited from outside it; leaving one closes those
- * channels again, which is why content colour set before a styled child does
- * not resume after it. A span that both chunks hold — same host, same channels
- * resolved inside it — never closed in between, so the content state carries
- * through instead.
+ * One item of the stream composition replays: a written SGR sequence, or the
+ * index of a run.
  */
-function chunkStyleFor(
-  carried: Style,
-  spans: readonly TextStyleSpan[],
-  previous: readonly TextStyleSpan[],
-): ChunkStyle {
-  let foreground = carried.foreground;
-  let background = carried.background;
-  let attrs = carried.attrs;
-  let foregroundFromProps = false;
-  let backgroundFromProps = false;
-  let attrsFromProps = 0;
-  let foregroundReset: SgrPair | undefined;
-  let backgroundReset: SgrPair | undefined;
-
-  for (const span of previous) {
-    if (continuesSpan(spans, span)) continue;
-    const { contribution } = span;
-    if (contribution.kind === "attribute") attrs &= ~contribution.attribute;
-    else if (contribution.kind === "background") background = defaultColor;
-    else foreground = defaultColor;
-  }
-
-  for (const span of spans) {
-    if (continuesSpan(previous, span)) continue;
-    const { contribution } = span;
-    if (contribution.kind === "attribute") {
-      attrs |= contribution.attribute;
-      attrsFromProps |= contribution.attribute;
-      continue;
-    }
-    const reset =
-      contribution.color.kind === "default"
-        ? { code: contribution.close, endCode: contribution.close }
-        : undefined;
-    if (contribution.kind === "background") {
-      background = contribution.color;
-      backgroundFromProps = true;
-      backgroundReset = reset;
-    } else {
-      foreground = contribution.color;
-      foregroundFromProps = true;
-      foregroundReset = reset;
-    }
-  }
-
-  return {
-    base: { foreground, background, attrs, extraSgr: carried.extraSgr },
-    foregroundFromProps,
-    backgroundFromProps,
-    attrsFromProps,
-    backgroundReset,
-    foregroundReset,
-  };
-}
+type StreamItem = SgrToken | number;
 
 /**
- * The colour one channel holds where the content around it left `entry` and
- * this run carries `source`.
+ * One stretch of content that the levels outside it style as a unit.
  *
- * Content SGR inside the chunk resolves the channel from where it appears, so
- * a value this chunk's content set wins over the props. The one exception is a
- * close: the string pipeline replaced a close written inside a host that sets
- * the channel with that host's own opening sequence, so the prop comes back
- * rather than the terminal default.
+ * `resolved` is every channel the hosts inside this level have already settled
+ * for the stretch. Two neighbouring stretches join when their `resolved` masks
+ * agree, because then every level outside them writes the same sequences around
+ * both, and one open and one close cover the pair.
  */
-function takesBaseColor(source: Color, entry: Color, fromProps: boolean): boolean {
-  return sameColor(source, entry) || (source.kind === "default" && fromProps);
+interface ContentSpan {
+  items: StreamItem[];
+  readonly resolved: number;
+  /** A source chunk of the span, which carries the levels enclosing it. */
+  readonly chunk: number;
 }
 
-function withChunkStyle(cell: Cell, entry: Style, chunk: ChunkStyle): Cell {
-  const source = cell.style;
-  const { base } = chunk;
-  const baseForeground = takesBaseColor(
-    source.foreground,
-    entry.foreground,
-    chunk.foregroundFromProps,
-  );
-  const baseBackground = takesBaseColor(
-    source.background,
-    entry.background,
-    chunk.backgroundFromProps,
-  );
-  const foreground = baseForeground ? base.foreground : source.foreground;
-  const background = baseBackground ? base.background : source.background;
-  // A bit this chunk's content switched carries the content's value, except one
-  // it cleared inside a host whose props open it, which the close reopened.
-  const changed = source.attrs ^ entry.attrs;
-  const attrs =
-    (base.attrs & ~changed) |
-    (source.attrs & changed) |
-    (changed & ~source.attrs & chunk.attrsFromProps);
-  const content = sameSgrPairs(source.extraSgr, entry.extraSgr) ? base.extraSgr : source.extraSgr;
-
-  const resets: SgrPair[] = [];
-  if (chunk.backgroundReset && baseBackground) resets.push(chunk.backgroundReset);
-  if (chunk.foregroundReset && baseForeground) resets.push(chunk.foregroundReset);
-  const extraSgr = resets.length === 0 ? content : [...resets, ...content];
-
-  if (
-    sameColor(foreground, source.foreground) &&
-    sameColor(background, source.background) &&
-    attrs === source.attrs &&
-    sameSgrPairs(extraSgr, source.extraSgr)
-  ) {
-    return cell;
-  }
-  return { ...cell, style: { foreground, background, attrs, extraSgr } };
-}
-
-/** What the content leaves open at the end of a chunk, over the chunk's own base. */
-function chunkExitStyle(entry: Style, exit: Style, chunk: ChunkStyle): Style {
-  const { base } = chunk;
-  const changed = exit.attrs ^ entry.attrs;
-  return {
-    foreground: takesBaseColor(exit.foreground, entry.foreground, chunk.foregroundFromProps)
-      ? base.foreground
-      : exit.foreground,
-    background: takesBaseColor(exit.background, entry.background, chunk.backgroundFromProps)
-      ? base.background
-      : exit.background,
-    attrs:
-      (base.attrs & ~changed) |
-      (exit.attrs & changed) |
-      (changed & ~exit.attrs & chunk.attrsFromProps),
-    extraSgr: sameSgrPairs(exit.extraSgr, entry.extraSgr) ? base.extraSgr : exit.extraSgr,
-  };
-}
+const hardBreak = "\n";
 
 /**
- * Style a Text's parsed runs with the channels its enclosing hosts resolve.
+ * Style a Text's parsed runs with the sequences its enclosing hosts write.
  *
- * The content is one left-to-right state machine, chunk by chunk: a chunk
- * starts from what the content before it left open, with its hosts' spans
- * closed and opened over that, and each run then takes back every channel its
- * own chunk's content resolved. `chunkSpans` holds one entry per chunk, in
- * content order.
+ * Composition replays one left-to-right stream: entering a host writes the open
+ * sequences its props resolve, the chunk's own content writes what the author
+ * wrote, and leaving the host writes its closes. A host repairs its span around
+ * anything that would end it early — a close written inside it is followed by a
+ * fresh open, and a hard newline closes the span and opens it again after the
+ * break. The SGR state machine that reads content sequences reads this whole
+ * stream, so a content colour outranks the props around it, a nested host's own
+ * props outrank the content it inherits, a close written inside a host restores
+ * that host's value, and a host's close also ends a content attribute that
+ * shares its end code — all without a rule of composition's own.
+ *
+ * `chunkLevels` holds one entry per chunk in content order: the hosts enclosing
+ * that chunk, outermost first, beginning with the Text node itself.
  */
 export function composeContentRuns(
   content: ContentRunSource,
-  chunkSpans: readonly (readonly TextStyleSpan[])[],
+  chunkLevels: readonly (readonly TextStyleLevel[])[],
 ): readonly Cell[] {
-  const composed: Cell[] = [];
-  let carried = defaultStyle;
+  const firstRuns: number[] = [];
   let start = 0;
-  for (let index = 0; index < content.chunks.length; index++) {
-    const spans = chunkSpans[index] ?? noSpans;
-    const previous = index === 0 ? noSpans : (chunkSpans[index - 1] ?? noSpans);
-    const chunk = chunkStyleFor(carried, spans, previous);
-    const entry = content.chunkBoundaryStyles[index] ?? defaultStyle;
-    const end = start + content.chunks[index]!.runs;
-    for (let run = start; run < end; run++) {
-      composed.push(withChunkStyle(content.runs[run]!, entry, chunk));
-    }
-    start = end;
-    carried = chunkExitStyle(entry, content.chunkBoundaryStyles[index + 1] ?? entry, chunk);
+  for (const chunk of content.chunks) {
+    firstRuns.push(start);
+    start += chunk.runs;
   }
-  for (let run = start; run < content.runs.length; run++) composed.push(content.runs[run]!);
+
+  const composed: Cell[] = [];
+  let active: readonly SgrToken[] = [];
+  let visual = cellVisualFromAnsiCodes(active);
+  let stale = false;
+  for (const span of replayLevel(content, chunkLevels, firstRuns, 0, content.chunks.length, 0)) {
+    for (const item of span.items) {
+      if (typeof item !== "number") {
+        active = reduceStyledCodes(active, [item]);
+        stale = true;
+        continue;
+      }
+      if (stale) {
+        visual = cellVisualFromAnsiCodes(active);
+        stale = false;
+      }
+      const run = content.runs[item]!;
+      composed.push(
+        visual.style === run.style && visual.link === run.link
+          ? run
+          : { ...run, style: visual.style, link: visual.link },
+      );
+    }
+  }
   return composed;
+}
+
+/**
+ * The spans one level contributes for the chunks `[from, to)`, which every
+ * chunk in that range is enclosed by at `depth`.
+ *
+ * The levels inside it produce their spans first, exactly as a nested host's
+ * own composition finished before the host around it saw it.
+ */
+function replayLevel(
+  content: ContentRunSource,
+  chunkLevels: readonly (readonly TextStyleLevel[])[],
+  firstRuns: readonly number[],
+  from: number,
+  to: number,
+  depth: number,
+): ContentSpan[] {
+  const inner: ContentSpan[] = [];
+  let index = from;
+  while (index < to) {
+    const nested = chunkLevels[index]?.[depth + 1];
+    if (nested === undefined) {
+      inner.push({ items: chunkItems(content, firstRuns, index), resolved: 0, chunk: index });
+      index++;
+      continue;
+    }
+    let end = index + 1;
+    while (end < to && chunkLevels[end]?.[depth + 1]?.owner === nested.owner) end++;
+    inner.push(...replayLevel(content, chunkLevels, firstRuns, index, end, depth + 1));
+    index = end;
+  }
+
+  const joined = joinSpans(inner);
+  const level = chunkLevels[from]?.[depth];
+  if (level === undefined) return joined;
+  return joinSpans(
+    joined.map((span) => ({
+      items: applyLevel(content.runs, span.items, chunkLevels[span.chunk]![depth]!.contributions),
+      resolved: span.resolved | level.ownChannels,
+      chunk: span.chunk,
+    })),
+  );
+}
+
+/** One chunk's own stream: what it wrote, and the runs it wrote it around. */
+function chunkItems(
+  content: ContentRunSource,
+  firstRuns: readonly number[],
+  index: number,
+): StreamItem[] {
+  const chunk = content.chunks[index]!;
+  const first = firstRuns[index]!;
+  const items: StreamItem[] = [];
+  for (let position = 0; position <= chunk.runs; position++) {
+    for (const code of chunk.codes[position] ?? []) items.push(code);
+    if (position < chunk.runs) items.push(first + position);
+  }
+  return items;
+}
+
+/** Join neighbouring spans the levels outside them cannot tell apart. */
+function joinSpans(spans: readonly ContentSpan[]): ContentSpan[] {
+  const joined: ContentSpan[] = [];
+  for (const span of spans) {
+    // A chunk that sanitized away leaves nothing for a level to wrap, so it
+    // never separates the spans on either side of it.
+    if (span.items.length === 0) continue;
+    const previous = joined.at(-1);
+    if (previous?.resolved !== span.resolved) {
+      joined.push({ ...span, items: [...span.items] });
+      continue;
+    }
+    // One item at a time: a long Text holds more runs than a spread call may
+    // pass as arguments.
+    for (const item of span.items) previous.items.push(item);
+  }
+  return joined;
+}
+
+/**
+ * Write one host's style around a span: innermost contribution first, which is
+ * the order the props are resolved in.
+ */
+function applyLevel(
+  runs: readonly Cell[],
+  items: StreamItem[],
+  contributions: readonly TextStyleContribution[],
+): StreamItem[] {
+  let result = items;
+  for (let index = contributions.length - 1; index >= 0; index--) {
+    result = applyContribution(runs, result, contributions[index]!);
+  }
+  return result;
+}
+
+function applyContribution(
+  runs: readonly Cell[],
+  items: readonly StreamItem[],
+  contribution: TextStyleContribution,
+): StreamItem[] {
+  const { open, close, reopens } = contribution;
+  const result: StreamItem[] = [open];
+  for (const item of items) {
+    if (typeof item !== "number") {
+      result.push(item);
+      // A close written inside the span would leave the rest of the content
+      // bare, so the span opens itself again behind it.
+      if (reopens && item.source === close.source) result.push(open);
+      continue;
+    }
+    // A style left open across a hard break bleeds over the rest of the row on
+    // some terminals, so the span closes before the break and opens after it.
+    if (reopens && runs[item]!.grapheme === hardBreak) {
+      result.push(close, item, open);
+      continue;
+    }
+    result.push(item);
+  }
+  result.push(close);
+  return result;
 }

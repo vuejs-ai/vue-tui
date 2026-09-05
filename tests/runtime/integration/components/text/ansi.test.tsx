@@ -323,12 +323,16 @@ test("link ansi escapes are closed properly", async () => {
 
 // ── Nested Text props against content SGR ─────────────
 //
-// Composition is one left-to-right state machine over a Text's joined content:
-// entering a nested Text resolves the channels its own props set, content SGR
-// resolves a channel from where it is written onward, and leaving a nested Text
-// closes the channels it set. The byte locks below are what the renderer wrote
-// before the runs became cells; a composition that let an enclosing content
-// colour outrank a nested Text's own prop breaks every one of them.
+// Composition replays one left-to-right stream over a Text's joined content:
+// entering a nested Text writes the sequences its props open, the content
+// writes what the author wrote, and leaving the Text writes its closes. A
+// styled span repairs itself around anything that would end it early — a close
+// written inside it is followed by a fresh open, and a hard newline closes the
+// span before the break and opens it again after — while a colour prop set to
+// `default` writes its bare end sequence at both edges and repairs nothing.
+// One SGR state machine reads the whole stream. The byte locks below are what
+// the renderer wrote before the runs became cells; every rule above shows up
+// as one of them.
 
 test("a nested Text colour outranks content colour opened outside it", () => {
   const output = renderToString(
@@ -459,6 +463,109 @@ test("content SGR inside a Text overrides its props from that point on", () => {
 
   // The authored end code puts the Text's own colour back, not the terminal's.
   expect(output).toBe(`${ESC}[31mA${ESC}[32mB${ESC}[31mC${ESC}[39m`);
+});
+
+test("content re-asserting the colour already open still resolves it", () => {
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Text>
+        <Text color="blue">{`${ESC}[31m`}</Text>
+        {`${ESC}[31mc`}
+      </Text>
+    )),
+    { color: "truecolor", width: 20 },
+  );
+
+  // The nested Text writes blue and closes it; the content then writes red
+  // twice, and c is red because the second one is what stands when it is read,
+  // not because it differs from the colour the chunk entered with.
+  expect(output).toBe(`${ESC}[31mc${ESC}[39m`);
+});
+
+test("content SGR inside a nested Text outranks that Text's own colour", () => {
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Text>
+        {`${ESC}[34mA`}
+        <Text color="yellow">{`${ESC}[34mB`}</Text>
+      </Text>
+    )),
+    { color: "truecolor", width: 20 },
+  );
+
+  // The child opens yellow and its own content writes blue over it, so B is
+  // blue — the same blue A already carried, which is not what decides it.
+  expect(output).toBe(`${ESC}[34mAB${ESC}[39m`);
+});
+
+test("an authored close restores the enclosing colour on a later chunk too", () => {
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Text color="blue">
+        <Text>{`${ESC}[33m`}</Text>
+        {`${ESC}[39mc`}
+      </Text>
+    )),
+    { color: "truecolor", width: 20 },
+  );
+
+  // The enclosing blue span runs on past the unstyled child, so the authored
+  // close inside it opens blue again rather than falling to the terminal.
+  expect(output).toBe(`${ESC}[34mc${ESC}[39m`);
+});
+
+test("a nested Text's close also ends a content attribute sharing its end code", () => {
+  const underline = renderToString(
+    defineComponent(() => () => (
+      <Text>
+        A<Text underline>{`${ESC}[4:3mB`}</Text>C
+      </Text>
+    )),
+    { color: "truecolor", width: 20 },
+  );
+
+  // The curly underline ends with `24m`, which is the child's own close, so C
+  // is not underlined.
+  expect(underline).toBe(`A${ESC}[4:3mB${ESC}[24mC`);
+
+  const intensity = renderToString(
+    defineComponent(() => () => (
+      <Text>
+        A<Text dimColor>{`${ESC}[1mB`}</Text>C
+      </Text>
+    )),
+    { color: "truecolor", width: 20 },
+  );
+
+  // Bold and dim coexist over B, and the child's `22m` ends both.
+  expect(intensity).toBe(`A${ESC}[1m${ESC}[2mB${ESC}[22mC`);
+});
+
+test("a nested Text that sets nothing leaves the content around it in one span", () => {
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Text color="red">
+        {`${ESC}[34ma`}
+        <Text>b</Text>
+      </Text>
+    )),
+    { color: "truecolor", width: 20 },
+  );
+
+  // The child resolves no channel, so the enclosing red opens once around both
+  // runs and the content's blue carries from a into b.
+  expect(output).toBe(`${ESC}[34mab${ESC}[39m`);
+});
+
+test("a styled span closes at a hard newline and opens again after it", () => {
+  const output = renderToString(
+    defineComponent(() => () => <Text color="red">{`${ESC}[34ma\nb`}</Text>),
+    { color: "truecolor", width: 20 },
+  );
+
+  // The break re-opens the Text's own red, so the content's blue covers only
+  // the first row rather than bleeding into the second.
+  expect(output).toBe(`${ESC}[34ma${ESC}[39m\n${ESC}[31mb${ESC}[39m`);
 });
 
 test("a mounted host paints a nested Text colour over content colour", async () => {

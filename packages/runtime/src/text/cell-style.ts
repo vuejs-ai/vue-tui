@@ -1,7 +1,7 @@
 // Where authored SGR becomes structured cell style. Content enters the system
 // as a string, so exactly one place turns the sequences it carries into the
 // `Style` a cell holds; paint downstream of here never reads an SGR code.
-import type { AnsiCode, StyledChar } from "@alcalzone/ansi-tokenize";
+import type { StyledChar } from "@alcalzone/ansi-tokenize";
 import stringWidth from "string-width";
 import type { Cell, Hyperlink } from "../frame/cell.ts";
 import {
@@ -33,6 +33,40 @@ export const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "g
 
 export const foregroundEndCode = "\x1b[39m";
 export const backgroundEndCode = "\x1b[49m";
+
+/**
+ * One active SGR pair together with the exact sequence it was written as.
+ *
+ * Composition matches a written close against that sequence rather than against
+ * the pair it parsed into: `\x1b[1;39m` carries the same foreground close a bare
+ * `\x1b[39m` does, and only the bare one reads as a close a component's style
+ * has to survive.
+ */
+export interface SgrToken extends SgrPair {
+  readonly source: string;
+}
+
+/**
+ * The SGR sequence one structured color is written as: the inverse of the
+ * reading {@link cellVisualFromAnsiCodes} does. Composition writes a Text's
+ * color props back out as sequences so that props and content SGR reach the
+ * cell through one state machine. The encoder in `surface/` spells the same
+ * colors for its own output, which `text/` may not reach.
+ */
+export function sgrCodeForColor(color: Color, background: boolean): string {
+  switch (color.kind) {
+    case "default":
+      return background ? backgroundEndCode : foregroundEndCode;
+    case "ansi16":
+      return color.index < 8
+        ? `\x1b[${(background ? 40 : 30) + color.index}m`
+        : `\x1b[${(background ? 100 : 90) + color.index - 8}m`;
+    case "ansi256":
+      return `\x1b[${background ? 48 : 38};5;${color.index}m`;
+    case "rgb":
+      return `\x1b[${background ? 48 : 38};2;${color.red};${color.green};${color.blue}m`;
+  }
+}
 
 function osc8Link(code: string): Hyperlink | undefined {
   if (!code.startsWith("\x1b]8;")) return undefined;
@@ -86,7 +120,7 @@ function sgrColor(
 }
 
 /** The visual state one run's active SGR pairs resolve to. */
-export function cellVisualFromAnsiCodes(codes: readonly AnsiCode[]): {
+export function cellVisualFromAnsiCodes(codes: readonly SgrPair[]): {
   readonly style: Style;
   readonly link: Hyperlink | undefined;
 } {

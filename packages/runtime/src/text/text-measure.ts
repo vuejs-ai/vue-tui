@@ -11,16 +11,16 @@ import {
   type Token,
 } from "@alcalzone/ansi-tokenize";
 import type { Cell } from "../frame/cell.ts";
-import { defaultStyle, type Style } from "../frame/style.ts";
+import { defaultStyle, type SgrPair, type Style } from "../frame/style.ts";
 import { hasAnsiControlCharacters, tokenizeAnsi } from "./ansi-tokenizer.ts";
-import { cellVisualFromAnsiCodes, graphemeSegmenter } from "./cell-style.ts";
+import { graphemeSegmenter } from "./cell-style.ts";
 
 export type WrapMode = "wrap" | "hard" | "truncate" | "truncate-middle" | "truncate-start";
 
 const boldOpen = "\u001B[1m";
 const dimOpen = "\u001B[2m";
 
-function isIntensityStyle(style: StyledChar["styles"][number]): boolean {
+function isIntensityStyle(style: SgrPair): boolean {
   return style.code === boldOpen || style.code === dimOpen;
 }
 
@@ -124,6 +124,30 @@ function sgrPair(code: string, endCode = sgrOffCodeFor(code)): AnsiCode {
   return { type: "ansi", code, endCode };
 }
 
+/**
+ * One token stream whose SGR pairs remember the sequence they were written as.
+ *
+ * A written sequence can carry several pairs — `\x1b[1;39m` is bold and a
+ * foreground close — and composition has to match a close against what the
+ * author wrote rather than against the pair it parsed into.
+ */
+export type ContentToken =
+  | {
+      readonly type: "ansi";
+      readonly code: string;
+      readonly endCode: string;
+      readonly source: string;
+    }
+  | { readonly type: "char"; readonly value: string; readonly fullWidth: boolean }
+  | { readonly type: "control"; readonly code: string };
+
+/** The SGR member of a content token stream. */
+export type ContentSgr = Extract<ContentToken, { readonly type: "ansi" }>;
+
+function withSource(tokens: readonly Token[], source: string): ContentToken[] {
+  return tokens.map((token) => (token.type === "ansi" ? { ...token, source } : token));
+}
+
 function tokenizeSgrParameters(parameterString: string): Token[] {
   if (parameterString === "") return tokenizeStyledAnsi("\x1b[0m");
 
@@ -188,7 +212,16 @@ function tokenizeSgrParameters(parameterString: string): Token[] {
   return tokens;
 }
 
-function reduceStyledCodes(active: readonly AnsiCode[], next: readonly AnsiCode[]): AnsiCode[] {
+/**
+ * The active SGR pairs after `next` is written over `active`: a reset clears
+ * them, a close ends every pair it terminates, bold and dim coexist, and any
+ * other open replaces the pair sharing its end code. Content SGR and the
+ * sequences a Text's props write both travel through here.
+ */
+export function reduceStyledCodes<Pair extends SgrPair>(
+  active: readonly Pair[],
+  next: readonly Pair[],
+): Pair[] {
   let result = [...active];
   for (const pair of next) {
     if (pair.code === "\x1b[0m") {
@@ -205,12 +238,14 @@ function reduceStyledCodes(active: readonly AnsiCode[], next: readonly AnsiCode[
   return result;
 }
 
-function styledCharactersFromTokens(tokens: readonly Token[]): StyledChar[] {
-  let styles: AnsiCode[] = [];
+function styledCharactersFromTokens(tokens: readonly ContentToken[]): StyledChar[] {
+  let styles: ContentSgr[] = [];
   const characters: StyledChar[] = [];
   for (const token of tokens) {
     if (token.type === "ansi") styles = reduceStyledCodes(styles, [token]);
-    else if (token.type === "char") characters.push({ ...token, styles: [...styles] });
+    // `reduceStyledCodes` answers with a fresh array every time, so the run of
+    // characters between two sequences can share one rather than copy it.
+    else if (token.type === "char") characters.push({ ...token, styles });
   }
   return characters;
 }
@@ -222,15 +257,19 @@ function normalizeOscForStyledCharacters(value: string): string {
 }
 
 /** One styled string's tokens, with the pairing this module has to repair. */
-function styledTokensFromAnsi(text: string): Token[] {
-  const tokens = tokenizeAnsi(text).flatMap((token) => {
-    if (token.type === "text") return tokenizeStyledAnsi(token.value);
+export function styledTokensFromAnsi(text: string): ContentToken[] {
+  const tokens = tokenizeAnsi(text).flatMap<ContentToken>((token) => {
+    if (token.type === "text") return withSource(tokenizeStyledAnsi(token.value), token.value);
     if (token.type === "csi") {
       if (token.finalCharacter !== "m" || token.intermediateString !== "") return [];
-      return tokenizeSgrParameters(token.parameterString);
+      return withSource(tokenizeSgrParameters(token.parameterString), token.value);
     }
-    if (token.type === "osc")
-      return tokenizeStyledAnsi(normalizeOscForStyledCharacters(token.value));
+    if (token.type === "osc") {
+      return withSource(
+        tokenizeStyledAnsi(normalizeOscForStyledCharacters(token.value)),
+        token.value,
+      );
+    }
     return [];
   });
   // The tokenizer pairs `21m` with the generic reset; `24m` ends both underline
@@ -242,41 +281,35 @@ function styledTokensFromAnsi(text: string): Token[] {
   );
 }
 
-/**
- * The SGR state the content holds at each chunk boundary: entry `i` is what the
- * chunks before it leave open, and the final entry is what all of them do.
- *
- * A styled grapheme says what one cell carries, which cannot say what is open
- * *between* two graphemes, and trailing SGR belongs to the chunk it was written
- * in. Composition reads these to tell a channel a chunk's own content resolved
- * from one it merely inherited from the text before it.
- */
-export function chunkBoundaryStyles(chunks: readonly string[]): Style[] {
-  const boundaries: Style[] = [];
-  let active: readonly AnsiCode[] = [];
-  for (const chunk of chunks) {
-    boundaries.push(cellVisualFromAnsiCodes(active).style);
-    if (!hasAnsiControlCharacters(chunk)) continue;
-    active = reduceStyledCodes(
-      active,
-      styledTokensFromAnsi(chunk).filter((token): token is AnsiCode => token.type === "ansi"),
-    );
-  }
-  boundaries.push(cellVisualFromAnsiCodes(active).style);
-  return boundaries;
+function isPlainAsciiCharacter(value: string): boolean {
+  const code = value.codePointAt(0);
+  return value.length === 1 && code !== undefined && code < 0x80 && code !== 0x0d;
 }
 
 /**
- * Normalize ANSI-tokenized code points into terminal paint graphemes once.
+ * Normalize ANSI-tokenized code points into terminal paint graphemes once, and
+ * report for each grapheme the character token it begins at.
  *
- * Shared with painting: both must agree on how many graphemes a styled line
- * holds, or the line the layout planned and the cells drawn from it diverge.
+ * The graphemes are shared with painting: both must agree on how many a styled
+ * line holds, or the line the layout planned and the cells drawn from it
+ * diverge. The leading index says which chunk a grapheme belongs to when one
+ * straddles the boundary between two of them.
  */
-export function styledGraphemesFromAnsi(text: string): StyledChar[] {
-  if (!hasAnsiControlCharacters(text)) return styledCharsFromTokens(tokenizeStyledAnsi(text));
-
-  const characters = styledCharactersFromTokens(styledTokensFromAnsi(text));
-  if (characters.length < 2) return characters;
+export function styledGraphemesFromTokens(tokens: readonly ContentToken[]): {
+  readonly graphemes: StyledChar[];
+  readonly leadingCharacters: number[];
+} {
+  const characters = styledCharactersFromTokens(tokens);
+  const oneToOne = (): { graphemes: StyledChar[]; leadingCharacters: number[] } => ({
+    graphemes: characters,
+    leadingCharacters: characters.map((_, index) => index),
+  });
+  if (characters.length < 2) return oneToOne();
+  // Plain ASCII is one grapheme per code point, so the tokenizer's characters
+  // are already the graphemes and the join and re-segmentation below can be
+  // skipped. CR is the one ASCII code point that joins with what follows it,
+  // and `sanitizeAnsiMultiline` takes it out before content reaches here.
+  if (characters.every((character) => isPlainAsciiCharacter(character.value))) return oneToOne();
 
   const plain = characters.map((character) => character.value).join("");
   const graphemes = [...graphemeSegmenter.segment(plain)];
@@ -284,10 +317,11 @@ export function styledGraphemesFromAnsi(text: string): StyledChar[] {
     graphemes.length === characters.length &&
     graphemes.every((part, index) => part.segment === characters[index]!.value)
   ) {
-    return characters;
+    return oneToOne();
   }
 
   const result: StyledChar[] = [];
+  const leadingCharacters: number[] = [];
   let characterIndex = 0;
   let characterOffset = 0;
   for (const part of graphemes) {
@@ -306,8 +340,15 @@ export function styledGraphemesFromAnsi(text: string): StyledChar[] {
       value: part.segment,
       fullWidth: stringWidth(part.segment) > 1,
     });
+    leadingCharacters.push(characterIndex);
   }
-  return result;
+  return { graphemes: result, leadingCharacters };
+}
+
+/** The terminal paint graphemes one styled string holds. */
+export function styledGraphemesFromAnsi(text: string): StyledChar[] {
+  if (!hasAnsiControlCharacters(text)) return styledCharsFromTokens(tokenizeStyledAnsi(text));
+  return styledGraphemesFromTokens(styledTokensFromAnsi(text)).graphemes;
 }
 
 /**

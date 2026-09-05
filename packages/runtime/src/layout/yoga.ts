@@ -704,9 +704,9 @@ export function ensureTextContent(text: TuiText): TuiTextContent {
     runs: parsed.runs,
     chunks: sources.map((chunk, index) => ({
       runs: parsed.chunkRuns[index] ?? 0,
+      codes: parsed.chunkCodes[index] ?? [],
       nesting: chunk.nesting,
     })),
-    chunkBoundaryStyles: parsed.chunkBoundaryStyles,
   };
   text.content = content;
   return content;
