@@ -98,6 +98,13 @@ export interface TuiTextContent {
   readonly text: string;
   readonly runs: readonly TuiTextRun[];
   readonly chunks: readonly TuiTextChunk[];
+  /**
+   * What the content's own SGR leaves open at each chunk boundary, one entry per
+   * chunk plus the state after the last. Composition reads them to tell a
+   * channel a chunk's own content resolved from one it inherited from the text
+   * before it.
+   */
+  readonly chunkBoundaryStyles: readonly TuiTextRunStyle[];
 }
 
 export interface TuiText extends NodeBase {

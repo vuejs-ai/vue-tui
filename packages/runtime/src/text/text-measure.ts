@@ -11,8 +11,14 @@ import {
   type Token,
 } from "@alcalzone/ansi-tokenize";
 import type { Cell } from "../frame/cell.ts";
+import type { Style } from "../frame/style.ts";
 import { hasAnsiControlCharacters, tokenizeAnsi } from "./ansi-tokenizer.ts";
-import { cellsFromStyledChars, graphemeSegmenter, styledCharFromCell } from "./cell-style.ts";
+import {
+  cellsFromStyledChars,
+  cellVisualFromAnsiCodes,
+  graphemeSegmenter,
+  styledCharFromCell,
+} from "./cell-style.ts";
 
 export type WrapMode = "wrap" | "hard" | "truncate" | "truncate-middle" | "truncate-start";
 
@@ -267,15 +273,8 @@ function normalizeOscForStyledCharacters(value: string): string {
   return escaped.endsWith("\x9c") ? `${escaped.slice(0, -1)}\x07` : escaped;
 }
 
-/**
- * Normalize ANSI-tokenized code points into terminal paint graphemes once.
- *
- * Shared with painting: both must agree on how many graphemes a styled line
- * holds, or the line the layout planned and the cells drawn from it diverge.
- */
-export function styledGraphemesFromAnsi(text: string): StyledChar[] {
-  if (!hasAnsiControlCharacters(text)) return styledCharsFromTokens(tokenizeStyledAnsi(text));
-
+/** One styled string's tokens, with the pairing this module has to repair. */
+function styledTokensFromAnsi(text: string): Token[] {
   const tokens = tokenizeAnsi(text).flatMap((token) => {
     if (token.type === "text") return tokenizeStyledAnsi(token.value);
     if (token.type === "csi") {
@@ -288,13 +287,47 @@ export function styledGraphemesFromAnsi(text: string): StyledChar[] {
   });
   // The tokenizer pairs `21m` with the generic reset; `24m` ends both underline
   // forms, so double underline must leave with it rather than outlive it.
-  const characters = styledCharactersFromTokens(
-    tokens.map((token) =>
-      token.type === "ansi" && token.code === "\u001b[21m"
-        ? { ...token, endCode: "\u001b[24m" }
-        : token,
-    ),
+  return tokens.map((token) =>
+    token.type === "ansi" && token.code === "\u001b[21m"
+      ? { ...token, endCode: "\u001b[24m" }
+      : token,
   );
+}
+
+/**
+ * The SGR state the content holds at each chunk boundary: entry `i` is what the
+ * chunks before it leave open, and the final entry is what all of them do.
+ *
+ * A styled grapheme says what one cell carries, which cannot say what is open
+ * *between* two graphemes, and trailing SGR belongs to the chunk it was written
+ * in. Composition reads these to tell a channel a chunk's own content resolved
+ * from one it merely inherited from the text before it.
+ */
+export function chunkBoundaryStyles(chunks: readonly string[]): Style[] {
+  const boundaries: Style[] = [];
+  let active: readonly AnsiCode[] = [];
+  for (const chunk of chunks) {
+    boundaries.push(cellVisualFromAnsiCodes(active).style);
+    if (!hasAnsiControlCharacters(chunk)) continue;
+    active = reduceStyledCodes(
+      active,
+      styledTokensFromAnsi(chunk).filter((token): token is AnsiCode => token.type === "ansi"),
+    );
+  }
+  boundaries.push(cellVisualFromAnsiCodes(active).style);
+  return boundaries;
+}
+
+/**
+ * Normalize ANSI-tokenized code points into terminal paint graphemes once.
+ *
+ * Shared with painting: both must agree on how many graphemes a styled line
+ * holds, or the line the layout planned and the cells drawn from it diverge.
+ */
+export function styledGraphemesFromAnsi(text: string): StyledChar[] {
+  if (!hasAnsiControlCharacters(text)) return styledCharsFromTokens(tokenizeStyledAnsi(text));
+
+  const characters = styledCharactersFromTokens(styledTokensFromAnsi(text));
   if (characters.length < 2) return characters;
 
   const plain = characters.map((character) => character.value).join("");

@@ -706,6 +706,7 @@ export function ensureTextContent(text: TuiText): TuiTextContent {
       runs: parsed.chunkRuns[index] ?? 0,
       nesting: chunk.nesting,
     })),
+    chunkBoundaryStyles: parsed.chunkBoundaryStyles,
   };
   text.content = content;
   return content;

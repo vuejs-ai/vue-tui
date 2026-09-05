@@ -9,13 +9,13 @@ import {
   type Style,
 } from "../frame/style.ts";
 import { cellsFromPlainText } from "../text/cell-style.ts";
-import { styleContentRuns } from "../text/text-content.ts";
+import { composeContentRuns } from "../text/text-content.ts";
 import { styleMeasuredTextLines } from "../text/text-measure.ts";
 import {
   explicitTextStyleChannels,
   parseColorValue,
   textStyleContributions,
-  type TextStyleContribution,
+  type TextStyleSpan,
 } from "../text/text-style.ts";
 import type {
   TuiNode,
@@ -298,28 +298,20 @@ function composeTextRuns(
   content: TuiTextContent,
   inheritedBg: string | undefined,
 ): readonly Cell[] {
-  const chunkStyles = content.chunks.map((chunk) =>
-    textStyleContributionsForChunk(node, chunk, inheritedBg),
+  const chunkSpans = content.chunks.map((chunk) =>
+    textStyleSpansForChunk(node, chunk, inheritedBg),
   );
   // Content that no enclosing Text styles is already its own composition.
-  if (chunkStyles.every((list) => list.length === 0)) return content.runs;
-
-  const composed: Cell[] = [];
-  let start = 0;
-  for (let index = 0; index < content.chunks.length; index++) {
-    const end = start + content.chunks[index]!.runs;
-    styleContentRuns(content.runs, start, end, chunkStyles[index]!, composed);
-    start = end;
-  }
-  return composed;
+  if (chunkSpans.every((spans) => spans.length === 0)) return content.runs;
+  return composeContentRuns(content, chunkSpans);
 }
 
-/** The channels the enclosing Text hosts resolve around one chunk, outermost first. */
-function textStyleContributionsForChunk(
+/** The spans the enclosing Text hosts hold open around one chunk, outermost first. */
+function textStyleSpansForChunk(
   node: TuiText,
   chunk: TuiTextChunk,
   inheritedBg: string | undefined,
-): TextStyleContribution[] {
+): TextStyleSpan[] {
   const levels: readonly (TuiText | TuiVirtualText)[] = [node, ...chunk.nesting];
   // Every explicit value resolves its channel for the complete subtree, so a
   // level skips the channels any level inside it sets.
@@ -330,18 +322,22 @@ function textStyleContributionsForChunk(
     inner |= explicitTextStyleChannels(levels[index]!.props);
   }
 
-  const contributions: TextStyleContribution[] = [];
+  const spans: TextStyleSpan[] = [];
   for (let index = 0; index < levels.length; index++) {
-    const props = levels[index]!.props;
+    const level = levels[index]!;
+    const props = level.props;
     // A surrounding Box supplies only the outermost Text's base background.
     // Public Text background values are strings, including the active `default`
     // reset. Unsupported raw-host values do not replace the base.
     const ownBg = props.backgroundColor;
     const styleProps =
       index === 0 && typeof ownBg !== "string" ? { ...props, backgroundColor: inheritedBg } : props;
-    contributions.push(...textStyleContributions(styleProps, blockedBelow[index]!));
+    const enclosed = blockedBelow[index]!;
+    for (const contribution of textStyleContributions(styleProps, enclosed)) {
+      spans.push({ contribution, owner: level, enclosed });
+    }
   }
-  return contributions;
+  return spans;
 }
 
 type BoxStyle = (typeof cliBoxes)[keyof cliBoxes.Boxes];

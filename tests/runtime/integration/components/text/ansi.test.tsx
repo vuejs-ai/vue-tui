@@ -320,3 +320,156 @@ test("link ansi escapes are closed properly", async () => {
   // Lock the exact bytes: the OSC-8 hyperlink must round-trip unchanged.
   expect(output).toBe(ansiEscapes.link("Example", "https://example.com"));
 });
+
+// ── Nested Text props against content SGR ─────────────
+//
+// Composition is one left-to-right state machine over a Text's joined content:
+// entering a nested Text resolves the channels its own props set, content SGR
+// resolves a channel from where it is written onward, and leaving a nested Text
+// closes the channels it set. The byte locks below are what the renderer wrote
+// before the runs became cells; a composition that let an enclosing content
+// colour outrank a nested Text's own prop breaks every one of them.
+
+test("a nested Text colour outranks content colour opened outside it", () => {
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Text>
+        {`${ESC}[31mA`}
+        <Text color="blue">B</Text>
+        {`C${ESC}[39m`}
+      </Text>
+    )),
+    { color: "truecolor", width: 20 },
+  );
+
+  // B is blue, and the enclosing content's red does not resume after it: the
+  // nested Text closed the channel it opened.
+  expect(output).toBe(`${ESC}[31mA${ESC}[34mB${ESC}[39mC`);
+});
+
+test("a nested Text default colour outranks content colour opened outside it", () => {
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Text>
+        {`${ESC}[31mA`}
+        <Text color="default">B</Text>
+        {`C${ESC}[39m`}
+      </Text>
+    )),
+    { color: "truecolor", width: 20 },
+  );
+
+  expect(output).toBe(`${ESC}[31mA${ESC}[39mBC`);
+});
+
+test("two nested Texts under one content colour each keep their own", () => {
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Text>
+        {`${ESC}[31mA`}
+        <Text color="blue">B</Text>
+        <Text color="green">C</Text>
+        {`D${ESC}[39m`}
+      </Text>
+    )),
+    { color: "truecolor", width: 20 },
+  );
+
+  expect(output).toBe(`${ESC}[31mA${ESC}[34mB${ESC}[32mC${ESC}[39mD`);
+});
+
+test("a nested Text closes only the channels its props set", () => {
+  const colour = renderToString(
+    defineComponent(() => () => (
+      <Text>
+        {`${ESC}[1mA`}
+        <Text color="blue">B</Text>
+        {`C${ESC}[22m`}
+      </Text>
+    )),
+    { color: "truecolor", width: 20 },
+  );
+  // Bold was opened by the content and the child sets no attribute, so bold
+  // spans all three runs while the child's blue closes with the child.
+  expect(colour).toBe(`${ESC}[1mA${ESC}[34mB${ESC}[39mC${ESC}[22m`);
+
+  const attribute = renderToString(
+    defineComponent(() => () => (
+      <Text>
+        {`${ESC}[31mA`}
+        <Text bold>B</Text>
+        {`C${ESC}[39m`}
+      </Text>
+    )),
+    { color: "truecolor", width: 20 },
+  );
+  // The content's red is not a channel the child sets, so it survives the child
+  // and continues after it. The generic reset here is the frame encoder's own
+  // repair while opening bold beside an unmodelled span, not authored content.
+  expect(attribute).toBe(`${ESC}[31mA${ESC}[1m${ESC}[0m${ESC}[1m${ESC}[31mB${ESC}[22mC${ESC}[39m`);
+});
+
+test("leaving a nested Text restores the enclosing Text's own colour", () => {
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Text>
+        {`${ESC}[31mA`}
+        <Text color="blue">
+          B<Text color="green">C</Text>D
+        </Text>
+        {`E${ESC}[39m`}
+      </Text>
+    )),
+    { color: "truecolor", width: 20 },
+  );
+
+  // D is back to the enclosing Text's blue prop; E has no prop to fall back to,
+  // so it is the terminal default rather than the content's red.
+  expect(output).toBe(`${ESC}[31mA${ESC}[34mB${ESC}[32mC${ESC}[34mD${ESC}[39mE`);
+});
+
+test("three levels of Text props resolve innermost first", () => {
+  const output = renderToString(
+    defineComponent(() => () => (
+      <Text color="red">
+        A
+        <Text color="blue" bold>
+          B
+          <Text color="green" italic>
+            C
+          </Text>
+          D
+        </Text>
+        E
+      </Text>
+    )),
+    { color: "truecolor", width: 20 },
+  );
+
+  expect(output).toBe(
+    `${ESC}[31mA${ESC}[1m${ESC}[34mB${ESC}[3m${ESC}[32mC${ESC}[23m${ESC}[34mD${ESC}[22m${ESC}[31mE${ESC}[39m`,
+  );
+});
+
+test("content SGR inside a Text overrides its props from that point on", () => {
+  const output = renderToString(
+    defineComponent(() => () => <Text color="red">{`A${ESC}[32mB${ESC}[39mC`}</Text>),
+    { color: "truecolor", width: 20 },
+  );
+
+  // The authored end code puts the Text's own colour back, not the terminal's.
+  expect(output).toBe(`${ESC}[31mA${ESC}[32mB${ESC}[31mC${ESC}[39m`);
+});
+
+test("a mounted host paints a nested Text colour over content colour", async () => {
+  const App = defineComponent(() => () => (
+    <Text>
+      {`${ESC}[31mA`}
+      <Text color="blue">B</Text>
+      {`C${ESC}[39m`}
+    </Text>
+  ));
+  const { lastFrame } = await render(App, { columns: 20, color: "truecolor" });
+
+  expect(lastFrame()).toBe(`${ESC}[31mA${ESC}[34mB${ESC}[39mC`);
+});

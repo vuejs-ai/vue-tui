@@ -20,9 +20,10 @@ export interface TextStyleProps {
 /**
  * One channel a Text's props resolve for its subtree.
  *
- * `close` is the SGR sequence that would end the channel. It is what decides
- * whether the content already resolved that channel for a run, and a content
- * reset re-arms the contribution by writing exactly this sequence.
+ * `close` is the SGR sequence that ends the channel. A colour prop selecting
+ * the terminal's own colour writes exactly that sequence: an actively reset
+ * channel has no structured field to carry it, so the pair it opens is its own
+ * close.
  */
 export type TextStyleContribution =
   | {
@@ -31,6 +32,26 @@ export type TextStyleContribution =
       readonly color: Color;
     }
   | { readonly kind: "attribute"; readonly close: string; readonly attribute: number };
+
+/**
+ * One contribution as it stands over a stretch of content: which host's props
+ * opened it, and which channels the hosts inside that one resolve for the same
+ * stretch.
+ *
+ * Both are identity, not style. Two neighbouring chunks continue one span only
+ * when they name the same `owner` and the same `enclosed` channels — that is
+ * exactly the stretch the string pipeline wrapped in one open and one close,
+ * and content SGR left open at the end of the first chunk survives into the
+ * second only there. `owner` is an opaque object because the hosts live in
+ * `host/`, which `text/` may not import.
+ */
+export interface TextStyleSpan {
+  readonly contribution: TextStyleContribution;
+  /** The inline host whose props opened this span. */
+  readonly owner: object;
+  /** The channels the hosts inside `owner` resolve for this chunk. */
+  readonly enclosed: number;
+}
 
 const namedColorIndex = new Map<string, number>([
   ["black", 0],
