@@ -82,7 +82,8 @@ test("wrapText at width 0 keeps empty text to one empty row", () => {
 });
 
 test("wrapText at width 0 truncates to empty", () => {
-  // cliTruncate("A", 0) = "" for a zero-width cell.
+  // "A" displays one column, so it does not fit a zero-column cell, and a
+  // budget under 1 leaves no room even for the ellipsis.
   expect(wrapText("A", 0, "truncate")).toEqual([""]);
 });
 

@@ -181,6 +181,69 @@ test("the ellipsis inherits a colon-form sequence like any other style", () => {
   expect(line("truncate-middle")).toBe(`${ESC}[4:3mab${ESC}[24m…${ESC}[4:3mf${ESC}[24m`);
 });
 
+// A line that displays no columns at all still fits every budget, so
+// truncation leaves it alone: the modes shorten a line that is too wide, and
+// nothing here is too wide. Zero-width graphemes reach a Text through pasted
+// text, an editor's invisible characters, or a lone combining mark, and the
+// three modes must keep painting what the author wrote — with the props and the
+// hyperlink around it.
+const ZWSP = "\u200b";
+const VS16 = "\ufe0f";
+const COMBINING_ACUTE = "\u0301";
+
+test.each(["truncate", "truncate-start", "truncate-middle"] as const)(
+  "%s keeps a line that displays no columns",
+  (wrap) => {
+    const output = truncated(4, () => (
+      <Box width={4}>
+        <Text wrap={wrap}>{ZWSP}</Text>
+      </Box>
+    ));
+
+    expect(output).toBe(ZWSP);
+  },
+);
+
+test("a lone variation selector and a lone combining mark survive truncation", () => {
+  const line = (text: string) =>
+    truncated(4, () => (
+      <Box width={4}>
+        <Text wrap="truncate">{text}</Text>
+      </Box>
+    ));
+
+  expect(line(VS16)).toBe(VS16);
+  expect(line(COMBINING_ACUTE)).toBe(COMBINING_ACUTE);
+});
+
+test("a zero-column line keeps the props and the hyperlink written around it", () => {
+  const colored = truncated(4, () => (
+    <Box width={4}>
+      <Text color="red" wrap="truncate">
+        {ZWSP}
+      </Text>
+    </Box>
+  ));
+  const linked = truncated(4, () => (
+    <Box width={4}>
+      <Text wrap="truncate">{`${ESC}]8;;https://example.com${BEL}${ZWSP}${ESC}]8;;${BEL}`}</Text>
+    </Box>
+  ));
+
+  expect(colored).toBe(`${ESC}[31m${ZWSP}${ESC}[39m`);
+  expect(linked).toBe(`${ESC}]8;;https://example.com${BEL}${ZWSP}${ESC}]8;;${BEL}`);
+});
+
+test("each zero-column hard-newline line is kept", () => {
+  const output = truncated(4, () => (
+    <Box width={4}>
+      <Text wrap="truncate">{`${ZWSP}\n${ZWSP}`}</Text>
+    </Box>
+  ));
+
+  expect(output).toBe(`${ZWSP}\n${ZWSP}`);
+});
+
 test("a mounted host keeps an inner bold through a truncated outer dimColor", async () => {
   const App = defineComponent(() => () => (
     <Box width={4}>

@@ -636,6 +636,9 @@ function ellipsisCell(style: Style): Cell {
  *
  * The rules this implements:
  *
+ * - a line that fits the budget comes back whole. That is asked first, because
+ *   a line of only zero-width graphemes displays no columns and so fits even a
+ *   budget of zero, which the rule below would otherwise empty;
  * - a budget under 1 keeps nothing, and a budget of exactly 1 is the bare
  *   ellipsis carrying no style at all, whatever the line held;
  * - `end` keeps what fits in `width - 1` columns from the left, `start` the same
@@ -653,9 +656,9 @@ export function truncateCellLine(
   width: number,
   position: "start" | "middle" | "end",
 ): Cell[] {
-  if (width < 1) return [];
   const columns = displayedColumns(cells);
   if (columns <= width) return [...cells];
+  if (width < 1) return [];
   if (width === 1) return [ellipsisCell(defaultStyle)];
 
   if (position === "start") {
