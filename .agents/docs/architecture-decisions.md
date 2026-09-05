@@ -80,6 +80,13 @@ Entries without a stamp are drafts of judgments Yunfei expressed. A stamp alone 
 - **Why:** Yunfei's meaning: emit what the author wrote, the behaviour is whatever falls out of that, and the behaviour itself is undefined.
 - **Source:** Yunfei, 2026-09-05, ruling given when the two readings were laid out; no durable session URL is available, so this entry is the durable record.
 
+### Static writes what the author wrote, whatever the terminal shows
+
+- **Ruling:** A `Static` block is committed when its painted frame has content, independent of the resolved colour level; when the terminal cannot show the styling, the row is written anyway.
+- **Limits:** This decides Static's commit test only, not what counts as content in a frame generally.
+- **Why:** Yunfei's meaning: write out what the author wrote; a terminal that shows nothing because it disabled colour is the terminal's concern.
+- **Source:** Yunfei, 2026-09-05, ruling given when the blank-row case was laid out; no durable session URL is available, so this entry is the durable record.
+
 ## Open
 
 ### Which SGR attributes receive structured fields
