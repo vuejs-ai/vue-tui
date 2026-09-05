@@ -11,14 +11,9 @@ import {
   type Token,
 } from "@alcalzone/ansi-tokenize";
 import type { Cell } from "../frame/cell.ts";
-import type { Style } from "../frame/style.ts";
+import { defaultStyle, type Style } from "../frame/style.ts";
 import { hasAnsiControlCharacters, tokenizeAnsi } from "./ansi-tokenizer.ts";
-import {
-  cellsFromStyledChars,
-  cellVisualFromAnsiCodes,
-  graphemeSegmenter,
-  styledCharFromCell,
-} from "./cell-style.ts";
+import { cellVisualFromAnsiCodes, graphemeSegmenter } from "./cell-style.ts";
 
 export type WrapMode = "wrap" | "hard" | "truncate" | "truncate-middle" | "truncate-start";
 
@@ -220,53 +215,6 @@ function styledCharactersFromTokens(tokens: readonly Token[]): StyledChar[] {
   return characters;
 }
 
-function sameStyledCodes(left: readonly AnsiCode[], right: readonly AnsiCode[]): boolean {
-  return (
-    left.length === right.length &&
-    left.every(
-      (pair, index) => pair.code === right[index]!.code && pair.endCode === right[index]!.endCode,
-    )
-  );
-}
-
-function styledCodeDifference(from: readonly AnsiCode[], to: readonly AnsiCode[]): AnsiCode[] {
-  const endCodesInTarget = new Set(to.map((pair) => pair.endCode));
-  const codesInTarget = new Set(to.map((pair) => pair.code));
-  const codesInSource = new Set(from.map((pair) => pair.code));
-  const closesBeforeReplacement = new Set(["\x1b[0m"]);
-  const removed = reduceStyledCodes(
-    [],
-    from.filter((pair) =>
-      isIntensityStyle(pair)
-        ? !codesInTarget.has(pair.code)
-        : !endCodesInTarget.has(pair.endCode) ||
-          (closesBeforeReplacement.has(pair.endCode) && !codesInTarget.has(pair.code)),
-    ),
-  )
-    .reverse()
-    .map((pair) => ({ ...pair, code: pair.endCode }));
-  return [...removed, ...to.filter((pair) => !codesInSource.has(pair.code))];
-}
-
-function styledTransition(from: readonly AnsiCode[], to: readonly AnsiCode[]): string {
-  let current = reduceStyledCodes([], from);
-  const target = reduceStyledCodes([], to);
-  let output = "";
-  const maxRepairs = current.length + target.length + 2;
-
-  for (let attempt = 0; attempt < maxRepairs; attempt++) {
-    if (sameStyledCodes(current, target)) return output;
-    const difference = styledCodeDifference(current, target);
-    if (difference.length === 0) break;
-    output += ansiCodesToString(difference);
-    const next = reduceStyledCodes(current, difference);
-    if (sameStyledCodes(current, next)) break;
-    current = next;
-  }
-
-  return output + "\x1b[0m" + ansiCodesToString(target);
-}
-
 function normalizeOscForStyledCharacters(value: string): string {
   const escaped = value.startsWith("\x9d") ? `\x1b]${value.slice(1)}` : value;
   if (escaped.endsWith("\x1b\\")) return `${escaped.slice(0, -2)}\x07`;
@@ -360,20 +308,6 @@ export function styledGraphemesFromAnsi(text: string): StyledChar[] {
     });
   }
   return result;
-}
-
-/** Serialize styled graphemes while retaining independent bold and dim. */
-export function styledGraphemesToString(characters: readonly StyledChar[]): string {
-  let result = "";
-  let previousStyles: StyledChar["styles"] = [];
-
-  for (const character of characters) {
-    result += styledTransition(previousStyles, character.styles);
-    result += character.value;
-    previousStyles = character.styles;
-  }
-
-  return result + styledTransition(previousStyles, []);
 }
 
 /**
@@ -604,6 +538,88 @@ function styleMeasuredWrappedLines(
   return styledLines;
 }
 
+/** The columns one line of cells displays. */
+function displayedColumns(cells: readonly Cell[]): number {
+  let columns = 0;
+  for (const cell of cells) columns += cell.width;
+  return columns;
+}
+
+/**
+ * The cells wholly inside `[start, end)` slots, which is what `slice-ansi`
+ * selects: it opens at the first grapheme starting at or after `start` and stops
+ * at the first one that would cross `end`, so a grapheme a cut would split
+ * belongs to neither side.
+ *
+ * Slots, not columns: `slice-ansi` gives every grapheme at least one of them, so
+ * a zero-width grapheme claims a slot of its own while the budget the caller
+ * divides up counts it as nothing. That is the same slot model the width-zero
+ * wrap above walks, and mixing the two is the library's own arithmetic.
+ */
+function sliceCells(cells: readonly Cell[], start: number, end: number): Cell[] {
+  const slice: Cell[] = [];
+  let slot = 0;
+  for (const cell of cells) {
+    const cellEnd = slot + Math.max(1, cell.width);
+    if (slot >= start && slot < end && cellEnd <= end) slice.push(cell);
+    slot = cellEnd;
+  }
+  return slice;
+}
+
+function ellipsisCell(style: Style): Cell {
+  // The ellipsis never carries the hyperlink of the grapheme it inherits from:
+  // `cli-truncate` inserts it inside the SGR span `slice-ansi` re-emits and
+  // outside the OSC 8 open and close around it.
+  return { grapheme: "…", width: 1, style, link: undefined };
+}
+
+/**
+ * Truncate one line of cells the way `cli-truncate@6` truncates the string.
+ *
+ * Column arithmetic rather than a string round trip: a line serialized back to
+ * ANSI cannot carry bold and dim at once through the library — they share the
+ * `22m` close, so whichever was written last is the only one that survives, and
+ * a bold run inside a dim Text came back dim. The rules below are the library's,
+ * for the options {@link wrapText} passes it — `position` only, so `space` and
+ * `preferTruncationOnSpace` stay false and the character stays `…`:
+ *
+ * - a budget under 1 keeps nothing, and a budget of exactly 1 is the bare
+ *   ellipsis carrying no style at all, whatever the line held;
+ * - `end` keeps what fits in `width - 1` columns from the left, `start` the same
+ *   from the right, and `middle` keeps `floor(width / 2)` columns from the left
+ *   and the rest from the right. A grapheme a cut would split is dropped whole,
+ *   so a line of wide graphemes can come back narrower than the budget;
+ * - the ellipsis inherits the style of the retained grapheme it touches — the
+ *   last one for `end`, the first one for `start` — and inherits nothing at all
+ *   for `middle`, where the library joins two independently sliced strings and
+ *   does no inheriting between them. That asymmetry is the library's own, and it
+ *   is reproduced here rather than derived.
+ */
+export function truncateCellLine(
+  cells: readonly Cell[],
+  width: number,
+  position: "start" | "middle" | "end",
+): Cell[] {
+  if (width < 1) return [];
+  const columns = displayedColumns(cells);
+  if (columns <= width) return [...cells];
+  if (width === 1) return [ellipsisCell(defaultStyle)];
+
+  if (position === "start") {
+    const kept = sliceCells(cells, columns - width + 1, columns);
+    return [ellipsisCell(kept[0]?.style ?? defaultStyle), ...kept];
+  }
+  if (position === "middle") {
+    const half = Math.floor(width / 2);
+    const head = sliceCells(cells, 0, half);
+    const tail = sliceCells(cells, columns - (width - half) + 1, columns);
+    return [...head, ellipsisCell(defaultStyle), ...tail];
+  }
+  const kept = sliceCells(cells, 0, width - 1);
+  return [...kept, ellipsisCell(kept.at(-1)?.style ?? defaultStyle)];
+}
+
 function styleMeasuredTruncatedLines(
   sourceLines: readonly (readonly Cell[])[],
   wrappedLines: readonly string[],
@@ -624,19 +640,13 @@ function styleMeasuredTruncatedLines(
     // this branch truncates the styled line rather than projecting onto it.
     if (measuredPlain === sourcePlain) return [...sourceGraphemes];
 
-    // `cli-truncate` decides which graphemes survive and what the ellipsis
-    // inherits, and it works on a string. Serializing this line's cells and
-    // reading the result back is the one place style leaves structured form; it
-    // stays inside text/, beside the wrap plan the same library produced.
-    const styled = cliTruncate(
-      styledGraphemesToString(sourceGraphemes.map((run) => styledCharFromCell(run))),
-      Math.max(0, wrapWidth),
-      { position },
-    );
-    if (visibleText(styled) !== measuredPlain) {
+    // The wrap plan came from `cli-truncate` over the same line as a string, so
+    // what this keeps must spell exactly what that plan holds.
+    const truncated = truncateCellLine(sourceGraphemes, Math.max(0, wrapWidth), position);
+    if (truncated.map((cell) => cell.grapheme).join("") !== measuredPlain) {
       throw new Error("Measured text plan does not match styled source.");
     }
-    return cellsFromStyledChars(styledGraphemesFromAnsi(styled));
+    return truncated;
   });
 }
 

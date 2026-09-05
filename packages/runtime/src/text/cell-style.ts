@@ -13,20 +13,6 @@ import {
   type Style,
 } from "../frame/style.ts";
 
-/** The structured attribute each SGR parameter switches on, and the code that ends it. */
-const attributeCodes = [
-  [StyleAttribute.bold, "\x1b[1m", "\x1b[22m"],
-  [StyleAttribute.dim, "\x1b[2m", "\x1b[22m"],
-  [StyleAttribute.italic, "\x1b[3m", "\x1b[23m"],
-  [StyleAttribute.underline, "\x1b[4m", "\x1b[24m"],
-  [StyleAttribute.blink, "\x1b[5m", "\x1b[25m"],
-  [StyleAttribute.rapidBlink, "\x1b[6m", "\x1b[25m"],
-  [StyleAttribute.inverse, "\x1b[7m", "\x1b[27m"],
-  [StyleAttribute.conceal, "\x1b[8m", "\x1b[28m"],
-  [StyleAttribute.strikethrough, "\x1b[9m", "\x1b[29m"],
-  [StyleAttribute.overline, "\x1b[53m", "\x1b[55m"],
-] as const satisfies readonly (readonly [number, string, string])[];
-
 const attributeBySgrCode = new Map<number, number>([
   [1, StyleAttribute.bold],
   [2, StyleAttribute.dim],
@@ -155,66 +141,4 @@ export function cellsFromPlainText(text: string, style: Style): Cell[] {
     cells.push({ grapheme: segment, width: stringWidth(segment), style, link: undefined });
   }
   return cells;
-}
-
-function colorCode(color: Color, background: boolean): string {
-  switch (color.kind) {
-    case "default":
-      return background ? backgroundEndCode : foregroundEndCode;
-    case "ansi16":
-      return color.index < 8
-        ? `\x1b[${(background ? 40 : 30) + color.index}m`
-        : `\x1b[${(background ? 100 : 90) + color.index - 8}m`;
-    case "ansi256":
-      return `\x1b[${background ? 48 : 38};5;${color.index}m`;
-    case "rgb":
-      return `\x1b[${background ? 48 : 38};2;${color.red};${color.green};${color.blue}m`;
-  }
-}
-
-/**
- * The SGR pairs one cell's style holds, for the string form `cli-truncate`
- * needs. This is the inverse of {@link cellVisualFromAnsiCodes} up to the order
- * the codes were originally written in, which no longer exists once the style
- * is structured; re-parsing the result reproduces the same `Style`.
- */
-export function ansiCodesFromCell(cell: Cell): AnsiCode[] {
-  const codes: AnsiCode[] = [];
-  if (cell.link) {
-    codes.push({
-      type: "ansi",
-      code: `\x1b]8;${cell.link.parameters};${cell.link.target}\x07`,
-      endCode: "\x1b]8;;\x07",
-    });
-  }
-  for (const [attribute, code, endCode] of attributeCodes) {
-    if ((cell.style.attrs & attribute) !== 0) codes.push({ type: "ansi", code, endCode });
-  }
-  if (cell.style.background.kind !== "default") {
-    codes.push({
-      type: "ansi",
-      code: colorCode(cell.style.background, true),
-      endCode: backgroundEndCode,
-    });
-  }
-  if (cell.style.foreground.kind !== "default") {
-    codes.push({
-      type: "ansi",
-      code: colorCode(cell.style.foreground, false),
-      endCode: foregroundEndCode,
-    });
-  }
-  for (const pair of cell.style.extraSgr) {
-    codes.push({ type: "ansi", code: pair.code, endCode: pair.endCode });
-  }
-  return codes;
-}
-
-export function styledCharFromCell(cell: Cell): StyledChar {
-  return {
-    type: "char",
-    value: cell.grapheme,
-    fullWidth: cell.width > 1,
-    styles: ansiCodesFromCell(cell),
-  };
 }
