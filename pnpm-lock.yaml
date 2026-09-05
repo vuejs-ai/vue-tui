@@ -270,9 +270,6 @@ importers:
       cli-boxes:
         specifier: ^3.0.0
         version: 3.0.0
-      cli-truncate:
-        specifier: ^6.0.0
-        version: 6.0.0
       patch-console:
         specifier: 'catalog:'
         version: 2.0.0
@@ -1838,10 +1835,6 @@ packages:
   cli-boxes@3.0.0:
     resolution: {integrity: sha512-/lzGpEWL/8PfI0BmBOPRwp0c/wFNX1RdUML3jK/RcSBA9T8mZDdQpqYBKtCFTOfQbwPqWEOpjqW+Fnayc0969g==}
     engines: {node: '>=10'}
-
-  cli-truncate@6.0.0:
-    resolution: {integrity: sha512-3+YKIUFsohD9MIoOFPFBldjAlnfCmCDcqe6aYGFqlDTRKg80p4wg35L+j83QQ63iOlKRccEkbn8IuM++HsgEjA==}
-    engines: {node: '>=22'}
 
   combined-stream@1.0.8:
     resolution: {integrity: sha512-FQN4MRfuJeHf7cBbBMJFXhKSDq+2kAArBlmRBvcvFE5BB1HZKXtSFASDhdlz9zOYwxh8lDdnvmMOe/+5cdoEdg==}
@@ -3581,11 +3574,6 @@ snapshots:
   chalk@5.6.2: {}
 
   cli-boxes@3.0.0: {}
-
-  cli-truncate@6.0.0:
-    dependencies:
-      slice-ansi: 9.0.0
-      string-width: 8.2.1
 
   combined-stream@1.0.8:
     dependencies:

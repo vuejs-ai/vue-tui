@@ -6,9 +6,10 @@ import { Box, renderToString, Text } from "@vue-tui/runtime";
 // What a truncated line keeps. Every retained grapheme keeps the style its
 // author wrote — including two attributes that share one end code, such as an
 // inner `bold` under an outer `dimColor`, which a serialized line cannot carry
-// through `cli-truncate` because `22m` closes both. The ellipsis inherits what
-// the library gives it: the neighbouring retained grapheme's style in `truncate`
-// and `truncate-start`, and nothing at all in `truncate-middle`.
+// because `22m` closes both. The ellipsis inherits the complete style of the
+// retained grapheme it touches in `truncate` and `truncate-start`, and nothing
+// at all in `truncate-middle`, where the two retained pieces are cut
+// independently and it belongs to neither.
 
 const ESC = "\x1b";
 const BEL = "\x07";
@@ -160,6 +161,24 @@ test("each hard-newline line is truncated against the same budget", () => {
   expect(output).toBe(
     `${ESC}[31mHello …${ESC}[39m\n${ESC}[31mshort${ESC}[39m\n${ESC}[31mlonger…${ESC}[39m`,
   );
+});
+
+// "Complete style" includes a sequence with colon sub-parameters, which Runtime
+// carries through as the exact pair the author wrote. Truncating on cells rather
+// than on a serialized line is what makes that reachable: a scan over an SGR
+// string that accepts only digits and semicolons stops at the colon and leaves
+// the ellipsis bare.
+test("the ellipsis inherits a colon-form sequence like any other style", () => {
+  const line = (wrap: "truncate" | "truncate-start" | "truncate-middle") =>
+    truncated(4, () => (
+      <Box width={4}>
+        <Text wrap={wrap}>{`${ESC}[4:3mabcdef`}</Text>
+      </Box>
+    ));
+
+  expect(line("truncate")).toBe(`${ESC}[4:3mabc…${ESC}[24m`);
+  expect(line("truncate-start")).toBe(`${ESC}[4:3m…def${ESC}[24m`);
+  expect(line("truncate-middle")).toBe(`${ESC}[4:3mab${ESC}[24m…${ESC}[4:3mf${ESC}[24m`);
 });
 
 test("a mounted host keeps an inner bold through a truncated outer dimColor", async () => {

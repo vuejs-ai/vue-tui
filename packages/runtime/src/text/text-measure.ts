@@ -1,4 +1,3 @@
-import cliTruncate from "cli-truncate";
 import sliceAnsi from "slice-ansi";
 import stringWidth from "string-width";
 import wrapAnsi from "wrap-ansi";
@@ -13,7 +12,7 @@ import {
 import type { Cell } from "../frame/cell.ts";
 import { defaultStyle, type SgrPair, type Style } from "../frame/style.ts";
 import { hasAnsiControlCharacters, tokenizeAnsi } from "./ansi-tokenizer.ts";
-import { graphemeSegmenter } from "./cell-style.ts";
+import { cellsFromStyledChars, graphemeSegmenter } from "./cell-style.ts";
 
 export type WrapMode = "wrap" | "hard" | "truncate" | "truncate-middle" | "truncate-start";
 
@@ -469,18 +468,29 @@ export function wrapText(text: string, width: number, mode: WrapMode = "wrap"): 
     return wrapAnsi(text, width, { hard: true, trim: false, wordWrap: false }).split("\n");
   }
 
-  // Truncate each hard-newline segment independently. Passing the complete
-  // multiline string to cli-truncate lets one over-wide line discard or merge
-  // every later line. The per-line path keeps hard breaks, uses one budgeted
-  // ellipsis only when that line is shortened, and inherits cli-truncate's
-  // ANSI-, grapheme-, and terminal-cell-aware slicing.
-  const lines = text.split("\n");
-  const position =
-    mode === "truncate-start" ? "start" : mode === "truncate-middle" ? "middle" : "end";
+  // Truncate each hard-newline segment independently, so one over-wide line
+  // cannot discard or merge the ones after it: hard breaks stay, and only a
+  // line that is actually shortened spends a column on the ellipsis. The plan
+  // is the cells `truncateCellLine` keeps, which is what paint writes.
+  const position = truncatePosition(mode);
   const budget = Math.max(0, width);
-  return lines.map((line) =>
-    stringWidth(line) <= budget ? line : cliTruncate(line, budget, { position }),
-  );
+  return text.split("\n").map((line) => truncatedLineText(line, budget, position));
+}
+
+type TruncatePosition = "start" | "middle" | "end";
+
+type TruncateMode = Extract<WrapMode, "truncate" | "truncate-middle" | "truncate-start">;
+
+function truncatePosition(mode: TruncateMode): TruncatePosition {
+  return mode === "truncate-start" ? "start" : mode === "truncate-middle" ? "middle" : "end";
+}
+
+/** The visible text one truncated line holds, which is the plan layout records. */
+function truncatedLineText(line: string, width: number, position: TruncatePosition): string {
+  const cells = cellsFromStyledChars(styledGraphemesFromAnsi(line));
+  return truncateCellLine(cells, width, position)
+    .map((cell) => cell.grapheme)
+    .join("");
 }
 
 /**
@@ -587,15 +597,14 @@ function displayedColumns(cells: readonly Cell[]): number {
 }
 
 /**
- * The cells wholly inside `[start, end)` slots, which is what `slice-ansi`
- * selects: it opens at the first grapheme starting at or after `start` and stops
- * at the first one that would cross `end`, so a grapheme a cut would split
- * belongs to neither side.
+ * The cells wholly inside `[start, end)` slots: the slice opens at the first
+ * grapheme starting at or after `start` and stops at the first one that would
+ * cross `end`, so a grapheme a cut would split belongs to neither side.
  *
- * Slots, not columns: `slice-ansi` gives every grapheme at least one of them, so
- * a zero-width grapheme claims a slot of its own while the budget the caller
- * divides up counts it as nothing. That is the same slot model the width-zero
- * wrap above walks, and mixing the two is the library's own arithmetic.
+ * Slots, not columns: every grapheme claims at least one of them, so a
+ * zero-width grapheme takes a slot of its own while the budget the caller
+ * divides up counts it as nothing. The width-zero wrap above walks the same
+ * slot model.
  */
 function sliceCells(cells: readonly Cell[], start: number, end: number): Cell[] {
   const slice: Cell[] = [];
@@ -609,21 +618,23 @@ function sliceCells(cells: readonly Cell[], start: number, end: number): Cell[] 
 }
 
 function ellipsisCell(style: Style): Cell {
-  // The ellipsis never carries the hyperlink of the grapheme it inherits from:
-  // `cli-truncate` inserts it inside the SGR span `slice-ansi` re-emits and
-  // outside the OSC 8 open and close around it.
+  // The ellipsis takes the touching grapheme's style but never its hyperlink:
+  // a link addresses the text it covers, and the ellipsis stands for the part
+  // of that text this line no longer shows.
   return { grapheme: "…", width: 1, style, link: undefined };
 }
 
 /**
- * Truncate one line of cells the way `cli-truncate@6` truncates the string.
+ * Truncate one line of cells to `width` columns, marking the cut with `…`.
  *
  * Column arithmetic rather than a string round trip: a line serialized back to
- * ANSI cannot carry bold and dim at once through the library — they share the
- * `22m` close, so whichever was written last is the only one that survives, and
- * a bold run inside a dim Text came back dim. The rules below are the library's,
- * for the options {@link wrapText} passes it — `position` only, so `space` and
- * `preferTruncationOnSpace` stay false and the character stays `…`:
+ * ANSI cannot carry bold and dim at once, because they share the `22m` close, so
+ * whichever was written last is the only one that survives and a bold run inside
+ * a dim Text came back dim. {@link wrapText} plans a truncated line by running
+ * this over the same cells, so layout and paint hold one implementation between
+ * them and no plan has to be checked against a second one.
+ *
+ * The rules this implements:
  *
  * - a budget under 1 keeps nothing, and a budget of exactly 1 is the bare
  *   ellipsis carrying no style at all, whatever the line held;
@@ -631,11 +642,11 @@ function ellipsisCell(style: Style): Cell {
  *   from the right, and `middle` keeps `floor(width / 2)` columns from the left
  *   and the rest from the right. A grapheme a cut would split is dropped whole,
  *   so a line of wide graphemes can come back narrower than the budget;
- * - the ellipsis inherits the style of the retained grapheme it touches — the
- *   last one for `end`, the first one for `start` — and inherits nothing at all
- *   for `middle`, where the library joins two independently sliced strings and
- *   does no inheriting between them. That asymmetry is the library's own, and it
- *   is reproduced here rather than derived.
+ * - the ellipsis inherits the complete style of the retained grapheme it
+ *   touches — the last one for `end`, the first one for `start` — including a
+ *   colon-form sequence Runtime carries as an exact pair. In `middle` it
+ *   inherits nothing: the two retained pieces are cut independently and it
+ *   belongs to neither, so it is written bare.
  */
 export function truncateCellLine(
   cells: readonly Cell[],
@@ -661,34 +672,22 @@ export function truncateCellLine(
   return [...kept, ellipsisCell(kept.at(-1)?.style ?? defaultStyle)];
 }
 
+// A truncated line carries the ellipsis, which no run holds, so paint cannot
+// project the runs onto the measured line the way the wrapping modes do. It
+// truncates the styled line itself, through the same call layout planned with,
+// and reads only the line count off the plan.
 function styleMeasuredTruncatedLines(
   sourceLines: readonly (readonly Cell[])[],
   wrappedLines: readonly string[],
-  mode: Extract<WrapMode, "truncate" | "truncate-middle" | "truncate-start">,
+  mode: TruncateMode,
   wrapWidth: number,
 ): Cell[][] {
   if (sourceLines.length !== wrappedLines.length) {
     throw new Error("Measured text plan does not match styled source.");
   }
-  const position =
-    mode === "truncate-start" ? "start" : mode === "truncate-middle" ? "middle" : "end";
-  return sourceLines.map((sourceGraphemes, index) => {
-    const measuredLine = wrappedLines[index]!;
-    const measuredPlain = visibleText(measuredLine);
-    if (measuredPlain === "") return [];
-    const sourcePlain = sourceGraphemes.map((run) => run.grapheme).join("");
-    // The measured line already carries the ellipsis, which no run holds, so
-    // this branch truncates the styled line rather than projecting onto it.
-    if (measuredPlain === sourcePlain) return [...sourceGraphemes];
-
-    // The wrap plan came from `cli-truncate` over the same line as a string, so
-    // what this keeps must spell exactly what that plan holds.
-    const truncated = truncateCellLine(sourceGraphemes, Math.max(0, wrapWidth), position);
-    if (truncated.map((cell) => cell.grapheme).join("") !== measuredPlain) {
-      throw new Error("Measured text plan does not match styled source.");
-    }
-    return truncated;
-  });
+  const position = truncatePosition(mode);
+  const budget = Math.max(0, wrapWidth);
+  return sourceLines.map((sourceGraphemes) => truncateCellLine(sourceGraphemes, budget, position));
 }
 
 /**
