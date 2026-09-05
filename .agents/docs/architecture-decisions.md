@@ -54,8 +54,8 @@ Entries without a stamp are drafts of judgments Yunfei expressed. A stamp alone 
 
 [VOUCHED @hyfdev 2026-09-04]
 
-- **Ruling:** For `@vue-tui/runtime`, end-to-end and integration tests are the primary evidence for behavior and unit tests are supplementary. Internal code logic is never changed, and never hacked around, in order to make it unit-testable.
-- **Limits:** Yunfei did not enumerate what counts as a hack. This does not forbid unit tests of pure functions that already exist as units, and it does not remove tests already in the repository. It does not decide suite placement, file naming, or harness details, which the repository's testing rules in `AGENTS.md` already govern. It covers Runtime code; how the other packages are tested is not decided here.
+- **Ruling:** For `@vue-tui/runtime`, end-to-end and integration tests are the primary evidence for behavior and unit tests are supplementary. Internal code is never changed, and no code is added to it, for the sake of a unit test.
+- **Limits:** The ruling does not enumerate forms; what it forbids is a change a unit test needs and production does not. This does not forbid unit tests of pure functions that already exist as units, and it does not remove tests already in the repository. It does not decide suite placement, file naming, or harness details, which the repository's testing rules in `AGENTS.md` already govern. It covers Runtime code; how the other packages are tested is not decided here.
 - **Why:** Yunfei gave this ruling as a direct instruction and stated no reason for it, so none is recorded.
 - **Source:** Yunfei, 2026-09-04, explicit instruction to adopt this principle and stamp it; no durable session URL is available, so this entry is the durable record.
 
