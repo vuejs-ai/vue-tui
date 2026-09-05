@@ -73,6 +73,13 @@ Entries without a stamp are drafts of judgments Yunfei expressed. A stamp alone 
 - **Why:** Yunfei adopted the recommendation as it was given: the target painter produces no strings, so degradation needs one home both hosts reach, and the encoder is that place. He gave no further reason.
 - **Source:** Yunfei, 2026-09-05, adopted the recommendation by reference after the alternative was laid out; no durable session URL is available, so this entry is the durable record.
 
+### A reset inside content is undefined behaviour
+
+- **Ruling:** Runtime parses a `Text`'s content into cells with the component's props as the base style and the content's own SGR layered on it; what an authored `\x1b[0m` inside content does beyond clearing the content's own styling is not a contract, is not pinned by a test, and Runtime carries no mechanism to reproduce any particular byte outcome for it.
+- **Limits:** This does not change what content SGR with proper end codes produces, nor OSC 8, nor `extraSgr`.
+- **Why:** Yunfei's meaning: emit what the author wrote, the behaviour is whatever falls out of that, and the behaviour itself is undefined.
+- **Source:** Yunfei, 2026-09-05, ruling given when the two readings were laid out; no durable session URL is available, so this entry is the durable record.
+
 ## Open
 
 ### Which SGR attributes receive structured fields
@@ -80,9 +87,3 @@ Entries without a stamp are drafts of judgments Yunfei expressed. A stamp alone 
 - **Question:** Which authored SGR attributes beyond the common 1–9 and 53 set deserve their own `Cell.attrs` bits rather than the exact `extraSgr` fallback.
 - **Stopgap:** `Cell.extraSgr` carries unmodelled numeric and colon-form attributes through the frame with their matching terminators.
 - **What would settle it:** A demonstrated consumer or terminal behavior that benefits from structured inspection, followed by Yunfei's judgment on that attribute's admission.
-
-### What a reset inside content means
-
-- **Question:** Whether a `\x1b[0m` written inside a `Text`'s content cancels that `Text`'s own props or returns each channel to them. Cancellation is the byte behaviour the previous string pipeline produced by wrapping content in SGR: the reset closes the enclosing props for the rest of the line, a channel's own end code re-arms that one prop, and a physical line break re-arms them all. It costs `TextContentReset`, `scanContentReset`, `cancellableEndCodes` and the `groupStart` threading between `text/text-content.ts` and `paint/paint.ts` — about 90 lines — plus an `at` and a `rearmed` entry per run on every parsed content that holds a reset. The structural reading gives a content reset one meaning instead: each channel returns to the enclosing `Text`'s contribution. It deletes that mechanism and its per-run arrays, and changes the bytes vue-tui writes for content carrying an authored reset.
-- **Stopgap:** Runtime cancels. Three cases in `tests/runtime/integration/components/text/ansi.test.tsx` pin the bytes: "a reset written in Text content also clears the component's own styling", "a channel's end code written in Text content re-opens that prop", and "a reset keeps clearing the component's styling across a wrapped row".
-- **What would settle it:** Yunfei's ruling on which of the two a content reset means. The choice is what vue-tui promises an author who writes ANSI inside a `Text`, not a structural preference.

@@ -83,19 +83,6 @@ export interface TuiTextRun {
   readonly link: TuiTextRunLink | undefined;
 }
 
-/**
- * A full SGR reset written inside the content also cancels the SGR the
- * enclosing Text hosts open around it, because a reset closes those spans
- * without the re-open each span's own end code triggers. `at[i]` is the run a
- * reset last took effect at within the current physical line (`-1` for none),
- * and `rearmed[i]` the end codes seen since, so a later `\x1b[39m` restores the
- * foreground span alone.
- */
-export interface TuiTextContentReset {
-  readonly at: readonly number[];
-  readonly rearmed: readonly number[];
-}
-
 /** The runs one nested inline host contributes, in content order. */
 export interface TuiTextChunk {
   readonly runs: number;
@@ -111,7 +98,6 @@ export interface TuiTextContent {
   readonly text: string;
   readonly runs: readonly TuiTextRun[];
   readonly chunks: readonly TuiTextChunk[];
-  readonly reset: TuiTextContentReset | null;
 }
 
 export interface TuiText extends NodeBase {

@@ -305,27 +305,10 @@ function composeTextRuns(
   if (chunkStyles.every((list) => list.length === 0)) return content.runs;
 
   const composed: Cell[] = [];
-  const blocked = content.chunks.map((chunk) =>
-    chunk.nesting.reduce((mask, nested) => mask | explicitTextStyleChannels(nested.props), 0),
-  );
   let start = 0;
-  let groupStart = 0;
   for (let index = 0; index < content.chunks.length; index++) {
-    const chunk = content.chunks[index]!;
-    // One group covers every neighbouring chunk this node styles identically, so
-    // a reset written in one of them keeps cancelling that style through the
-    // rest of the group, exactly as one wrap around the joined text did.
-    if (index === 0 || blocked[index] !== blocked[index - 1]) groupStart = start;
-    const end = start + chunk.runs;
-    styleContentRuns(
-      content.runs,
-      content.reset,
-      start,
-      end,
-      groupStart,
-      chunkStyles[index]!,
-      composed,
-    );
+    const end = start + content.chunks[index]!.runs;
+    styleContentRuns(content.runs, start, end, chunkStyles[index]!, composed);
     start = end;
   }
   return composed;
