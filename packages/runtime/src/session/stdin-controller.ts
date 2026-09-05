@@ -23,7 +23,6 @@ export interface ManagedInputSession {
   readonly isManagedInputReady: boolean;
   acquireKittyKeyboard(): () => void;
   readonly isKittyKeyboardReady: boolean;
-  writeTerminal(data: string, onHandoff?: () => void, onAttempt?: () => void): boolean;
   requestTerminalReconcile(): void;
   reportManagedInputFailure(error: unknown): void;
 }
@@ -55,46 +54,6 @@ export interface StdinController extends StdinContext {
   setCleanupErrorSink: (sink: ((error: unknown) => void) | null) => void;
 }
 
-interface RawModeState {
-  refs: number;
-  // True between a last-release (refs→0) and the microtask that actually disables
-  // raw mode. A same-tick re-acquire reads this to know raw mode is still
-  // physically on, so it can skip re-issuing ref()/setRawMode(true) and cancel the
-  // queued disable.
-  pendingDisable: boolean;
-  baselineRaw: boolean;
-  changedRawMode: boolean;
-  activeRefs: number;
-  physicalActive: boolean;
-  physicalRawUncertain: boolean;
-  physicalRefHeld: boolean;
-  physicalRefUncertain: boolean;
-  reconcilingPhysical: boolean;
-  physicalReconcileRequested: boolean;
-}
-const rawModeRegistry = new WeakMap<object, RawModeState>();
-
-function getRawModeState(inputOwner: object): RawModeState {
-  let state = rawModeRegistry.get(inputOwner);
-  if (!state) {
-    state = {
-      refs: 0,
-      pendingDisable: false,
-      baselineRaw: false,
-      changedRawMode: false,
-      activeRefs: 0,
-      physicalActive: false,
-      physicalRawUncertain: false,
-      physicalRefHeld: false,
-      physicalRefUncertain: false,
-      reconcilingPhysical: false,
-      physicalReconcileRequested: false,
-    };
-    rawModeRegistry.set(inputOwner, state);
-  }
-  return state;
-}
-
 interface CreateStdinControllerOptions {
   exitOnCtrlC: boolean;
   exit(): void;
@@ -106,7 +65,6 @@ export function createStdinController(
   session: ManagedInputSession,
   opts: CreateStdinControllerOptions,
 ): StdinController {
-  const inputOwner = terminal.inputOwner;
   let controller!: StdinController;
   const inputSubscriptions = createInputDispatcher({
     acquire() {
@@ -141,19 +99,14 @@ export function createStdinController(
     resolved: undefined,
   };
   let cleanupErrorSink: ((error: unknown) => void) | null = null;
+  /** Logical bracketed-paste demand; the leases below express it physically. */
   let bracketedPasteModeCount = 0;
   const bracketedPasteLeases: TerminalLease<"bracketed-paste">[] = [];
-  let pendingBracketedPasteMode: { readonly enabled: boolean; attempted: boolean } | undefined;
-  let reconcilingBracketedPaste = false;
-  let bracketedPasteReconcileRequested = false;
-  let bracketedPasteSyncRequested = false;
   let suspended = false;
   let disposed = false;
   let releaseKittyKeyboardDemand: (() => void) | undefined;
   let reconcilingKittyDemand = false;
   let kittyDemandReconcileRequested = false;
-  let bracketedPastePhysicallyEnabled = false;
-  let bracketedPastePhysicalUncertain = false;
   let localRefs = 0;
   const rawModeLeases: TerminalLease<"raw">[] = [];
   /** Logical managed-input owners, whether or not this stream supports raw mode. */
@@ -176,37 +129,12 @@ export function createStdinController(
   let semanticInputReconcileRequested = false;
   let resumeAwaitingTerminalModes = false;
 
-  // True once bracketed paste has been enabled at least once on this controller
-  // (semantic input was active). Lets signal-exit teardown re-issue a SYNCHRONOUS
-  // paste-OFF even after Vue's unmount already ran the async disable and zeroed
-  // bracketedPasteModeCount (see dispose(sync) below).
-  let everEnabledBracketedPaste = false;
-
   // Write terminal-mode escapes only when stdout can still take them. `isTTY`
   // stays truthy after a stream is destroyed or ended, so a restore gated on it
   // alone throws ERR_STREAM_DESTROYED on a teardown where stdout is already
   // gone; the backend's `canWrite` fact carries that check.
   function canWriteTerminalMode(): boolean {
     return terminal.capabilities.stdout.isTTY && terminal.capabilities.stdout.canWrite;
-  }
-
-  function writeTerminalMode(
-    data: string,
-    sync = false,
-    onHandoff: () => void = () => {},
-    onAttempt: () => void = () => {},
-  ): boolean {
-    if (!canWriteTerminalMode()) return false;
-    if (sync) {
-      // The base WriteStream type doesn't declare `fd`; tty/fs streams do.
-      // Let failures propagate to the reconciler: OFF transitions are retried
-      // once before the outer signal/suspension cleanup swallows the error.
-      onAttempt();
-      terminal.writeSync("stdout", data);
-      onHandoff();
-      return true;
-    }
-    return session.writeTerminal(data, onHandoff, onAttempt);
   }
 
   function runTerminalCleanup(operation: () => void): void {
@@ -228,111 +156,29 @@ export function createStdinController(
     session.reportManagedInputFailure(error);
   }
 
+  /**
+   * Match the bracketed-paste leases this controller holds to the demand it may
+   * physically express. The lease issues the escape at the edges: only the first
+   * acquisition and the last release reach the device.
+   */
   function reconcileBracketedPasteMode(sync = false): void {
-    bracketedPasteSyncRequested ||= sync;
-    if (reconcilingBracketedPaste) {
-      bracketedPasteReconcileRequested = true;
-      return;
+    const desired = disposed || suspended ? 0 : bracketedPasteModeCount;
+    while (bracketedPasteLeases.length > desired) {
+      bracketedPasteLeases.pop()!.release({ sync });
     }
-
-    reconcilingBracketedPaste = true;
-    try {
-      while (true) {
-        bracketedPasteReconcileRequested = false;
-        const useSync = bracketedPasteSyncRequested;
-        bracketedPasteSyncRequested = false;
-        const shouldEnable =
-          !disposed && !suspended && bracketedPasteModeCount > 0 && canWriteTerminalMode();
-        if (pendingBracketedPasteMode) break;
-        if (bracketedPastePhysicalUncertain) {
-          const pending = { enabled: false, attempted: false };
-          pendingBracketedPasteMode = pending;
-          try {
-            const accepted = writeTerminalMode(
-              "\x1b[?2004l",
-              useSync,
-              () => {
-                if (pendingBracketedPasteMode !== pending) return;
-                pendingBracketedPasteMode = undefined;
-                bracketedPastePhysicallyEnabled = false;
-                bracketedPastePhysicalUncertain = false;
-                session.requestTerminalReconcile();
-              },
-              () => {
-                if (pendingBracketedPasteMode === pending) pending.attempted = true;
-              },
-            );
-            if (!accepted) {
-              if (pendingBracketedPasteMode === pending) pendingBracketedPasteMode = undefined;
-              session.requestTerminalReconcile();
-            }
-          } catch (error) {
-            if (pendingBracketedPasteMode === pending) {
-              pendingBracketedPasteMode = undefined;
-              if (pending.attempted) bracketedPastePhysicalUncertain = true;
-            }
-            throw error;
-          }
-          break;
-        }
-        if (shouldEnable === bracketedPastePhysicallyEnabled && !bracketedPastePhysicalUncertain) {
-          if (!bracketedPasteReconcileRequested) break;
-          continue;
-        }
-
-        const pending = { enabled: shouldEnable, attempted: false };
-        pendingBracketedPasteMode = pending;
-        try {
-          const accepted = writeTerminalMode(
-            shouldEnable ? "\x1b[?2004h" : "\x1b[?2004l",
-            useSync,
-            () => {
-              if (pendingBracketedPasteMode !== pending) return;
-              pendingBracketedPasteMode = undefined;
-              bracketedPastePhysicallyEnabled = shouldEnable;
-              bracketedPastePhysicalUncertain = false;
-              if (shouldEnable) everEnabledBracketedPaste = true;
-              session.requestTerminalReconcile();
-            },
-            () => {
-              if (pendingBracketedPasteMode === pending) pending.attempted = true;
-            },
-          );
-          if (!accepted) {
-            if (pendingBracketedPasteMode === pending) {
-              pendingBracketedPasteMode = undefined;
-            }
-            session.requestTerminalReconcile();
-            break;
-          }
-        } catch (error) {
-          if (pendingBracketedPasteMode === pending) {
-            pendingBracketedPasteMode = undefined;
-            if (pending.attempted) bracketedPastePhysicalUncertain = true;
-          }
-          throw error;
-        }
-        if (pendingBracketedPasteMode) break;
-      }
-    } finally {
-      reconcilingBracketedPaste = false;
+    while (bracketedPasteLeases.length < desired) {
+      bracketedPasteLeases.push(terminal.acquire("bracketed-paste"));
     }
-  }
-
-  // On an abrupt signal path Vue cleanup may already have issued the normal
-  // async OFF and cleared the logical count. Re-issuing OFF synchronously is
-  // idempotent and guarantees the restore reaches the terminal before re-raise.
-  function forceDisableBracketedPaste(sync: boolean): void {
-    writeTerminalMode("\x1b[?2004l", sync);
-    pendingBracketedPasteMode = undefined;
-    bracketedPastePhysicallyEnabled = false;
-    bracketedPastePhysicalUncertain = false;
   }
 
   function reissueIdempotentTerminalDisables(sync: boolean): void {
-    if (everEnabledBracketedPaste) {
-      runTerminalCleanup(() => forceDisableBracketedPaste(sync));
-    }
+    // On an abrupt signal path Vue cleanup may already have issued the normal
+    // async OFF and cleared the logical count. Re-issuing OFF synchronously is
+    // idempotent and guarantees the restore reaches the terminal before re-raise.
+    runTerminalCleanup(() => {
+      bracketedPasteLeases.length = 0;
+      terminal.restoreMode("bracketed-paste", { sync });
+    });
   }
 
   function reconcileSharedSubscription(): void {
@@ -342,10 +188,8 @@ export function createStdinController(
         (session.isManagedInputReady &&
           session.isKittyKeyboardReady &&
           (!canWriteTerminalMode() ||
-            (bracketedPasteModeCount === 0
-              ? !bracketedPastePhysicallyEnabled && !bracketedPastePhysicalUncertain
-              : bracketedPastePhysicallyEnabled && !bracketedPastePhysicalUncertain)) &&
-          pendingBracketedPasteMode === undefined))
+            (terminal.isModeSettled("bracketed-paste") &&
+              (bracketedPasteModeCount === 0 || terminal.isModeActive("bracketed-paste"))))))
     ) {
       resumeAwaitingTerminalModes = false;
     }
@@ -506,151 +350,6 @@ export function createStdinController(
     }
   }
 
-  function reconcilePhysicalRawMode(state: RawModeState): void {
-    if (state.reconcilingPhysical) {
-      state.physicalReconcileRequested = true;
-      return;
-    }
-
-    state.reconcilingPhysical = true;
-    let firstError: unknown;
-    let hasError = false;
-    let mustConvergeAfterError = false;
-    const retriedTransitions = new Set<"raw-on" | "ref" | "raw-off" | "unref">();
-
-    function recordTransitionError(
-      error: unknown,
-      transition: "raw-on" | "ref" | "raw-off" | "unref",
-      recoverWithoutReentry = false,
-    ): boolean {
-      if (!hasError) {
-        firstError = error;
-        hasError = true;
-      }
-      // A nested acquire/release returned while this host callback was still
-      // running. Finish *all* raw + ref transitions required by that surviving
-      // owner before surfacing the original error to the outer caller. Each
-      // physical operation gets one recovery attempt, so a raw restore and an
-      // unref that both fail once can still converge without looping forever on
-      // a permanently hostile custom stream.
-      const shouldRecover =
-        state.physicalReconcileRequested || recoverWithoutReentry || mustConvergeAfterError;
-      if (!shouldRecover || retriedTransitions.has(transition)) return false;
-      retriedTransitions.add(transition);
-      mustConvergeAfterError = true;
-      return true;
-    }
-
-    try {
-      while (true) {
-        state.physicalReconcileRequested = false;
-        const shouldBeActive = state.activeRefs > 0 || state.pendingDisable;
-
-        if (shouldBeActive) {
-          if (!state.physicalActive || state.physicalRawUncertain) {
-            // Commit the transition before calling a hostile stream. Re-entrant
-            // suspend/release updates the desired counts; the next loop then
-            // compensates instead of letting the outer acquisition overwrite it.
-            state.physicalActive = true;
-            state.physicalRawUncertain = false;
-            if (state.changedRawMode) {
-              try {
-                terminal.setRawMode(true);
-              } catch (error) {
-                // A throwing custom stream may have failed before or after the
-                // ioctl. Mark the state uncertain so the next desired owner
-                // retries enable, or the no-owner cleanup explicitly restores
-                // the baseline instead of trusting this transition.
-                state.physicalActive = false;
-                state.physicalRawUncertain = true;
-                if (!recordTransitionError(error, "raw-on")) break;
-              }
-            }
-            continue;
-          }
-          if (!state.physicalRefHeld || state.physicalRefUncertain) {
-            state.physicalRefHeld = true;
-            state.physicalRefUncertain = false;
-            try {
-              terminal.refInput();
-            } catch (error) {
-              state.physicalRefHeld = false;
-              state.physicalRefUncertain = true;
-              if (!recordTransitionError(error, "ref")) break;
-            }
-            continue;
-          }
-        } else {
-          if (state.physicalActive || state.physicalRawUncertain) {
-            state.physicalActive = false;
-            state.physicalRawUncertain = false;
-            if (state.changedRawMode) {
-              try {
-                terminal.setRawMode(state.baselineRaw);
-              } catch (error) {
-                // A failed release may have left the terminal raw. Retain the
-                // ownership fact so teardown can retry instead of assuming the
-                // terminal is already restored.
-                state.physicalRawUncertain = true;
-                // Restoring cooked mode is idempotent. A one-shot host failure
-                // during suspension/unmount must not leave the shell raw after
-                // the framework has dropped its input listener.
-                if (!recordTransitionError(error, "raw-off", true)) break;
-              }
-            }
-            continue;
-          }
-          if (state.physicalRefHeld || state.physicalRefUncertain) {
-            state.physicalRefHeld = false;
-            state.physicalRefUncertain = false;
-            try {
-              terminal.unrefInput();
-            } catch (error) {
-              state.physicalRefUncertain = true;
-              // Node's unref() is idempotent. Retry a failed final release once
-              // so a transient custom-stream error cannot keep the process
-              // alive after the controller is disposed.
-              if (!recordTransitionError(error, "unref", true)) break;
-            }
-            continue;
-          }
-        }
-
-        if (!state.physicalReconcileRequested) break;
-      }
-    } finally {
-      state.reconcilingPhysical = false;
-    }
-    if (hasError) throw firstError;
-  }
-
-  function resetRawModeState(state: RawModeState): void {
-    state.pendingDisable = false;
-    state.activeRefs = 0;
-    state.physicalActive = false;
-    state.physicalRawUncertain = false;
-    state.physicalRefHeld = false;
-    state.physicalRefUncertain = false;
-    state.baselineRaw = false;
-    state.changedRawMode = false;
-    state.physicalReconcileRequested = false;
-  }
-
-  function resetRawModeStateIfIdle(state: RawModeState): void {
-    if (
-      state.refs === 0 &&
-      state.activeRefs === 0 &&
-      !state.pendingDisable &&
-      !state.physicalActive &&
-      !state.physicalRawUncertain &&
-      !state.physicalRefHeld &&
-      !state.physicalRefUncertain &&
-      !state.reconcilingPhysical
-    ) {
-      resetRawModeState(state);
-    }
-  }
-
   function setSemanticDemandPublished(demand: SemanticInputDemand, published: boolean): void {
     if (demand.published === published) return;
     demand.published = published;
@@ -678,9 +377,7 @@ export function createStdinController(
   function semanticTerminalModesReady(): boolean {
     const pasteReady =
       !canWriteTerminalMode() ||
-      (bracketedPastePhysicallyEnabled &&
-        !bracketedPastePhysicalUncertain &&
-        pendingBracketedPasteMode === undefined);
+      (terminal.isModeActive("bracketed-paste") && terminal.isModeSettled("bracketed-paste"));
     return !suspended && session.isManagedInputReady && session.isKittyKeyboardReady && pasteReady;
   }
 
@@ -776,35 +473,21 @@ export function createStdinController(
       assertPublicRawModeAvailable();
     }
 
-    const state = getRawModeState(inputOwner);
-    const firstSharedRef = state.refs === 0;
     const localRefsBefore = localRefs;
     const kindRefsBefore = managed ? managedRawRefs : publicRawRefs;
     let committedRef = false;
     let rawModeLease: TerminalLease<"raw"> | undefined;
     try {
-      if (
-        firstSharedRef &&
-        !state.pendingDisable &&
-        !state.physicalActive &&
-        !state.physicalRawUncertain &&
-        !state.physicalRefHeld &&
-        !state.physicalRefUncertain
-      ) {
-        state.baselineRaw = terminal.isRawModeEnabled;
-        state.changedRawMode = !state.baselineRaw;
-      }
-      const participatesPhysically = !suspended;
-      state.refs++;
-      if (participatesPhysically) state.activeRefs++;
       localRefs++;
       if (managed) managedRawRefs++;
       else publicRawRefs++;
       committedRef = true;
-      rawModeLease = terminal.acquire("raw");
-      rawModeLeases.push(rawModeLease);
-      if (participatesPhysically) state.pendingDisable = false;
-      reconcilePhysicalRawMode(state);
+      // A suspended session keeps its logical owners without asking the device
+      // for anything; resume() takes one lease back for each of them.
+      if (!suspended) {
+        rawModeLease = terminal.acquire("raw");
+        rawModeLeases.push(rawModeLease);
+      }
       reconcileSharedSubscription();
       reconcileKittyDemand();
     } catch (error) {
@@ -812,8 +495,6 @@ export function createStdinController(
       // acquisition. Roll back only this still-surviving kind of ref.
       const kindRefs = managed ? managedRawRefs : publicRawRefs;
       if (committedRef && !disposed && localRefs > localRefsBefore && kindRefs > kindRefsBefore) {
-        state.refs = Math.max(0, state.refs - 1);
-        if (!suspended) state.activeRefs = Math.max(0, state.activeRefs - 1);
         localRefs = Math.max(0, localRefs - 1);
         if (managed) managedRawRefs = Math.max(0, managedRawRefs - 1);
         else publicRawRefs = Math.max(0, publicRawRefs - 1);
@@ -821,11 +502,10 @@ export function createStdinController(
       if (rawModeLease) {
         const index = rawModeLeases.lastIndexOf(rawModeLease);
         if (index !== -1) rawModeLeases.splice(index, 1);
-        rawModeLease.release();
+        // The caller reads the input's state as soon as this failure returns,
+        // so the release cannot wait for the microtask boundary.
+        runTerminalCleanup(() => rawModeLease?.release({ sync: true }));
       }
-      if (state.activeRefs === 0) state.pendingDisable = false;
-      runTerminalCleanup(() => reconcilePhysicalRawMode(state));
-      resetRawModeStateIfIdle(state);
       runTerminalCleanup(reconcileSharedSubscription);
       runTerminalCleanup(reconcileKittyDemand);
       throw error;
@@ -835,12 +515,12 @@ export function createStdinController(
 
   function releaseLogicalRawMode(managed: boolean): void {
     if (managed ? managedRawRefs === 0 : publicRawRefs === 0) return;
-    const state = getRawModeState(inputOwner);
-    state.refs = Math.max(0, state.refs - 1);
-    if (!suspended) state.activeRefs = Math.max(0, state.activeRefs - 1);
     localRefs = Math.max(0, localRefs - 1);
     if (managed) managedRawRefs = Math.max(0, managedRawRefs - 1);
     else publicRawRefs = Math.max(0, publicRawRefs - 1);
+    // An ordinary release lets the lease defer the device transition, so a
+    // same-tick replacement hook or managed route inherits raw input instead of
+    // switching it off and straight back on.
     rawModeLeases.pop()?.release();
     let firstError: unknown;
     let hasError = false;
@@ -857,30 +537,6 @@ export function createStdinController(
         firstError = error;
         hasError = true;
       }
-    }
-    if (
-      state.activeRefs === 0 &&
-      (state.physicalActive ||
-        state.physicalRawUncertain ||
-        state.physicalRefHeld ||
-        state.physicalRefUncertain)
-    ) {
-      // Defer only the shared physical toggle, allowing a same-tick replacement
-      // hook or managed route to inherit the already-active terminal state.
-      state.pendingDisable = true;
-      queueMicrotask(() => {
-        if (!state.pendingDisable || state.activeRefs > 0) return;
-        state.pendingDisable = false;
-        try {
-          reconcilePhysicalRawMode(state);
-        } catch (error) {
-          reportTerminalOperationFailure(error);
-        } finally {
-          resetRawModeStateIfIdle(state);
-        }
-      });
-    } else {
-      resetRawModeStateIfIdle(state);
     }
     if (hasError) throw firstError;
   }
@@ -1007,27 +663,17 @@ export function createStdinController(
       flushPendingApplicationInput();
     },
     abandonPendingTerminalOutput(options) {
-      if (pendingBracketedPasteMode?.attempted) bracketedPastePhysicalUncertain = true;
-      pendingBracketedPasteMode = undefined;
       for (const demand of semanticInputDemands) {
         if (demand.physicalAcquired && !semanticTerminalModesReady()) {
           setSemanticDemandPublished(demand, false);
         }
       }
-      if (options?.physicalStateUncertain) {
-        // The coordinator is idle before it reports a physical stream failure.
-        // Converge immediately to a terminal-safe paste-OFF state.
-        runTerminalCleanup(reconcileBracketedPasteMode);
-      } else {
-        session.requestTerminalReconcile();
-      }
+      if (!options?.physicalStateUncertain) session.requestTerminalReconcile();
     },
     setBracketedPasteMode(enabled: boolean) {
       if (disposed) return;
       if (enabled) {
         const bracketedPasteModeCountBefore = bracketedPasteModeCount;
-        const lease = terminal.acquire("bracketed-paste");
-        bracketedPasteLeases.push(lease);
         bracketedPasteModeCount++;
         try {
           reconcileBracketedPasteMode();
@@ -1035,16 +681,12 @@ export function createStdinController(
           if (!disposed && bracketedPasteModeCount > bracketedPasteModeCountBefore) {
             bracketedPasteModeCount--;
           }
-          const index = bracketedPasteLeases.lastIndexOf(lease);
-          if (index !== -1) bracketedPasteLeases.splice(index, 1);
-          lease.release();
           runTerminalCleanup(reconcileBracketedPasteMode);
           throw error;
         }
       } else {
         if (bracketedPasteModeCount === 0) return;
         bracketedPasteModeCount--;
-        bracketedPasteLeases.pop()?.release();
         // Let the semantic release finish before retrying an ambiguous OFF. A
         // re-entrant replacement can then establish the newest desired count,
         // so reconciliation emits ON directly instead of an obsolete second
@@ -1076,32 +718,23 @@ export function createStdinController(
 
       runTerminalCleanup(() => reconcileBracketedPasteMode(sync));
 
-      if (terminal.capabilities.stdin.canSetRawMode) {
-        const state = getRawModeState(inputOwner);
-        state.activeRefs = Math.max(0, state.activeRefs - localRefs);
-        state.pendingDisable = false;
-        runTerminalCleanup(() => reconcilePhysicalRawMode(state));
-        resetRawModeStateIfIdle(state);
+      // Suspension keeps this session's logical owners and gives the input
+      // back. The transition happens now: the process stops as soon as the
+      // signal handler returns, so a deferred one would never run.
+      for (const lease of rawModeLeases.splice(0)) {
+        runTerminalCleanup(() => lease.release({ sync: true }));
       }
     },
     resume() {
       if (!suspended) return;
-      const state = terminal.capabilities.stdin.canSetRawMode
-        ? getRawModeState(inputOwner)
-        : undefined;
-      let addedActiveRawRefs = 0;
-
       suspended = false;
       resumeAwaitingTerminalModes = true;
       try {
-        // Reacquire raw input first. The shared reconciler re-checks desired
-        // counts after every host callback, so a synchronous re-entrant suspend
-        // wins without leaving an active logical ref on a cooked terminal.
-        if (state && localRefs > 0) {
-          state.pendingDisable = false;
-          state.activeRefs += localRefs;
-          addedActiveRawRefs = localRefs;
-          reconcilePhysicalRawMode(state);
+        // Reacquire raw input first. The lease re-checks the shared holders
+        // after every host callback, so a synchronous re-entrant suspend wins
+        // without leaving an active logical ref on a cooked terminal.
+        while (rawModeLeases.length < localRefs) {
+          rawModeLeases.push(terminal.acquire("raw"));
         }
         if (suspended || disposed) return;
         reconcileBracketedPasteMode();
@@ -1111,19 +744,11 @@ export function createStdinController(
         reconcileSharedSubscription();
         flushPendingApplicationInput();
       } catch (error) {
-        if (addedActiveRawRefs > 0 && state && !suspended && !disposed) {
-          state.activeRefs = Math.max(
-            0,
-            state.activeRefs - Math.min(addedActiveRawRefs, localRefs),
-          );
-        }
         if (!disposed) suspended = true;
         resumeAwaitingTerminalModes = false;
         runTerminalCleanup(reconcileBracketedPasteMode);
-        if (state) {
-          state.pendingDisable = false;
-          runTerminalCleanup(() => reconcilePhysicalRawMode(state));
-          resetRawModeStateIfIdle(state);
+        for (const lease of rawModeLeases.splice(0)) {
+          runTerminalCleanup(() => lease.release({ sync: true }));
         }
         runTerminalCleanup(reconcileSharedSubscription);
         throw error;
@@ -1157,62 +782,37 @@ export function createStdinController(
       }
       managedInputRefs = 0;
       semanticInputDemands.clear();
-      // Normal teardown itself owns one unhanded output transaction. Preserve
-      // terminal-mode callbacks captured by Vue scope cleanup so the handoff
-      // commits their physical state exactly once. Abrupt teardown aborts that
-      // transaction and explicitly abandons these pending callbacks first.
-      if (sync) {
-        pendingBracketedPasteMode = undefined;
-      }
       resumeAwaitingTerminalModes = false;
       runTerminalCleanup(() => reconcileBracketedPasteMode(sync));
       if (sync && reissueAbruptTerminalDisables) {
         // The paste-off escape must flush synchronously on signal exit. By the
-        // time dispose() runs, Vue's unmount has usually
-        // already disposed the semantic-input lease, which wrote `\x1b[?2004l`
-        // ASYNC and zeroed the count — and that
-        // async write is exactly what signal-exit's immediate re-raise can drop.
-        // So re-issue it SYNCHRONOUSLY here whenever paste was ever enabled, not
-        // gated on the (now-zero) live count. Re-sending paste-OFF is idempotent:
-        // disabling an already-disabled mode is a terminal no-op, so a redundant
-        // sync write after a surviving async one is harmless. If detach hasn't run
-        // yet (count still > 0), this single sync write still covers it.
+        // time dispose() runs, Vue's unmount has usually already released the
+        // semantic-input lease, which disabled bracketed paste through the
+        // output gate and zeroed the count — and that asynchronous write is
+        // exactly what signal-exit's immediate re-raise can drop. So re-issue
+        // it synchronously here whenever paste was ever enabled, not gated on
+        // the (now-zero) live count. If the release has not run yet, this one
+        // synchronous restore still covers it.
         reissueIdempotentTerminalDisables(true);
-      } else {
-        if (bracketedPastePhysicalUncertain) {
-          runTerminalCleanup(() => forceDisableBracketedPaste(sync));
-        }
       }
       bracketedPasteModeCount = 0;
-      for (const lease of bracketedPasteLeases.splice(0)) lease.release();
+      localRefs = 0;
+      managedRawRefs = 0;
+      publicRawRefs = 0;
+      rawModeLeases.length = 0;
+      // Give the input back synchronously when ownership changes. This covers
+      // BOTH teardown orderings:
+      //   (1) dispose() ran while this controller still held leases, or
+      //   (2) Vue's unmount already released them, which DEFERRED the disable to
+      //       a microtask — but on the signal-exit path (teardown(true) re-raises
+      //       the signal without draining microtasks) that microtask never runs,
+      //       so the terminal would be left raw and the shell stops echoing after
+      //       Ctrl+C.
+      // Dropping every lease also cancels that queued microtask so it cannot
+      // double-unref. The shared state keeps another app's owners.
       if (terminal.capabilities.stdin.canSetRawMode) {
-        const state = getRawModeState(inputOwner);
-        // Drop this controller's outstanding refs (if Vue's unmount hasn't already
-        // released them via onScopeDispose → releaseRawMode).
-        if (localRefs > 0) {
-          if (!suspended) {
-            state.activeRefs = Math.max(0, state.activeRefs - localRefs);
-          }
-          state.refs = Math.max(0, state.refs - localRefs);
-          localRefs = 0;
-        }
-        managedRawRefs = 0;
-        publicRawRefs = 0;
-        // Reconcile terminal raw mode synchronously when ownership changes. This
-        // covers BOTH teardown orderings:
-        //   (1) dispose() ran while this controller still held refs (above), or
-        //   (2) Vue's unmount already fired releaseRawMode (localRefs is 0) which
-        //       DEFERRED the disable to a microtask — but on the signal-exit path
-        //       (teardown(true) re-raises the signal without draining microtasks)
-        //       that microtask never runs, so the terminal would be left raw and
-        //       the shell stops echoing after Ctrl+C.
-        // Clearing pendingDisable also cancels the queued microtask so it cannot
-        // double-unref. The shared reconciler keeps another app's active lease.
-        state.pendingDisable = false;
-        runTerminalCleanup(() => reconcilePhysicalRawMode(state));
-        resetRawModeStateIfIdle(state);
+        runTerminalCleanup(() => terminal.restoreMode("raw", { sync: true }));
       }
-      for (const lease of rawModeLeases.splice(0)) lease.release();
       suspended = false;
     },
   };

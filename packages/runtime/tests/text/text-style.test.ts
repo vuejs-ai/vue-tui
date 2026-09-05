@@ -1,170 +1,133 @@
 import { expect, test } from "vite-plus/test";
 import {
-  applyChalk as applyTerminalStyle,
-  assertValidBackgroundColor,
-  assertValidForegroundColor,
-  isInvalidBackgroundColor,
-  isInvalidForegroundColor,
+  colorContribution,
+  parseColorValue,
+  TextStyleChannel,
+  textStyleContributions,
 } from "../../src/text/text-style.ts";
-import { createTerminalStyle } from "../../src/text/terminal-style.ts";
 
-const terminalStyle = createTerminalStyle(1);
-const plainStyle = createTerminalStyle(0);
-const chalk = terminalStyle.chalk;
-const applyChalk = (text: string, props: Parameters<typeof applyTerminalStyle>[2]): string =>
-  applyTerminalStyle(terminalStyle, text, props);
+// Props resolve every color at full fidelity; reducing it to the host's
+// capability is the frame encoder's job, so nothing here selects a level. A
+// contribution is the pair of sequences the channel opens and ends with, which
+// is what composition replays.
 
-test("named color applies chalk method", () => {
-  expect(applyChalk("x", { color: "red" })).toBe(chalk.red("x"));
+const pair = (
+  code: string,
+  endCode: string,
+): { code: string; endCode: string; source: string } => ({
+  code,
+  endCode,
+  source: code,
 });
 
-test("hex color applies chalk.hex", () => {
-  expect(applyChalk("x", { color: "#ff0000" })).toBe(chalk.hex("#ff0000")("x"));
+test("named color resolves the ANSI 16 index it names", () => {
+  expect(parseColorValue("red")).toEqual({ kind: "ansi16", index: 1 });
+  expect(parseColorValue("gray")).toEqual({ kind: "ansi16", index: 8 });
+  expect(parseColorValue("whiteBright")).toEqual({ kind: "ansi16", index: 15 });
 });
 
-test("non-string color values do not have a tuple-specific styling path", () => {
-  expect(applyChalk("x", { color: [255, 0, 0] })).toBe("x");
+test("hex color resolves truecolor, expanding the short form", () => {
+  expect(parseColorValue("#ff0000")).toEqual({ kind: "rgb", red: 255, green: 0, blue: 0 });
+  expect(parseColorValue("#f00")).toEqual({ kind: "rgb", red: 255, green: 0, blue: 0 });
+  expect(parseColorValue("#FF8800")).toEqual({ kind: "rgb", red: 255, green: 136, blue: 0 });
+});
+
+test("non-string color values do not have a tuple-specific path", () => {
+  expect(parseColorValue([255, 0, 0])).toBeUndefined();
 });
 
 test("unknown color name falls back to no color", () => {
-  expect(applyChalk("x", { color: "not-a-real-color" })).toBe("x");
+  expect(parseColorValue("not-a-real-color")).toBeUndefined();
 });
 
-test("default colors emit explicit terminal-default spans independently", () => {
-  expect(applyChalk("x", { color: "default" })).toBe("\x1b[39mx\x1b[39m");
-  expect(applyChalk("x", { backgroundColor: "default" })).toBe("\x1b[49mx\x1b[49m");
+// The string pipeline wrote this pair directly rather than through Chalk, so
+// the span never repaired itself around a close or a hard newline.
+test("default colors write their channel's end sequence at both edges", () => {
+  expect(colorContribution("default", false)).toEqual({
+    open: pair("\x1b[39m", "\x1b[39m"),
+    close: pair("\x1b[39m", "\x1b[39m"),
+    reopens: false,
+  });
+  expect(colorContribution("default", true)).toEqual({
+    open: pair("\x1b[49m", "\x1b[49m"),
+    close: pair("\x1b[49m", "\x1b[49m"),
+    reopens: false,
+  });
 });
 
-test("terminal-default colors emit no ANSI when color output is disabled", () => {
-  expect(applyTerminalStyle(plainStyle, "x", { color: "default" })).toBe("x");
-  expect(applyTerminalStyle(plainStyle, "x", { backgroundColor: "default" })).toBe("x");
+test("a color contribution opens the sequence its structured value spells", () => {
+  expect(colorContribution("#ff8800", false)).toEqual({
+    open: pair("\x1b[38;2;255;136;0m", "\x1b[39m"),
+    close: pair("\x1b[39m", "\x1b[39m"),
+    reopens: true,
+  });
+  expect(colorContribution("ansi256(194)", true)).toEqual({
+    open: pair("\x1b[48;5;194m", "\x1b[49m"),
+    close: pair("\x1b[49m", "\x1b[49m"),
+    reopens: true,
+  });
+  expect(colorContribution("blueBright", false)).toEqual({
+    open: pair("\x1b[94m", "\x1b[39m"),
+    close: pair("\x1b[39m", "\x1b[39m"),
+    reopens: true,
+  });
 });
 
-test("ansi256 foreground color applies chalk.ansi256", () => {
-  expect(applyChalk("x", { color: "ansi256(194)" })).toBe(chalk.ansi256(194)("x"));
+test("ansi256 colors resolve the indexed form", () => {
+  expect(parseColorValue("ansi256(194)")).toEqual({ kind: "ansi256", index: 194 });
 });
 
-test("ansi256 background color applies chalk.bgAnsi256", () => {
-  expect(applyChalk("x", { backgroundColor: "ansi256(194)" })).toBe(chalk.bgAnsi256(194)("x"));
+test("rgb colors resolve the truecolor form", () => {
+  expect(parseColorValue("rgb(1, 2, 3)")).toEqual({ kind: "rgb", red: 1, green: 2, blue: 3 });
+  expect(parseColorValue("rgb(1,2,3)")).toEqual({ kind: "rgb", red: 1, green: 2, blue: 3 });
 });
 
 // Functional color parsing accepts ansi256(N) only when N is numeric.
-test("unparseable ansi256(foo) emits no codes", () => {
-  expect(applyChalk("X", { color: "ansi256(foo)" })).toBe("X");
-  expect(applyChalk("X", { backgroundColor: "ansi256(foo)" })).toBe("X");
+test("unparseable ansi256(foo) resolves nothing", () => {
+  expect(parseColorValue("ansi256(foo)")).toBeUndefined();
+  expect(colorContribution("ansi256(foo)", true)).toBeUndefined();
 });
 
-test("ansi(194) is not a supported form and emits no codes", () => {
-  expect(applyChalk("X", { color: "ansi(194)" })).toBe("X");
-  expect(applyChalk("X", { backgroundColor: "ansi(194)" })).toBe("X");
+test("ansi(194) is not a supported form", () => {
+  expect(parseColorValue("ansi(194)")).toBeUndefined();
+  expect(colorContribution("ansi(194)", false)).toBeUndefined();
 });
 
-test("valid ansi256(194) still colors after hardening", () => {
-  expect(applyChalk("X", { color: "ansi256(194)" })).toBe(chalk.ansi256(194)("X"));
-  expect(applyChalk("X", { backgroundColor: "ansi256(194)" })).toBe(chalk.bgAnsi256(194)("X"));
+test("multiple modifiers each contribute their own attribute, outermost first", () => {
+  expect(textStyleContributions({ bold: true, underline: true }, 0)).toEqual([
+    { open: pair("\x1b[4m", "\x1b[24m"), close: pair("\x1b[24m", "\x1b[24m"), reopens: true },
+    { open: pair("\x1b[1m", "\x1b[22m"), close: pair("\x1b[22m", "\x1b[22m"), reopens: true },
+  ]);
 });
 
-test("multiple modifiers chain", () => {
-  // Each style is its own Chalk wrap in the documented order.
-  // bold then underline => underline(bold(x)).
-  expect(applyChalk("x", { bold: true, underline: true })).toBe(chalk.underline(chalk.bold("x")));
+// The nesting order is dim,color,bg,bold,italic,underline,strikethrough,inverse,
+// so the outermost contribution comes first.
+test("color and bold contribute in nesting order, bold outside color", () => {
+  expect(textStyleContributions({ color: "red", bold: true }, 0)).toEqual([
+    { open: pair("\x1b[1m", "\x1b[22m"), close: pair("\x1b[22m", "\x1b[22m"), reopens: true },
+    { open: pair("\x1b[31m", "\x1b[39m"), close: pair("\x1b[39m", "\x1b[39m"), reopens: true },
+  ]);
 });
 
-// The nesting order is dim,color,bg,bold,italic,underline,strikethrough,inverse.
-test("color+bold nests bold outside color", () => {
-  // ESC[1m ESC[31m X ESC[39m ESC[22m
-  expect(applyChalk("X", { color: "red", bold: true })).toBe(chalk.bold(chalk.red("X")));
-  expect(applyChalk("X", { color: "red", bold: true })).toBe("[1m[31mX[39m[22m");
+test("dim and bold are independent intensity attributes", () => {
+  expect(textStyleContributions({ dimColor: true, bold: true }, 0)).toEqual([
+    { open: pair("\x1b[1m", "\x1b[22m"), close: pair("\x1b[22m", "\x1b[22m"), reopens: true },
+    { open: pair("\x1b[2m", "\x1b[22m"), close: pair("\x1b[22m", "\x1b[22m"), reopens: true },
+  ]);
 });
 
-test("dim+bold re-opens bold after dim's SGR-22 reset", () => {
-  // ESC[1m ESC[2m X ESC[22m ESC[1m ESC[22m
-  expect(applyChalk("X", { dimColor: true, bold: true })).toBe(chalk.bold(chalk.dim("X")));
-  expect(applyChalk("X", { dimColor: true, bold: true })).toBe("[1m[2mX[22m[1m[22m");
+test("color and backgroundColor contribute with background outside color", () => {
+  expect(textStyleContributions({ color: "red", backgroundColor: "blue" }, 0)).toEqual([
+    { open: pair("\x1b[44m", "\x1b[49m"), close: pair("\x1b[49m", "\x1b[49m"), reopens: true },
+    { open: pair("\x1b[31m", "\x1b[39m"), close: pair("\x1b[39m", "\x1b[39m"), reopens: true },
+  ]);
 });
 
-test("color+backgroundColor nests bg outside color", () => {
-  // ESC[44m ESC[31m X ESC[39m ESC[49m
-  expect(applyChalk("X", { color: "red", backgroundColor: "blue" })).toBe(
-    chalk.bgBlue(chalk.red("X")),
-  );
-  expect(applyChalk("X", { color: "red", backgroundColor: "blue" })).toBe("[44m[31mX[39m[49m");
-});
-
-test("level 0 emits no ANSI codes regardless of styles", () => {
+test("a blocked channel contributes nothing, whatever the props set it to", () => {
   expect(
-    applyTerminalStyle(plainStyle, "X", {
-      color: "red",
-      bold: true,
-      backgroundColor: "blue",
-    }),
-  ).toBe("X");
-});
-
-// A Chalk modifier has no matching background method (`chalk.bgBold`, etc.).
-// vue-tui rejects it during component render so Vue error handling applies.
-test("isInvalidBackgroundColor: chalk modifier names are invalid backgrounds", () => {
-  for (const m of [
-    "bold",
-    "dim",
-    "italic",
-    "underline",
-    "inverse",
-    "hidden",
-    "strikethrough",
-    "reset",
-    "overline",
-    "visible",
-  ]) {
-    expect(isInvalidBackgroundColor(m)).toBe(true);
-  }
-});
-
-test("isInvalidBackgroundColor: real colors / hex / ansi256 / rgb / unknown / empty are valid", () => {
-  for (const ok of [
-    "red",
-    "blue",
-    "blackBright",
-    "redBright",
-    "#ff0000",
-    "ansi256(9)",
-    "rgb(1,2,3)",
-    "not-a-real-color",
-    "",
-    undefined,
-    null,
-  ]) {
-    expect(isInvalidBackgroundColor(ok)).toBe(false);
-  }
-});
-
-test("assertValidBackgroundColor throws only for a modifier name, with the label in the message", () => {
-  expect(() => assertValidBackgroundColor("bold")).toThrow(/backgroundColor/i);
-  expect(() => assertValidBackgroundColor("dim", "borderTopBackgroundColor")).toThrow(
-    /borderTopBackgroundColor/,
-  );
-  // No throw for valid forms.
-  expect(() => assertValidBackgroundColor("red")).not.toThrow();
-  expect(() => assertValidBackgroundColor("#abcdef")).not.toThrow();
-  expect(() => assertValidBackgroundColor("not-a-real-color")).not.toThrow();
-  expect(() => assertValidBackgroundColor(undefined)).not.toThrow();
-});
-
-test("assertValidForegroundColor throws only for chalk keys that are not methods", () => {
-  expect(isInvalidForegroundColor("level")).toBe(true);
-  expect(() => assertValidForegroundColor("level")).toThrow(/color/i);
-  expect(() => assertValidForegroundColor("level", "borderTopColor")).toThrow(/borderTopColor/);
-
-  // Valid foreground forms and unknown strings keep the bare-text fallback.
-  expect(isInvalidForegroundColor("bold")).toBe(false);
-  expect(isInvalidForegroundColor("red")).toBe(false);
-  expect(isInvalidForegroundColor("#abcdef")).toBe(false);
-  expect(isInvalidForegroundColor("not-a-real-color")).toBe(false);
-  expect(isInvalidForegroundColor(undefined)).toBe(false);
-});
-
-// `color="bold"` resolves to the callable chalk.bold method. Only the background
-// path has the missing-bg-method problem.
-test("foreground modifier name still applies (no validation on color)", () => {
-  expect(applyChalk("X", { color: "bold" })).toBe(chalk.bold("X"));
+    textStyleContributions(
+      { color: "red", bold: true },
+      TextStyleChannel.foreground | TextStyleChannel.bold,
+    ),
+  ).toEqual([]);
 });

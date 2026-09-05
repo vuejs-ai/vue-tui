@@ -1,4 +1,3 @@
-import cliTruncate from "cli-truncate";
 import sliceAnsi from "slice-ansi";
 import stringWidth from "string-width";
 import wrapAnsi from "wrap-ansi";
@@ -10,14 +9,17 @@ import {
   type StyledChar,
   type Token,
 } from "@alcalzone/ansi-tokenize";
+import type { Cell } from "../frame/cell.ts";
+import { defaultStyle, type SgrPair, type Style } from "../frame/style.ts";
 import { hasAnsiControlCharacters, tokenizeAnsi } from "./ansi-tokenizer.ts";
+import { graphemeSegmenter } from "./cell-style.ts";
 
 export type WrapMode = "wrap" | "hard" | "truncate" | "truncate-middle" | "truncate-start";
 
 const boldOpen = "\u001B[1m";
 const dimOpen = "\u001B[2m";
 
-function isIntensityStyle(style: StyledChar["styles"][number]): boolean {
+function isIntensityStyle(style: SgrPair): boolean {
   return style.code === boldOpen || style.code === dimOpen;
 }
 
@@ -53,35 +55,14 @@ export function sliceAnsiPreservingIntensity(text: string, start: number, end: n
 }
 
 /**
- * Slice `text` from the start so the result is at most `maxCols` columns wide.
- * `slice-ansi` can overshoot when a wide character straddles the boundary, so
- * we reduce the slice position until the result fits.
- */
-export function safeSliceEnd(text: string, maxCols: number): string {
-  if (maxCols <= 0) return "";
-  let end = maxCols;
-  let sliced = sliceAnsiPreservingIntensity(text, 0, end);
-  let w = stringWidth(sliced);
-  while (w > maxCols && end > 0) {
-    end--;
-    sliced = sliceAnsiPreservingIntensity(text, 0, end);
-    w = stringWidth(sliced);
-  }
-  return sliced;
-}
-
-// Grapheme segmenter shared across calls (constructing one is non-trivial). Locale-independent:
-// we only segment, never collate, so the default locale's segmentation rules suffice.
-const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-
-/**
  * Strip ALL ANSI from `text`, returning only its visible code points. Reuses the paint
  * tokenizer (the same one sanitizeAnsi uses) rather than a strip-ansi regex dep: every
  * non-`text` token — SGR, OSC hyperlinks, control strings — is dropped, so the result is the
  * exact visible string wrap-ansi must lay out. (wrap-ansi recognises SGR/OSC8 and would
  * byte-split SGR at width<=0; feeding it the plain string sidesteps that bug entirely.)
  */
-function stripAnsi(text: string): string {
+export function visibleText(text: string): string {
+  if (!hasAnsiControlCharacters(text)) return text;
   let out = "";
   for (const token of tokenizeAnsi(text)) {
     if (token.type === "text") out += token.value;
@@ -140,6 +121,30 @@ function normalizeColonColorParameter(parameter: string): string {
 
 function sgrPair(code: string, endCode = sgrOffCodeFor(code)): AnsiCode {
   return { type: "ansi", code, endCode };
+}
+
+/**
+ * One token stream whose SGR pairs remember the sequence they were written as.
+ *
+ * A written sequence can carry several pairs — `\x1b[1;39m` is bold and a
+ * foreground close — and composition has to match a close against what the
+ * author wrote rather than against the pair it parsed into.
+ */
+export type ContentToken =
+  | {
+      readonly type: "ansi";
+      readonly code: string;
+      readonly endCode: string;
+      readonly source: string;
+    }
+  | { readonly type: "char"; readonly value: string; readonly fullWidth: boolean }
+  | { readonly type: "control"; readonly code: string };
+
+/** The SGR member of a content token stream. */
+export type ContentSgr = Extract<ContentToken, { readonly type: "ansi" }>;
+
+function withSource(tokens: readonly Token[], source: string): ContentToken[] {
+  return tokens.map((token) => (token.type === "ansi" ? { ...token, source } : token));
 }
 
 function tokenizeSgrParameters(parameterString: string): Token[] {
@@ -206,7 +211,16 @@ function tokenizeSgrParameters(parameterString: string): Token[] {
   return tokens;
 }
 
-function reduceStyledCodes(active: readonly AnsiCode[], next: readonly AnsiCode[]): AnsiCode[] {
+/**
+ * The active SGR pairs after `next` is written over `active`: a reset clears
+ * them, a close ends every pair it terminates, bold and dim coexist, and any
+ * other open replaces the pair sharing its end code. Content SGR and the
+ * sequences a Text's props write both travel through here.
+ */
+export function reduceStyledCodes<Pair extends SgrPair>(
+  active: readonly Pair[],
+  next: readonly Pair[],
+): Pair[] {
   let result = [...active];
   for (const pair of next) {
     if (pair.code === "\x1b[0m") {
@@ -223,61 +237,16 @@ function reduceStyledCodes(active: readonly AnsiCode[], next: readonly AnsiCode[
   return result;
 }
 
-function styledCharactersFromTokens(tokens: readonly Token[]): StyledChar[] {
-  let styles: AnsiCode[] = [];
+function styledCharactersFromTokens(tokens: readonly ContentToken[]): StyledChar[] {
+  let styles: ContentSgr[] = [];
   const characters: StyledChar[] = [];
   for (const token of tokens) {
     if (token.type === "ansi") styles = reduceStyledCodes(styles, [token]);
-    else if (token.type === "char") characters.push({ ...token, styles: [...styles] });
+    // `reduceStyledCodes` answers with a fresh array every time, so the run of
+    // characters between two sequences can share one rather than copy it.
+    else if (token.type === "char") characters.push({ ...token, styles });
   }
   return characters;
-}
-
-function sameStyledCodes(left: readonly AnsiCode[], right: readonly AnsiCode[]): boolean {
-  return (
-    left.length === right.length &&
-    left.every(
-      (pair, index) => pair.code === right[index]!.code && pair.endCode === right[index]!.endCode,
-    )
-  );
-}
-
-function styledCodeDifference(from: readonly AnsiCode[], to: readonly AnsiCode[]): AnsiCode[] {
-  const endCodesInTarget = new Set(to.map((pair) => pair.endCode));
-  const codesInTarget = new Set(to.map((pair) => pair.code));
-  const codesInSource = new Set(from.map((pair) => pair.code));
-  const closesBeforeReplacement = new Set(["\x1b[0m"]);
-  const removed = reduceStyledCodes(
-    [],
-    from.filter((pair) =>
-      isIntensityStyle(pair)
-        ? !codesInTarget.has(pair.code)
-        : !endCodesInTarget.has(pair.endCode) ||
-          (closesBeforeReplacement.has(pair.endCode) && !codesInTarget.has(pair.code)),
-    ),
-  )
-    .reverse()
-    .map((pair) => ({ ...pair, code: pair.endCode }));
-  return [...removed, ...to.filter((pair) => !codesInSource.has(pair.code))];
-}
-
-function styledTransition(from: readonly AnsiCode[], to: readonly AnsiCode[]): string {
-  let current = reduceStyledCodes([], from);
-  const target = reduceStyledCodes([], to);
-  let output = "";
-  const maxRepairs = current.length + target.length + 2;
-
-  for (let attempt = 0; attempt < maxRepairs; attempt++) {
-    if (sameStyledCodes(current, target)) return output;
-    const difference = styledCodeDifference(current, target);
-    if (difference.length === 0) break;
-    output += ansiCodesToString(difference);
-    const next = reduceStyledCodes(current, difference);
-    if (sameStyledCodes(current, next)) break;
-    current = next;
-  }
-
-  return output + "\x1b[0m" + ansiCodesToString(target);
 }
 
 function normalizeOscForStyledCharacters(value: string): string {
@@ -286,35 +255,60 @@ function normalizeOscForStyledCharacters(value: string): string {
   return escaped.endsWith("\x9c") ? `${escaped.slice(0, -1)}\x07` : escaped;
 }
 
-/**
- * Normalize ANSI-tokenized code points into terminal paint graphemes once.
- *
- * Shared with painting: both must agree on how many graphemes a styled line
- * holds, or the line the layout planned and the cells drawn from it diverge.
- */
-export function styledGraphemesFromAnsi(text: string): StyledChar[] {
-  if (!hasAnsiControlCharacters(text)) return styledCharsFromTokens(tokenizeStyledAnsi(text));
-
-  const tokens = tokenizeAnsi(text).flatMap((token) => {
-    if (token.type === "text") return tokenizeStyledAnsi(token.value);
+/** One styled string's tokens, with the pairing this module has to repair. */
+export function styledTokensFromAnsi(text: string): ContentToken[] {
+  const tokens = tokenizeAnsi(text).flatMap<ContentToken>((token) => {
+    if (token.type === "text") return withSource(tokenizeStyledAnsi(token.value), token.value);
     if (token.type === "csi") {
       if (token.finalCharacter !== "m" || token.intermediateString !== "") return [];
-      return tokenizeSgrParameters(token.parameterString);
+      return withSource(tokenizeSgrParameters(token.parameterString), token.value);
     }
-    if (token.type === "osc")
-      return tokenizeStyledAnsi(normalizeOscForStyledCharacters(token.value));
+    if (token.type === "osc") {
+      return withSource(
+        tokenizeStyledAnsi(normalizeOscForStyledCharacters(token.value)),
+        token.value,
+      );
+    }
     return [];
   });
   // The tokenizer pairs `21m` with the generic reset; `24m` ends both underline
   // forms, so double underline must leave with it rather than outlive it.
-  const characters = styledCharactersFromTokens(
-    tokens.map((token) =>
-      token.type === "ansi" && token.code === "\u001b[21m"
-        ? { ...token, endCode: "\u001b[24m" }
-        : token,
-    ),
+  return tokens.map((token) =>
+    token.type === "ansi" && token.code === "\u001b[21m"
+      ? { ...token, endCode: "\u001b[24m" }
+      : token,
   );
-  if (characters.length < 2) return characters;
+}
+
+function isPlainAsciiCharacter(value: string): boolean {
+  const code = value.codePointAt(0);
+  return value.length === 1 && code !== undefined && code < 0x80 && code !== 0x0d;
+}
+
+/**
+ * Normalize ANSI-tokenized code points into terminal paint graphemes once, and
+ * report for each grapheme the character token it begins at.
+ *
+ * The graphemes are shared with painting: both must agree on how many a styled
+ * line holds, or the line the layout planned and the cells drawn from it
+ * diverge. The leading index says which chunk a grapheme belongs to when one
+ * straddles the boundary between two of them.
+ */
+export function styledGraphemesFromTokens(tokens: readonly ContentToken[]): {
+  readonly graphemes: StyledChar[];
+  readonly leadingCharacters: number[];
+} {
+  const characters = styledCharactersFromTokens(tokens);
+  const oneToOne = (): { graphemes: StyledChar[]; leadingCharacters: number[] } => ({
+    graphemes: characters,
+    leadingCharacters: characters.map((_, index) => index),
+  });
+  if (characters.length < 2) return oneToOne();
+  // Plain ASCII is one grapheme per code point, so the tokenizer's characters
+  // are already the graphemes and the join and re-segmentation below can be
+  // skipped. CR is the one ASCII code point that joins with what follows it,
+  // and `sanitizeAnsiMultiline` takes it out before content reaches here.
+  if (characters.every((character) => isPlainAsciiCharacter(character.value))) return oneToOne();
 
   const plain = characters.map((character) => character.value).join("");
   const graphemes = [...graphemeSegmenter.segment(plain)];
@@ -322,10 +316,11 @@ export function styledGraphemesFromAnsi(text: string): StyledChar[] {
     graphemes.length === characters.length &&
     graphemes.every((part, index) => part.segment === characters[index]!.value)
   ) {
-    return characters;
+    return oneToOne();
   }
 
   const result: StyledChar[] = [];
+  const leadingCharacters: number[] = [];
   let characterIndex = 0;
   let characterOffset = 0;
   for (const part of graphemes) {
@@ -344,22 +339,15 @@ export function styledGraphemesFromAnsi(text: string): StyledChar[] {
       value: part.segment,
       fullWidth: stringWidth(part.segment) > 1,
     });
+    leadingCharacters.push(characterIndex);
   }
-  return result;
+  return { graphemes: result, leadingCharacters };
 }
 
-/** Serialize styled graphemes while retaining independent bold and dim. */
-export function styledGraphemesToString(characters: StyledChar[]): string {
-  let result = "";
-  let previousStyles: StyledChar["styles"] = [];
-
-  for (const character of characters) {
-    result += styledTransition(previousStyles, character.styles);
-    result += character.value;
-    previousStyles = character.styles;
-  }
-
-  return result + styledTransition(previousStyles, []);
+/** The terminal paint graphemes one styled string holds. */
+export function styledGraphemesFromAnsi(text: string): StyledChar[] {
+  if (!hasAnsiControlCharacters(text)) return styledCharsFromTokens(tokenizeStyledAnsi(text));
+  return styledGraphemesFromTokens(styledTokensFromAnsi(text)).graphemes;
 }
 
 /**
@@ -392,7 +380,7 @@ export function styledGraphemesToString(characters: StyledChar[]): string {
 function wrapZeroWidthAnsi(text: string, mode: "wrap" | "hard"): string[] {
   // NFC-normalize first: wrap-ansi (and therefore vue's NORMAL-width wrap path, which feeds
   // the styled string straight to wrapAnsi) composes combining sequences (e.g. "á" →
-  // "á"). Deriving structure from wrapAnsi(stripAnsi(text)) yields composed rows, so the
+  // "á"). Deriving structure from wrapAnsi(visibleText(text)) yields composed rows, so the
   // styled slices must be composed too or they'd diverge (same glyph/width/line-count, but
   // different code points than the normal-width path). SGR/OSC bytes are ASCII → NFC-invariant.
   text = text.normalize("NFC");
@@ -407,7 +395,7 @@ function wrapZeroWidthAnsi(text: string, mode: "wrap" | "hard"): string[] {
   const wrapOptions =
     mode === "hard" ? { hard: true, trim: false, wordWrap: false } : { hard: true, trim: false };
   for (const styledLine of styledLines) {
-    const plainLine = stripAnsi(styledLine);
+    const plainLine = visibleText(styledLine);
     const plainLines = wrapAnsi(plainLine, 0, wrapOptions).split("\n");
 
     // Assign each grapheme of the plain line a slice-ansi slot range: a grapheme occupies
@@ -480,90 +468,162 @@ export function wrapText(text: string, width: number, mode: WrapMode = "wrap"): 
     return wrapAnsi(text, width, { hard: true, trim: false, wordWrap: false }).split("\n");
   }
 
-  // Truncate each hard-newline segment independently. Passing the complete
-  // multiline string to cli-truncate lets one over-wide line discard or merge
-  // every later line. The per-line path keeps hard breaks, uses one budgeted
-  // ellipsis only when that line is shortened, and inherits cli-truncate's
-  // ANSI-, grapheme-, and terminal-cell-aware slicing.
-  const lines = text.split("\n");
-  const position =
-    mode === "truncate-start" ? "start" : mode === "truncate-middle" ? "middle" : "end";
+  // Truncate each hard-newline segment independently, so one over-wide line
+  // cannot discard or merge the ones after it: hard breaks stay, and only a
+  // line that is actually shortened spends a column on the ellipsis. The plan
+  // is the text `truncationCut` keeps, and paint cuts the cells with that same
+  // call, so the two cannot disagree.
+  const position = truncatePosition(mode);
   const budget = Math.max(0, width);
-  return lines.map((line) =>
-    stringWidth(line) <= budget ? line : cliTruncate(line, budget, { position }),
-  );
+  return text.split("\n").map((line) => truncatedLineText(line, budget, position));
+}
+
+/** The grapheme a cut is marked with, in the plan and in the cells alike. */
+const ellipsis = "…";
+
+type TruncatePosition = "start" | "middle" | "end";
+
+type TruncateMode = Extract<WrapMode, "truncate" | "truncate-middle" | "truncate-start">;
+
+function truncatePosition(mode: TruncateMode): TruncatePosition {
+  return mode === "truncate-start" ? "start" : mode === "truncate-middle" ? "middle" : "end";
 }
 
 /**
- * Apply terminal styling to line structure which layout has already chosen.
+ * The visible text one truncated line holds, which is the plan layout records.
  *
- * `wrappedLines` comes from `wrapText()` during the Yoga
- * measure pass. Paint must not call `wrapText` again: the layout result is the
- * one authoritative whole-cell budget for this frame. ANSI styling is added
- * after measuring, so project the styled source over that existing structure
- * instead of deciding where any line ends here.
+ * The plan needs graphemes and the columns they display, and nothing else — no
+ * cell, no `Style`, no ANSI. It reads them off the line's visible text through
+ * {@link truncationCut}, the same arithmetic paint cuts the cells with, so the
+ * two agree by construction rather than by comparison.
+ *
+ * What the cut asks for is what gets measured. `truncate` keeps a window that
+ * ends inside the budget, so {@link sliceMeasured} stops the segmenter there and
+ * planning a line costs the budget rather than the line. `truncate-start` and
+ * `truncate-middle` anchor their window on the line's column total, which every
+ * grapheme contributes to, so their walk does reach the end — but it builds one
+ * `{ grapheme, width }` on the way instead of a styled cell.
+ */
+function truncatedLineText(line: string, width: number, position: TruncatePosition): string {
+  const plain = visibleText(line);
+  // `string-width` sums the same per-grapheme widths the cells carry, so this is
+  // `displayedColumns` for a line nobody has parsed into cells — and it answers
+  // from the library's printable-ASCII fast path instead of a grapheme walk.
+  const columns = stringWidth(plain);
+  if (columns <= width) return plain;
+  if (width < 1) return "";
+  if (width === 1) return ellipsis;
+
+  const cut = truncationCut(columns, width, position);
+  return `${slicePlainSlots(plain, cut.head)}${ellipsis}${slicePlainSlots(plain, cut.tail)}`;
+}
+
+/** The graphemes of a plain line inside a kept window, as the text they spell. */
+function slicePlainSlots(plain: string, window: SlotWindow | undefined): string {
+  if (!window) return "";
+  let sliced = "";
+  for (const measured of sliceMeasured(measuredGraphemes(plain), window.start, window.end)) {
+    sliced += measured.grapheme;
+  }
+  return sliced;
+}
+
+/**
+ * The graphemes of a plain line with the columns each displays, produced one at
+ * a time: a caller that stops early never segments the rest of the line.
+ */
+function* measuredGraphemes(plain: string): Generator<MeasuredGrapheme> {
+  for (const { segment } of graphemeSegmenter.segment(plain)) {
+    yield { grapheme: segment, width: stringWidth(segment) };
+  }
+}
+
+/**
+ * Project the runs onto the line structure which layout has already chosen.
+ *
+ * `wrappedLines` comes from `wrapText()` during the Yoga measure pass. Paint
+ * must not call `wrapText` again: the layout result is the one authoritative
+ * whole-cell budget for this frame. The runs carry the style of every grapheme,
+ * so they are distributed over that existing structure rather than re-wrapped,
+ * and each line comes back as the cells paint writes.
  */
 export function styleMeasuredTextLines(
-  text: string,
+  runs: readonly Cell[],
   wrappedLines: readonly string[],
   mode: WrapMode,
   wrapWidth: number,
-): string[] {
+): Cell[][] {
   if (wrappedLines.length === 0) {
-    if (stripAnsi(text) !== "") {
+    if (runs.length !== 0) {
       throw new Error("Measured text plan does not match styled source.");
     }
     return [];
   }
 
+  const sourceLines = splitRunLines(runs);
   if (mode === "truncate" || mode === "truncate-middle" || mode === "truncate-start") {
-    return styleMeasuredTruncatedLines(text, wrappedLines, mode, wrapWidth);
+    return styleMeasuredTruncatedLines(sourceLines, wrappedLines, mode, wrapWidth);
   }
 
-  return styleMeasuredWrappedLines(text, wrappedLines);
+  return styleMeasuredWrappedLines(sourceLines, wrappedLines);
 }
 
-function styleMeasuredWrappedLines(text: string, wrappedLines: readonly string[]): string[] {
-  const styledSourceLines = text.split("\n");
-  const styledLines: string[] = [];
+/** Split runs at the physical line breaks the content carries. */
+function splitRunLines(runs: readonly Cell[]): (readonly Cell[])[] {
+  if (!runs.some((run) => run.grapheme === "\n")) return [runs];
+  const lines: Cell[][] = [[]];
+  for (const run of runs) {
+    if (run.grapheme === "\n") lines.push([]);
+    else lines[lines.length - 1]!.push(run);
+  }
+  return lines;
+}
+
+function styleMeasuredWrappedLines(
+  sourceLines: readonly (readonly Cell[])[],
+  wrappedLines: readonly string[],
+): Cell[][] {
+  const styledLines: Cell[][] = [];
   let wrappedLineIndex = 0;
 
-  for (const styledSourceLine of styledSourceLines) {
-    const sourceGraphemes = styledGraphemesFromAnsi(styledSourceLine);
-    const sourcePlainGraphemes = [...graphemeSegmenter.segment(stripAnsi(styledSourceLine))];
-    if (sourcePlainGraphemes.length === 0) {
+  for (const sourceGraphemes of sourceLines) {
+    if (sourceGraphemes.length === 0) {
       // A hard newline contributes one empty physical line. Empty rows inserted
       // by width-zero wrapping are handled in the non-empty source branch below.
       const measuredLine = wrappedLines[wrappedLineIndex++];
-      if (measuredLine === undefined || stripAnsi(measuredLine) !== "") {
+      if (measuredLine === undefined || visibleText(measuredLine) !== "") {
         throw new Error("Measured text plan does not match styled source.");
       }
-      styledLines.push("");
+      styledLines.push([]);
       continue;
     }
 
     let consumedGraphemes = 0;
-    while (consumedGraphemes < sourcePlainGraphemes.length) {
+    while (consumedGraphemes < sourceGraphemes.length) {
       const measuredLine = wrappedLines[wrappedLineIndex++];
       if (measuredLine === undefined) {
         throw new Error("Measured text plan does not match styled source.");
       }
-      const measuredGraphemes = [...graphemeSegmenter.segment(stripAnsi(measuredLine))];
+      const measuredGraphemes = [...graphemeSegmenter.segment(visibleText(measuredLine))];
       if (measuredGraphemes.length === 0) {
-        styledLines.push("");
+        styledLines.push([]);
         continue;
       }
 
       const endGrapheme = consumedGraphemes + measuredGraphemes.length;
-      if (endGrapheme > sourcePlainGraphemes.length || endGrapheme > sourceGraphemes.length) {
+      if (endGrapheme > sourceGraphemes.length) {
         throw new Error("Measured text plan does not match styled source.");
       }
-      const projected = measuredGraphemes.map(({ segment }, index) => ({
-        ...sourceGraphemes[consumedGraphemes + index]!,
-        value: segment,
-        fullWidth: stringWidth(segment) > 1,
-      }));
-      styledLines.push(styledGraphemesToString(projected));
+      styledLines.push(
+        measuredGraphemes.map(({ segment }, index) => {
+          const source = sourceGraphemes[consumedGraphemes + index]!;
+          // wrap-ansi can compose a grapheme its source spelled differently, and
+          // only then does the run need rebuilding around the measured segment.
+          return segment === source.grapheme
+            ? source
+            : { ...source, grapheme: segment, width: stringWidth(segment) };
+        }),
+      );
       consumedGraphemes = endGrapheme;
     }
   }
@@ -574,30 +634,168 @@ function styleMeasuredWrappedLines(text: string, wrappedLines: readonly string[]
   return styledLines;
 }
 
+/** A grapheme and the columns it displays: what truncation arithmetic reads. */
+interface MeasuredGrapheme {
+  readonly grapheme: string;
+  readonly width: number;
+}
+
+/** The columns one line of graphemes displays. */
+function displayedColumns(graphemes: readonly MeasuredGrapheme[]): number {
+  let columns = 0;
+  for (const grapheme of graphemes) columns += grapheme.width;
+  return columns;
+}
+
+/** One half-open range of slots a truncated line keeps. */
+interface SlotWindow {
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * The graphemes wholly inside `[start, end)` slots: the slice opens at the first
+ * one starting at or after `start` and stops at the first one that would cross
+ * `end`, so a grapheme a cut would split belongs to neither side.
+ *
+ * Slots, not columns: every grapheme claims at least one of them, so a
+ * zero-width grapheme takes a slot of its own while the budget the caller
+ * divides up counts it as nothing. The width-zero wrap above walks the same
+ * slot model.
+ *
+ * Nothing at or past `end` can qualify, so the walk stops there. Over a source
+ * that measures graphemes as it is pulled, that is what keeps a plan from
+ * measuring the part of the line no window reaches.
+ */
+function sliceMeasured<T extends MeasuredGrapheme>(
+  graphemes: Iterable<T>,
+  start: number,
+  end: number,
+): T[] {
+  const slice: T[] = [];
+  let slot = 0;
+  for (const grapheme of graphemes) {
+    if (slot >= end) break;
+    const graphemeEnd = slot + Math.max(1, grapheme.width);
+    if (slot >= start && graphemeEnd <= end) slice.push(grapheme);
+    slot = graphemeEnd;
+  }
+  return slice;
+}
+
+/** Which retained window's style the ellipsis takes, if it takes one. */
+type EllipsisStyleSource = "head" | "tail" | "none";
+
+/** How one line is cut down to a budget: see {@link truncationCut}. */
+interface TruncationCut {
+  /** Kept before the ellipsis, absent when the cut keeps nothing there. */
+  readonly head: SlotWindow | undefined;
+  /** Kept after it. */
+  readonly tail: SlotWindow | undefined;
+  readonly ellipsisStyle: EllipsisStyleSource;
+}
+
+/**
+ * Where the cut falls on a line of `columns` columns held to `width` columns.
+ *
+ * This is the whole of the truncation arithmetic. {@link wrapText} plans a
+ * truncated line with it and {@link truncateCellLine} cuts the cells with it, so
+ * layout and paint hold one implementation between them and no plan has to be
+ * checked against a second one. Callers settle the degenerate budgets first: a
+ * line that fits, a budget with no room for the ellipsis, and a budget that is
+ * the ellipsis alone never reach here.
+ */
+function truncationCut(columns: number, width: number, position: TruncatePosition): TruncationCut {
+  if (position === "start") {
+    const tail = { start: columns - width + 1, end: columns };
+    return { head: undefined, tail, ellipsisStyle: "tail" };
+  }
+  if (position === "middle") {
+    const half = Math.floor(width / 2);
+    const head = { start: 0, end: half };
+    const tail = { start: columns - (width - half) + 1, end: columns };
+    return { head, tail, ellipsisStyle: "none" };
+  }
+  return { head: { start: 0, end: width - 1 }, tail: undefined, ellipsisStyle: "head" };
+}
+
+function ellipsisCell(style: Style): Cell {
+  // The ellipsis takes the touching grapheme's style but never its hyperlink:
+  // a link addresses the text it covers, and the ellipsis stands for the part
+  // of that text this line no longer shows.
+  return { grapheme: ellipsis, width: 1, style, link: undefined };
+}
+
+/**
+ * Truncate one line of cells to `width` columns, marking the cut with `…`.
+ *
+ * Column arithmetic rather than a string round trip: a line serialized back to
+ * ANSI cannot carry bold and dim at once, because they share the `22m` close, so
+ * whichever was written last is the only one that survives and a bold run inside
+ * a dim Text came back dim. Where the cut falls is {@link truncationCut}'s
+ * answer, the one {@link wrapText} plans with, so layout and paint hold one
+ * arithmetic between them and no plan has to be checked against a second one.
+ *
+ * The rules this implements:
+ *
+ * - a line that fits the budget comes back whole. That is asked first, because
+ *   a line of only zero-width graphemes displays no columns and so fits even a
+ *   budget of zero, which the rule below would otherwise empty;
+ * - a budget under 1 keeps nothing, and a budget of exactly 1 is the bare
+ *   ellipsis carrying no style at all, whatever the line held;
+ * - the budget buys slots, the unit {@link sliceMeasured} walks, where every
+ *   grapheme claims `max(1, width)` of them: `end` keeps the graphemes inside
+ *   the first `width - 1` slots, `start` those inside the `width - 1` slots
+ *   ending at the line's column total, and `middle` splits the budget, keeping
+ *   `floor(width / 2)` slots from the left and the rest at that same end. A
+ *   grapheme a cut would split is dropped whole, so a line of wide graphemes can
+ *   come back narrower than the budget. The right-hand window ends at the
+ *   columns the line displays rather than at the slots it occupies, so each
+ *   zero-width grapheme in the line moves that window one slot to the left:
+ *   `truncate-start` over `"ab\u200bcdef"` in four columns keeps `"…cde"`, not
+ *   `"…def"`. That is the arithmetic `0b781b41` performed through `cli-truncate`
+ *   and `slice-ansi`, which walked this same slot model, and the truncation
+ *   suite pins it;
+ * - the ellipsis inherits the complete style of the retained grapheme it
+ *   touches — the last one for `end`, the first one for `start` — including a
+ *   colon-form sequence Runtime carries as an exact pair. In `middle` it
+ *   inherits nothing: the two retained pieces are cut independently and it
+ *   belongs to neither, so it is written bare.
+ */
+export function truncateCellLine(
+  cells: readonly Cell[],
+  width: number,
+  position: "start" | "middle" | "end",
+): Cell[] {
+  const columns = displayedColumns(cells);
+  if (columns <= width) return [...cells];
+  if (width < 1) return [];
+  if (width === 1) return [ellipsisCell(defaultStyle)];
+
+  const cut = truncationCut(columns, width, position);
+  const head = cut.head ? sliceMeasured(cells, cut.head.start, cut.head.end) : [];
+  const tail = cut.tail ? sliceMeasured(cells, cut.tail.start, cut.tail.end) : [];
+  const touching =
+    cut.ellipsisStyle === "head" ? head.at(-1) : cut.ellipsisStyle === "tail" ? tail[0] : undefined;
+  return [...head, ellipsisCell(touching?.style ?? defaultStyle), ...tail];
+}
+
+// A truncated line carries the ellipsis, which no run holds, so paint cannot
+// project the runs onto the measured line the way the wrapping modes do. It
+// truncates the runs themselves, through the arithmetic layout planned with,
+// and reads only the line count off the plan.
 function styleMeasuredTruncatedLines(
-  text: string,
+  sourceLines: readonly (readonly Cell[])[],
   wrappedLines: readonly string[],
-  mode: Extract<WrapMode, "truncate" | "truncate-middle" | "truncate-start">,
+  mode: TruncateMode,
   wrapWidth: number,
-): string[] {
-  const sourceLines = text.split("\n");
+): Cell[][] {
   if (sourceLines.length !== wrappedLines.length) {
     throw new Error("Measured text plan does not match styled source.");
   }
-  const position =
-    mode === "truncate-start" ? "start" : mode === "truncate-middle" ? "middle" : "end";
-  return sourceLines.map((styledSourceLine, index) => {
-    const measuredLine = wrappedLines[index]!;
-    const measuredPlain = stripAnsi(measuredLine);
-    if (measuredPlain === "") return "";
-    if (measuredPlain === stripAnsi(styledSourceLine)) return styledSourceLine;
-
-    const styled = cliTruncate(styledSourceLine, Math.max(0, wrapWidth), { position });
-    if (stripAnsi(styled) !== measuredPlain) {
-      throw new Error("Measured text plan does not match styled source.");
-    }
-    return styled;
-  });
+  const position = truncatePosition(mode);
+  const budget = Math.max(0, wrapWidth);
+  return sourceLines.map((sourceGraphemes) => truncateCellLine(sourceGraphemes, budget, position));
 }
 
 /**

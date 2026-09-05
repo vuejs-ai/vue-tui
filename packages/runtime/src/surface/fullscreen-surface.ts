@@ -1,7 +1,6 @@
 import ansiEscapes from "ansi-escapes";
 import { Frame } from "../frame/frame.ts";
 import type { TerminalLease, TerminalOutput } from "../terminal/backend.ts";
-import { hideCursorEscape, showCursorEscape } from "./cursor-helpers.ts";
 import { encodeFrame, encodeFrameRow } from "./frame-encoder.ts";
 import {
   SurfaceBase,
@@ -18,24 +17,17 @@ export class FullscreenSurface extends SurfaceBase {
   readonly isLive = true;
   readonly acceptsHistory = false;
 
-  private alternateScreen = false;
-  private cursorHidden = false;
-  private alternateScreenMayBeActive = false;
-  private cursorMayBeHidden = false;
   private alternateScreenLease: TerminalLease<"alternate-screen"> | undefined;
   private cursorVisibilityLease: TerminalLease<"cursor-visibility"> | undefined;
-  private enterPending = false;
-  private hideCursorPending = false;
-  private exitPending = false;
-  private showCursorPending = false;
-  private alternateScreenReleaseGeneration = 0;
-  private cursorReleaseGeneration = 0;
   private baselineValid = false;
   private baselineColumns: number | null = null;
   private baselineRows: number | null = null;
 
   get isInputReady(): boolean {
-    return this.alternateScreen && this.cursorHidden;
+    return (
+      this.terminal.isModeActive("alternate-screen") &&
+      this.terminal.isModeActive("cursor-visibility")
+    );
   }
 
   layoutHeight(viewportRows: number | null): SurfaceLayoutHeight {
@@ -62,10 +54,10 @@ export class FullscreenSurface extends SurfaceBase {
   suspend(runtime: SurfaceRuntime): void {
     this.baselineValid = false;
     runtime.setSurfaceAvailable(false);
-    this.releaseAlternateScreen(runtime, true);
-    this.releaseCursorVisibility(runtime, true);
+    this.releaseAlternateScreen(true);
+    this.releaseCursorVisibility(true);
     try {
-      this.getAttachedWriter()?.reset({ cursorHidden: false });
+      this.getAttachedWriter()?.reset();
     } catch {
       // Continue the release sequence when log-update has already lost its
       // physical baseline to a failed terminal transaction.
@@ -74,32 +66,26 @@ export class FullscreenSurface extends SurfaceBase {
     runtime.reportTerminalReleased();
   }
 
-  resume(runtime: SurfaceRuntime): boolean {
-    return this.ensureTerminalLease(runtime);
+  resume(_runtime: SurfaceRuntime): boolean {
+    return this.ensureTerminalLease();
   }
 
   dispose(runtime: SurfaceRuntime, options: SurfaceDisposeOptions): void {
     const writer = this.getAttachedWriter();
     // Each release stands alone: a throw here must not cost the terminal its
-    // main screen or its cursor, which the two blocks below restore. The failure
-    // is still the teardown's, so it is raised once the restores have run.
+    // main screen or its cursor, which the two releases below restore. The
+    // failure is still the teardown's, so it is raised once they have run.
     let releaseFailure: { readonly error: unknown } | undefined;
     if (writer && runtime.isStdoutWritable) {
       try {
-        if (options.sync) {
-          if (writer.isCursorHidden()) {
-            runtime.writeBestEffort(runtime.stdout, showCursorEscape, true);
-          }
-          writer.reset({ cursorHidden: false });
-        } else {
-          writer.done();
-        }
+        if (options.sync) writer.reset();
+        else writer.done();
       } catch (error) {
         releaseFailure = { error };
       }
     }
-    this.releaseAlternateScreen(runtime, options.sync);
-    this.releaseCursorVisibility(runtime, options.sync);
+    this.releaseAlternateScreen(options.sync);
+    this.releaseCursorVisibility(options.sync);
     if (releaseFailure) throw releaseFailure.error;
   }
 
@@ -107,144 +93,62 @@ export class FullscreenSurface extends SurfaceBase {
     if (resize.mappingChanged) this.baselineValid = false;
   }
 
-  abandonPendingOutput(options?: { readonly physicalStateUncertain?: boolean }): void {
-    if (options?.physicalStateUncertain) {
-      this.baselineValid = false;
-    }
-    // Each physical write marks its own uncertainty when handoff starts. A
-    // later captured segment may never have reached stream.write(), so pending
-    // alone is not evidence that its terminal mode changed.
-    this.enterPending = false;
-    this.hideCursorPending = false;
-    this.exitPending = false;
-    this.showCursorPending = false;
-  }
-
   override createRollback(): () => void {
     const rollbackBase = super.createRollback();
     const snapshot = {
-      alternateScreen: this.alternateScreen,
-      alternateScreenMayBeActive: this.alternateScreenMayBeActive,
-      alternateScreenLease: this.alternateScreenLease,
-      alternateScreenReleaseGeneration: this.alternateScreenReleaseGeneration,
       baselineColumns: this.baselineColumns,
       baselineRows: this.baselineRows,
       baselineValid: this.baselineValid,
-      cursorHidden: this.cursorHidden,
-      cursorMayBeHidden: this.cursorMayBeHidden,
-      cursorVisibilityLease: this.cursorVisibilityLease,
-      cursorReleaseGeneration: this.cursorReleaseGeneration,
     };
     let active = true;
     return () => {
       if (!active) return;
       active = false;
       rollbackBase();
-      // Output rollback restores logical frame facts. Physical mode facts are
-      // conservative unions: acquisition may have reached the terminal before
-      // a later segment failed, while a failed release may need to be retried.
-      if (this.alternateScreenReleaseGeneration === snapshot.alternateScreenReleaseGeneration) {
-        this.alternateScreen ||= snapshot.alternateScreen;
-        this.alternateScreenMayBeActive ||= snapshot.alternateScreenMayBeActive;
-        this.alternateScreenLease ??= snapshot.alternateScreenLease;
-      }
+      // Output rollback restores logical frame facts. The physical mode facts
+      // belong to the leases, which stay owned: an acquisition may have reached
+      // the terminal before a later segment failed.
       this.baselineColumns = snapshot.baselineColumns;
       this.baselineRows = snapshot.baselineRows;
       this.baselineValid = snapshot.baselineValid;
-      if (this.cursorReleaseGeneration === snapshot.cursorReleaseGeneration) {
-        this.cursorHidden ||= snapshot.cursorHidden;
-        this.cursorMayBeHidden ||= snapshot.cursorMayBeHidden;
-        this.cursorVisibilityLease ??= snapshot.cursorVisibilityLease;
-      }
     };
   }
 
-  private ensureTerminalLease(runtime: SurfaceRuntime): boolean {
-    let accepted = true;
-    if (!this.alternateScreen && !this.enterPending) {
-      this.baselineValid = false;
-      this.enterPending = true;
-      if (
-        !runtime.writeTerminal(
-          ansiEscapes.enterAlternativeScreen + "\x1b[H",
-          () => {
-            if (!this.enterPending) return;
-            this.enterPending = false;
-            this.alternateScreenMayBeActive = false;
-            this.alternateScreen = true;
-            this.alternateScreenLease ??= runtime.terminal.acquire("alternate-screen");
-            this.reportAcquiredIfReady(runtime);
-            runtime.requestTerminalReconcile();
-          },
-          () => {
-            if (this.enterPending) this.alternateScreenMayBeActive = true;
-          },
-        )
-      ) {
-        this.enterPending = false;
-        accepted = false;
-      }
-    }
-    if (!this.cursorHidden && !this.hideCursorPending) {
-      this.hideCursorPending = true;
-      if (
-        !runtime.writeTerminal(
-          hideCursorEscape,
-          () => {
-            if (!this.hideCursorPending) return;
-            this.hideCursorPending = false;
-            this.cursorMayBeHidden = false;
-            this.cursorHidden = true;
-            this.cursorVisibilityLease ??= runtime.terminal.acquire("cursor-visibility");
-            this.reportAcquiredIfReady(runtime);
-            runtime.requestTerminalReconcile();
-          },
-          () => {
-            if (this.hideCursorPending) this.cursorMayBeHidden = true;
-          },
-        )
-      ) {
-        this.hideCursorPending = false;
-        accepted = false;
-      }
-    }
-    return accepted;
+  /**
+   * Take the viewport's two modes. Acquisition issues the alternate-screen and
+   * hide-cursor sequences; the return value reports whether the device has them,
+   * or is about to once the open transaction hands off.
+   */
+  private ensureTerminalLease(): boolean {
+    if (!this.terminal.isModeActive("alternate-screen")) this.baselineValid = false;
+    this.alternateScreenLease ??= this.terminal.acquire("alternate-screen");
+    this.cursorVisibilityLease ??= this.terminal.acquire("cursor-visibility");
+    return (
+      this.terminal.isModeSettled("alternate-screen") &&
+      this.terminal.isModeSettled("cursor-visibility")
+    );
   }
 
   /** The sole alternate-screen release path, paired with its acquisition above. */
-  private releaseAlternateScreen(runtime: SurfaceRuntime, sync: boolean): void {
-    if ((!this.alternateScreen && !this.alternateScreenMayBeActive) || this.exitPending) return;
-    this.exitPending = true;
-    const accepted = runtime.writeBestEffort(
-      runtime.stdout,
-      ansiEscapes.exitAlternativeScreen,
-      sync,
-      () => {
-        if (!this.exitPending) return;
-        this.exitPending = false;
-        this.alternateScreen = false;
-        this.alternateScreenMayBeActive = false;
-        this.alternateScreenLease?.release();
-        this.alternateScreenLease = undefined;
-        this.alternateScreenReleaseGeneration++;
-      },
-    );
-    if (!accepted) this.exitPending = false;
+  private releaseAlternateScreen(sync: boolean): void {
+    const lease = this.alternateScreenLease;
+    this.alternateScreenLease = undefined;
+    try {
+      lease?.release({ sync });
+    } catch {
+      // Restoring the main screen is best effort; the cursor release below and
+      // the rest of teardown still have to run.
+    }
   }
 
-  private releaseCursorVisibility(runtime: SurfaceRuntime, sync: boolean): void {
-    if ((!this.cursorHidden && !this.cursorMayBeHidden) || this.showCursorPending) return;
-    this.showCursorPending = true;
-    const accepted = runtime.writeBestEffort(runtime.stdout, showCursorEscape, sync, () => {
-      if (!this.showCursorPending) return;
-      this.showCursorPending = false;
-      this.cursorHidden = false;
-      this.cursorMayBeHidden = false;
-      this.cursorVisibilityLease?.release();
-      this.cursorVisibilityLease = undefined;
-      this.cursorReleaseGeneration++;
-    });
-    if (!accepted) this.showCursorPending = false;
+  private releaseCursorVisibility(sync: boolean): void {
+    const lease = this.cursorVisibilityLease;
+    this.cursorVisibilityLease = undefined;
+    try {
+      lease?.release({ sync });
+    } catch {
+      // Revealing the cursor is best effort; teardown continues either way.
+    }
   }
 
   private repaint(
@@ -272,7 +176,7 @@ export class FullscreenSurface extends SurfaceBase {
     }
 
     runtime.runLifecycleTransaction(() => {
-      this.ensureTerminalLease(runtime);
+      this.ensureTerminalLease();
       const previousFrame = this.previousFrame;
       const canDiff =
         frame !== undefined &&
@@ -289,7 +193,9 @@ export class FullscreenSurface extends SurfaceBase {
 
       runtime.runCoordinatedWrite(
         () => {
-          runtime.write(runtime.stdout, hideCursorEscape);
+          // The viewport restates its hidden cursor at the head of every frame,
+          // so console output that revealed it cannot outlive one repaint.
+          this.cursorVisibilityLease?.reassert();
           options.writeBefore?.();
         },
         () => {
@@ -299,7 +205,7 @@ export class FullscreenSurface extends SurfaceBase {
               changedRows.push(
                 ansiEscapes.cursorTo(0, row),
                 "\x1b[0m",
-                encodeFrameRow(frame!, row),
+                encodeFrameRow(frame!, row, this.color),
                 "\x1b[0m",
                 ansiEscapes.eraseEndLine,
               );
@@ -307,7 +213,7 @@ export class FullscreenSurface extends SurfaceBase {
             changedRows.push(ansiEscapes.cursorTo(0, Math.max(0, runtime.viewportRows! - 1)));
             runtime.write(runtime.stdout, changedRows.join(""));
           } else {
-            const encoded = options.encoded ?? (frame ? encodeFrame(frame) : "");
+            const encoded = options.encoded ?? (frame ? encodeFrame(frame, this.color) : "");
             runtime.write(runtime.stdout, ansiEscapes.clearViewport + encoded);
           }
         },
@@ -319,9 +225,5 @@ export class FullscreenSurface extends SurfaceBase {
       this.baselineRows = runtime.viewportRows;
     });
     return true;
-  }
-
-  private reportAcquiredIfReady(runtime: SurfaceRuntime): void {
-    if (this.isInputReady && !runtime.isResumeInProgress) runtime.reportTerminalAcquired();
   }
 }

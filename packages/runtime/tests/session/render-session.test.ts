@@ -8,9 +8,9 @@ import {
   resolveLiveSurface,
   type LiveHostInput,
 } from "../../src/session/render-session.ts";
-import { createTerminalStyle } from "../../src/text/terminal-style.ts";
+import { createColorCapability } from "../../src/frame/color-profile.ts";
 
-const terminalStyle = createTerminalStyle(3);
+const colorCapability = createColorCapability(3);
 
 function liveInput(overrides: Partial<LiveHostInput> = {}): LiveHostInput {
   return {
@@ -139,7 +139,7 @@ test("visual Fullscreen owns an exact detected viewport", () => {
 
 test("the reactive service keeps identity and replaces dimensions atomically", () => {
   const initial = resolveLiveSurface(liveInput({ requestedMode: "fullscreen" }));
-  const service = createLiveRenderSessionService(initial, terminalStyle);
+  const service = createLiveRenderSessionService(initial, colorCapability);
   const session = service.session;
 
   service.updateDimensions({
@@ -162,7 +162,7 @@ test("the reactive service keeps identity and replaces dimensions atomically", (
 });
 
 test("string service exposes one fixed document snapshot", () => {
-  const service = createStringRenderSessionService({ columns: 37, rows: 24, terminalStyle });
+  const service = createStringRenderSessionService({ columns: 37, rows: 24, colorCapability });
   const session = service.session;
 
   expect(session).toEqual({
@@ -174,6 +174,6 @@ test("string service exposes one fixed document snapshot", () => {
 });
 
 test("string service maps unbounded height to private null rows", () => {
-  const service = createStringRenderSessionService({ columns: 80, rows: null, terminalStyle });
+  const service = createStringRenderSessionService({ columns: 80, rows: null, colorCapability });
   expect(service.session.dimensions.layout).toEqual({ columns: 80, rows: null });
 });

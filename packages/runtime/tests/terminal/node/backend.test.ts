@@ -295,21 +295,24 @@ test("an external listener added during pause keeps input flowing", () => {
 });
 
 test("the node backend counts mode ownership like the test backend does", () => {
+  const stdout = createWritable();
   const backend = new NodeTerminalBackend({
     stdin: createReadable(),
-    stdout: createWritable(),
+    stdout,
     stderr: createWritable(),
   });
 
-  expect(backend.isModeHeld("alternate-screen")).toBe(false);
   const first = backend.acquire("alternate-screen");
   const second = backend.acquire("alternate-screen");
-  expect(backend.isModeHeld("alternate-screen")).toBe(true);
+  // The enable reaches the device once, when the first holder arrives.
+  expect(stdout.writes).toEqual(["\x1b[?1049h\x1b[H"]);
 
   first.release();
   first.release();
-  expect(backend.isModeHeld("alternate-screen")).toBe(true);
+  // A holder leaving while another remains, and a redundant release, write
+  // nothing.
+  expect(stdout.writes).toEqual(["\x1b[?1049h\x1b[H"]);
 
   second.release();
-  expect(backend.isModeHeld("alternate-screen")).toBe(false);
+  expect(stdout.writes).toEqual(["\x1b[?1049h\x1b[H", "\x1b[?1049l"]);
 });

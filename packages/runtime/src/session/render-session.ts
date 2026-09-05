@@ -3,7 +3,7 @@ import {
   useInternalRenderSession as useVueInternalRenderSession,
   useOptionalInternalRenderSession as useOptionalVueInternalRenderSession,
 } from "../vue/context.ts";
-import type { TerminalStyle } from "../text/terminal-style.ts";
+import type { ColorCapability } from "../frame/color-profile.ts";
 import { MAX_LAYOUT_VALUE } from "../layout/numeric-limits.ts";
 import type {
   ResolvedLiveDimensions,
@@ -157,7 +157,8 @@ type MutableLiveRenderSession = {
 
 interface InternalRenderSessionServiceBase {
   readonly session: DeepReadonly<InternalRenderSessionSnapshot>;
-  readonly terminalStyle: TerminalStyle;
+  /** The color capability this host's encoder degrades every cell to. */
+  readonly colorCapability: ColorCapability;
   dispose(): void;
 }
 
@@ -183,7 +184,7 @@ function frozenDimensions(dimensions: ResolvedLiveDimensions): ResolvedLiveDimen
 
 export function createLiveRenderSessionService(
   surface: ResolvedLiveSurface,
-  terminalStyle: TerminalStyle,
+  colorCapability: ColorCapability,
 ): InternalLiveRenderSessionService {
   const state = shallowReactive<MutableLiveRenderSession>({
     dimensions: frozenDimensions(surface.dimensions),
@@ -192,7 +193,7 @@ export function createLiveRenderSessionService(
 
   return {
     session: readonly(state) as DeepReadonly<InternalLiveRenderSessionSnapshot>,
-    terminalStyle,
+    colorCapability,
     updateDimensions(next) {
       if (disposed) return;
       state.dimensions = frozenDimensions(next);
@@ -207,7 +208,7 @@ export function createStringRenderSessionService(options: {
   readonly columns: number;
   /** `null` is Runtime's private unbounded vertical layout representation. */
   readonly rows: number | null;
-  readonly terminalStyle: TerminalStyle;
+  readonly colorCapability: ColorCapability;
 }): InternalStringRenderSessionService {
   const state = shallowReactive<InternalStringRenderSessionSnapshot>({
     dimensions: Object.freeze({
@@ -217,7 +218,7 @@ export function createStringRenderSessionService(options: {
   });
   return {
     session: readonly(state) as DeepReadonly<InternalStringRenderSessionSnapshot>,
-    terminalStyle: options.terminalStyle,
+    colorCapability: options.colorCapability,
     dispose() {
       // The readonly snapshot remains valid after the synchronous tree is gone.
     },

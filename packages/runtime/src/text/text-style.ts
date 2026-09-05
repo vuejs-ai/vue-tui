@@ -1,5 +1,14 @@
-import { Chalk, type ChalkInstance } from "chalk";
-import type { TerminalStyle } from "./terminal-style.ts";
+// Authored style props resolved into the structured fields a cell holds. Every
+// colour is carried at full fidelity; the frame encoder owns degradation to the
+// host's resolved colour level, so nothing here reads a capability.
+import ansiStyles from "ansi-styles";
+import type { Color } from "../frame/style.ts";
+import {
+  backgroundEndCode,
+  foregroundEndCode,
+  sgrCodeForColor,
+  type SgrToken,
+} from "./cell-style.ts";
 
 /** The Text prop subset that contributes visual cell style. */
 export interface TextStyleProps {
@@ -13,157 +22,182 @@ export interface TextStyleProps {
   readonly inverse?: boolean;
 }
 
-// Validation is grammar-only. It must not inherit the process's terminal or
-// color environment just because Chalk was imported in this module.
-const chalkGrammar = new Chalk({ level: 1 });
+/**
+ * One channel a Text's props resolve for its subtree, as the two sequences that
+ * open and end it.
+ *
+ * `reopens` says whether the span repairs itself around content that would end
+ * it early: a written close is followed by a fresh open, and a hard newline
+ * closes the span before the break and opens it again after. Every styled
+ * channel does both. A colour prop set to `default` does neither: it selects
+ * the terminal's own colour by writing that channel's end sequence at each edge
+ * of the content, and a bare pair has nothing to repair.
+ */
+export interface TextStyleContribution {
+  readonly open: SgrToken;
+  readonly close: SgrToken;
+  readonly reopens: boolean;
+}
+
+/**
+ * One inline host as it stands over one chunk of content: which host it is,
+ * which channels its own props set, and the style it opens around this chunk.
+ *
+ * `owner` is identity, not style, and is an opaque object because the hosts
+ * live in `host/`, which `text/` may not import. Composition reads it to tell
+ * which neighbouring chunks the same host encloses. `ownChannels` is every
+ * channel the props set, whatever they set it to, which decides where one host
+ * ends a stretch of content and the next begins.
+ */
+export interface TextStyleLevel {
+  readonly owner: object;
+  readonly ownChannels: number;
+  readonly contributions: readonly TextStyleContribution[];
+}
+
+const namedColorIndex = new Map<string, number>([
+  ["black", 0],
+  ["red", 1],
+  ["green", 2],
+  ["yellow", 3],
+  ["blue", 4],
+  ["magenta", 5],
+  ["cyan", 6],
+  ["white", 7],
+  ["blackBright", 8],
+  ["gray", 8],
+  ["grey", 8],
+  ["redBright", 9],
+  ["greenBright", 10],
+  ["yellowBright", 11],
+  ["blueBright", 12],
+  ["magentaBright", 13],
+  ["cyanBright", 14],
+  ["whiteBright", 15],
+]);
 
 // Accepted functional colors are rgb(R,G,B) and ansi256(N). An unparseable or
-// unsupported string leaves the text unchanged instead of emitting an invalid
-// SGR sequence; ansi(N) is not an accepted form.
+// unsupported string leaves the channel unset instead of inventing a colour;
+// ansi(N) is not an accepted form.
 const rgbRegex = /^rgb\(\s?(\d+),\s?(\d+),\s?(\d+)\s?\)$/;
 const ansi256Regex = /^ansi256\(\s?(\d+)\s?\)$/;
 
-function chalkProperty(instance: ChalkInstance, key: string): unknown {
-  // Chalk is a callable proxy with dynamic named-color properties that its
-  // public type cannot enumerate. Keep that dynamic lookup in one read-only
-  // boundary and validate every result before use.
-  const property: unknown = Reflect.get(instance, key);
-  return property;
+/** A pair whose written form is the sequence itself, which is every pair here. */
+function sgrToken(code: string, endCode: string): SgrToken {
+  return { code, endCode, source: code };
 }
 
-export function isForegroundResetColor(color: unknown): boolean {
+function attributeContribution(open: string, close: string): TextStyleContribution {
+  return { open: sgrToken(open, close), close: sgrToken(close, close), reopens: true };
+}
+
+const attributeContributions = {
+  dimColor: attributeContribution("\x1b[2m", "\x1b[22m"),
+  bold: attributeContribution("\x1b[1m", "\x1b[22m"),
+  italic: attributeContribution("\x1b[3m", "\x1b[23m"),
+  underline: attributeContribution("\x1b[4m", "\x1b[24m"),
+  strikethrough: attributeContribution("\x1b[9m", "\x1b[29m"),
+  inverse: attributeContribution("\x1b[7m", "\x1b[27m"),
+} as const satisfies Record<string, TextStyleContribution>;
+
+/** `default` actively selects the terminal's own color for one channel. */
+function isTerminalDefaultColor(color: unknown): boolean {
   return color === "default";
 }
 
-export function isBackgroundResetColor(color: unknown): boolean {
-  return color === "default";
-}
-
-function resetForeground(text: string, style: TerminalStyle): string {
-  return style.colorLevel > 0 ? `\x1b[39m${text}\x1b[39m` : text;
-}
-
-function resetBackground(text: string, style: TerminalStyle): string {
-  return style.colorLevel > 0 ? `\x1b[49m${text}\x1b[49m` : text;
-}
-
-export function applyColor(style: TerminalStyle, color: unknown, bg: boolean): ChalkInstance {
-  const chalk = style.chalk;
-  if (style.colorLevel === 0) return chalk;
-  if (typeof color !== "string") return chalk;
-  // Apply a named Chalk method when present; otherwise leave the text bare.
-  const key = bg ? bgKey(color) : color;
-  const named = chalkProperty(chalk, key);
-  if (typeof named === "function") return named as ChalkInstance;
-  if (color.startsWith("#")) return bg ? chalk.bgHex(color) : chalk.hex(color);
+/** The structured colour one authored value names, or nothing for an unsupported value. */
+export function parseColorValue(color: unknown): Color | undefined {
+  if (typeof color !== "string") return undefined;
+  const named = namedColorIndex.get(color);
+  if (named !== undefined) return { kind: "ansi16", index: named };
+  if (color.startsWith("#")) {
+    // `hexToRgb` takes the first six- or three-digit run anywhere in the value
+    // and doubles each digit of the short form, so `#f80` and `#ff8800` name
+    // the same color.
+    const [red, green, blue] = ansiStyles.hexToRgb(color);
+    return { kind: "rgb", red, green, blue };
+  }
   if (color.startsWith("ansi256")) {
-    const m = ansi256Regex.exec(color);
-    if (!m) return chalk;
-    const n = Number(m[1]);
-    return bg ? chalk.bgAnsi256(n) : chalk.ansi256(n);
+    const match = ansi256Regex.exec(color);
+    return match ? { kind: "ansi256", index: Number(match[1]) } : undefined;
   }
   if (color.startsWith("rgb")) {
-    const m = rgbRegex.exec(color);
-    if (!m) return chalk;
-    const [r, g, b] = [Number(m[1]), Number(m[2]), Number(m[3])];
-    return bg ? chalk.bgRgb(r, g, b) : chalk.rgb(r, g, b);
+    const match = rgbRegex.exec(color);
+    if (!match) return undefined;
+    return { kind: "rgb", red: Number(match[1]), green: Number(match[2]), blue: Number(match[3]) };
   }
-  return chalk;
-}
-
-function bgKey(name: string): string {
-  return "bg" + name.charAt(0).toUpperCase() + name.slice(1);
+  return undefined;
 }
 
 /**
- * Detect a backgroundColor value that resolves to a Chalk property but has no
- * corresponding background method.
- *
- * A Chalk modifier name (`bold`/`dim`/`italic`/`underline`/
- * `inverse`/`hidden`/`strikethrough`/`reset`/`overline`/`visible`) is `in chalk`
- * but has NO `bg*` method, so the call is `chalk[undefined-method](str)` and throws
- * "chalk.bgBold is not a function". A chalk COLOR name resolves to a real `bg*`
- * method (works); a string NOT in chalk falls through to bare text (no throw).
- *
- * vue-tui mirrors that throw, but VALIDATES here at component-render time (not in
- * paint): a raw throw in the post-flush paint pass unwinds through Vue's
- * flushPostFlushCbs outside Vue's component error propagation (cf. the borderStyle
- * fix #124). Returning a flag lets the component throw during render so user
- * capture hooks and the app error handler receive it through Vue normally.
- *
- * Only the in-chalk-but-no-bg-method case is rejected; valid colors, hex,
- * ansi256, rgb strings, and unknown non-chalk strings all return false.
+ * The style channels a Text's props carry. A nested Text that sets a channel
+ * resolves it for its own subtree, so an enclosing Text must not open that
+ * channel again: the mask represents terminal-default colors and all three
+ * modifier states without sentinel characters in user text.
  */
-export function isInvalidBackgroundColor(color: unknown): boolean {
-  // Only a non-empty string can be a chalk name. Non-strings, undefined, null,
-  // hex/ansi256/rgb strings (not `in chalk`) all fall through to `false`.
-  if (typeof color !== "string" || color.length === 0) return false;
-  const isInChalk = color in chalkGrammar;
-  if (!isInChalk) return false;
-  const bgMethod = chalkProperty(chalkGrammar, bgKey(color));
-  return typeof bgMethod !== "function";
+export const TextStyleChannel = {
+  foreground: 1 << 0,
+  background: 1 << 1,
+  dimColor: 1 << 2,
+  bold: 1 << 3,
+  italic: 1 << 4,
+  underline: 1 << 5,
+  strikethrough: 1 << 6,
+  inverse: 1 << 7,
+} as const;
+
+/** The channels these props set explicitly, whatever value they set them to. */
+export function explicitTextStyleChannels(props: TextStyleProps): number {
+  let mask = 0;
+  if (props.color !== undefined) mask |= TextStyleChannel.foreground;
+  if (props.backgroundColor !== undefined) mask |= TextStyleChannel.background;
+  if (props.dimColor !== undefined) mask |= TextStyleChannel.dimColor;
+  if (props.bold !== undefined) mask |= TextStyleChannel.bold;
+  if (props.italic !== undefined) mask |= TextStyleChannel.italic;
+  if (props.underline !== undefined) mask |= TextStyleChannel.underline;
+  if (props.strikethrough !== undefined) mask |= TextStyleChannel.strikethrough;
+  if (props.inverse !== undefined) mask |= TextStyleChannel.inverse;
+  return mask;
 }
 
 /**
- * Detect a foreground color value that resolves to a non-callable Chalk property.
- *
- * Real colors and modifiers (`red`, `bold`) are callable, while properties such
- * as `level` are not.
+ * The channels these props resolve, outermost first, skipping every `blocked`
+ * one. The order is the nesting order the styles were written in — inverse
+ * outermost, dim innermost — which is the order an unmodelled channel reset
+ * takes its place in a cell's `extraSgr`.
  */
-export function isInvalidForegroundColor(color: unknown): boolean {
-  if (typeof color !== "string" || color.length === 0) return false;
-  const method = chalkProperty(chalkGrammar, color);
-  return color in chalkGrammar && typeof method !== "function";
+export function textStyleContributions(
+  props: TextStyleProps,
+  blocked: number,
+): TextStyleContribution[] {
+  const contributions: TextStyleContribution[] = [];
+  const add = (channel: number, contribution: TextStyleContribution | undefined): void => {
+    if (contribution !== undefined && (blocked & channel) === 0) contributions.push(contribution);
+  };
+  add(TextStyleChannel.inverse, props.inverse ? attributeContributions.inverse : undefined);
+  add(
+    TextStyleChannel.strikethrough,
+    props.strikethrough ? attributeContributions.strikethrough : undefined,
+  );
+  add(TextStyleChannel.underline, props.underline ? attributeContributions.underline : undefined);
+  add(TextStyleChannel.italic, props.italic ? attributeContributions.italic : undefined);
+  add(TextStyleChannel.bold, props.bold ? attributeContributions.bold : undefined);
+  add(TextStyleChannel.background, colorContribution(props.backgroundColor, true));
+  add(TextStyleChannel.foreground, colorContribution(props.color, false));
+  add(TextStyleChannel.dimColor, props.dimColor ? attributeContributions.dimColor : undefined);
+  return contributions;
 }
 
-/**
- * Throw during component render if `color` is a Chalk modifier used as a
- * backgroundColor. `label` names the offending prop in the message.
- */
-export function assertValidBackgroundColor(color: unknown, label = "backgroundColor"): void {
-  if (isInvalidBackgroundColor(color)) {
-    throw new Error(
-      `Invalid ${label}: ${JSON.stringify(color)} (chalk has no bg method for it — ` +
-        `it is a text modifier, not a background color)`,
-    );
-  }
-}
-
-/**
- * Throw during component render for foreground names that resolve to a
- * non-callable Chalk property. `label` names the offending prop.
- */
-export function assertValidForegroundColor(color: unknown, label = "color"): void {
-  if (isInvalidForegroundColor(color)) {
-    throw new Error(
-      `Invalid ${label}: ${JSON.stringify(color)} (chalk has this key but it is not a color method)`,
-    );
-  }
-}
-
-export function applyChalk(style: TerminalStyle, text: string, props: TextStyleProps): string {
-  // Apply each enabled style as its own nested Chalk call, in the order
-  // dim -> color -> backgroundColor -> bold -> italic -> underline ->
-  // strikethrough -> inverse. This produces individually-balanced open/close
-  // pairs (e.g. dim+bold re-opens bold after dim's SGR-22 reset). A single
-  // chained ChalkInstance would produce different reset placement.
-  const chalk = style.chalk;
-  let s = text;
-  if (props.dimColor) s = chalk.dim(s);
-  if (props.color) {
-    s = isForegroundResetColor(props.color)
-      ? resetForeground(s, style)
-      : applyColor(style, props.color, false)(s);
-  }
-  if (props.backgroundColor) {
-    s = isBackgroundResetColor(props.backgroundColor)
-      ? resetBackground(s, style)
-      : applyColor(style, props.backgroundColor, true)(s);
-  }
-  if (props.bold) s = chalk.bold(s);
-  if (props.italic) s = chalk.italic(s);
-  if (props.underline) s = chalk.underline(s);
-  if (props.strikethrough) s = chalk.strikethrough(s);
-  if (props.inverse) s = chalk.inverse(s);
-  return s;
+/** One colour channel's contribution, with `default` selecting the terminal's own. */
+export function colorContribution(
+  color: unknown,
+  background: boolean,
+): TextStyleContribution | undefined {
+  if (!color) return undefined;
+  const end = background ? backgroundEndCode : foregroundEndCode;
+  const close = sgrToken(end, end);
+  if (isTerminalDefaultColor(color)) return { open: close, close, reopens: false };
+  const parsed = parseColorValue(color);
+  if (parsed === undefined) return undefined;
+  return { open: sgrToken(sgrCodeForColor(parsed, background), end), close, reopens: true };
 }

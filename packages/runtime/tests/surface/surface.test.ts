@@ -1,6 +1,7 @@
 import { expect, test } from "vite-plus/test";
 import { blankCell } from "../../src/frame/cell.ts";
 import { Frame } from "../../src/frame/frame.ts";
+import { createColorCapability } from "../../src/frame/color-profile.ts";
 import { createSurface, type Surface } from "../../src/surface/surface.ts";
 import type { FrameWriter } from "../../src/surface/frame-writer.ts";
 import type { SurfaceHistory, SurfaceRuntime } from "../../src/surface/surface-contract.ts";
@@ -8,6 +9,8 @@ import {
   createTestTerminalBackend,
   type TestTerminalBackend,
 } from "../../src/terminal/test/backend.ts";
+
+const truecolor = createColorCapability(3);
 
 function frame(text: string): Frame {
   const lines = text.split("\n");
@@ -24,23 +27,32 @@ function frame(text: string): Frame {
   return picture;
 }
 
-function createRuntime(): {
+/**
+ * The mode writer is the session's output gate. Attaching one here records the
+ * escapes a lease issues in the order the terminal would receive them, and lets
+ * a test hold a handoff back the way a captured transaction does.
+ */
+function createHost(): {
   readonly runtime: SurfaceRuntime;
   readonly terminal: TestTerminalBackend;
-  readonly terminalWrites: string[];
+  readonly modeWrites: string[];
   readonly writes: Array<{ readonly output: "stdout" | "stderr"; readonly data: string }>;
 } {
   const terminal = createTestTerminalBackend();
-  const terminalWrites: string[] = [];
+  const modeWrites: string[] = [];
   const writes: Array<{ output: "stdout" | "stderr"; data: string }> = [];
+  terminal.attachModeWrites((data, onHandoff, onAttempt) => {
+    modeWrites.push(data);
+    onAttempt?.();
+    onHandoff?.();
+    return true;
+  });
   return {
     terminal,
-    terminalWrites,
+    modeWrites,
     writes,
     runtime: {
-      terminal,
       stdout: "stdout",
-      isResumeInProgress: false,
       isStdoutTty: true,
       isStdoutWritable: true,
       viewportColumns: 80,
@@ -55,12 +67,6 @@ function createRuntime(): {
         onHandoff?.();
         return true;
       },
-      writeTerminal(data, onAccepted, onAttempt) {
-        terminalWrites.push(data);
-        onAttempt?.();
-        onAccepted?.();
-        return true;
-      },
       runCoordinatedWrite(body, finalize) {
         body();
         finalize();
@@ -71,8 +77,6 @@ function createRuntime(): {
       runSynchronizedOutput(body) {
         body();
       },
-      requestTerminalReconcile() {},
-      reportTerminalAcquired() {},
       reportTerminalReleased() {},
       setSurfaceAvailable() {},
     },
@@ -90,9 +94,6 @@ function createWriter(): { readonly frames: string[]; readonly writer: FrameWrit
       done() {},
       clear() {},
       reset() {},
-      isCursorHidden() {
-        return false;
-      },
       createRollback() {
         return () => {};
       },
@@ -118,16 +119,17 @@ test.each([
   ["fullscreen-terminal", { history: false, live: true }],
   ["final-stream", { history: true, live: false }],
 ] as const)("selects the %s surface capabilities", (kind, expected) => {
-  const surface: Surface = createSurface(kind);
+  const surface: Surface = createSurface(kind, truecolor, createTestTerminalBackend());
 
   expect(surface.isLive).toBe(expected.live);
   expect(surface.acceptsHistory).toBe(expected.history);
 });
 
 test("each surface supplies its own layout height", () => {
-  const inline = createSurface("inline-terminal");
-  const fullscreen = createSurface("fullscreen-terminal");
-  const document = createSurface("final-stream");
+  const terminal = createTestTerminalBackend();
+  const inline = createSurface("inline-terminal", truecolor, terminal);
+  const fullscreen = createSurface("fullscreen-terminal", truecolor, terminal);
+  const document = createSurface("final-stream", truecolor, terminal);
 
   expect(inline.layoutHeight(2)).toEqual({ mode: "at-most", rows: 2 });
   expect(fullscreen.layoutHeight(2)).toEqual({ mode: "exact", rows: 2 });
@@ -135,8 +137,8 @@ test("each surface supplies its own layout height", () => {
 });
 
 test("Inline owns a bounded writer region and restores it around history", () => {
-  const surface = createSurface("inline-terminal");
-  const { runtime, writes } = createRuntime();
+  const { runtime, terminal, modeWrites, writes } = createHost();
+  const surface = createSurface("inline-terminal", truecolor, terminal);
   const { writer, frames } = createWriter();
   const { history: staticHistory } = history();
   surface.attachWriter(writer);
@@ -147,11 +149,17 @@ test("Inline owns a bounded writer region and restores it around history", () =>
 
   expect(writes.map(({ data }) => data)).toEqual(["\x1bE", "note", "\x1bE"]);
   expect(frames).toEqual(["screen\n", "screen\n"]);
+  // The live region owns the hidden cursor for as long as it exists: nothing
+  // restores it while the region stands.
+  expect(modeWrites).toEqual(["\x1b[?25l"]);
+
+  surface.dispose(runtime, { cleanExit: true, sync: false });
+  expect(modeWrites).toEqual(["\x1b[?25l", "\x1b[?25h"]);
 });
 
 test("Fullscreen owns its terminal lease and fixed-viewport presentation", () => {
-  const surface = createSurface("fullscreen-terminal");
-  const { runtime, terminal, terminalWrites, writes } = createRuntime();
+  const { runtime, terminal, modeWrites, writes } = createHost();
+  const surface = createSurface("fullscreen-terminal", truecolor, terminal);
   const { writer, frames } = createWriter();
   const { history: staticHistory } = history();
   surface.attachWriter(writer);
@@ -161,95 +169,36 @@ test("Fullscreen owns its terminal lease and fixed-viewport presentation", () =>
   );
 
   expect(surface.isInputReady).toBe(true);
-  expect(terminal.isModeHeld("alternate-screen")).toBe(true);
-  expect(terminal.isModeHeld("cursor-visibility")).toBe(true);
-  expect(terminalWrites).toEqual(["\x1b[?1049h\x1b[H", "\x1b[?25l"]);
+  // The viewport enters, hides the cursor, then restates the hidden cursor at
+  // the head of the frame it is about to paint.
+  expect(modeWrites).toEqual(["\x1b[?1049h\x1b[H", "\x1b[?25l", "\x1b[?25l"]);
   expect(writes.at(-1)?.data).toContain("\x1b[2J");
   expect(frames).toEqual([]);
 
+  // Disposal gives both modes back, in the sweep's order.
   surface.dispose(runtime, { cleanExit: true, sync: true });
-  expect(terminal.isModeHeld("alternate-screen")).toBe(false);
-  expect(terminal.isModeHeld("cursor-visibility")).toBe(false);
+  expect(terminal.writes.map(({ data }) => data)).toEqual(["\x1b[?1049l", "\x1b[?25h"]);
 });
 
 test("Fullscreen keeps post-snapshot physical acquisitions until disposal", () => {
-  const surface = createSurface("fullscreen-terminal");
-  const { runtime, terminal } = createRuntime();
+  const { runtime, terminal, modeWrites } = createHost();
+  const surface = createSurface("fullscreen-terminal", truecolor, terminal);
   const rollback = surface.createRollback();
 
   expect(surface.resume(runtime)).toBe(true);
   rollback();
+  // The rollback rewinds to the snapshot, which is before these acquisitions:
+  // neither mode is given back, so nothing is restored yet.
+  expect(modeWrites).toEqual(["\x1b[?1049h\x1b[H", "\x1b[?25l"]);
+
   surface.dispose(runtime, { cleanExit: false, sync: true });
 
-  expect(terminal.isModeHeld("alternate-screen")).toBe(false);
-  expect(terminal.isModeHeld("cursor-visibility")).toBe(false);
+  expect(terminal.writes.map(({ data }) => data)).toEqual(["\x1b[?1049l", "\x1b[?25h"]);
 });
-
-test("Fullscreen releases mode leases only after restore handoff", () => {
-  const surface = createSurface("fullscreen-terminal");
-  const { runtime, terminal, writes } = createRuntime();
-  const { writer } = createWriter();
-  const handoffs: Array<() => void> = [];
-  surface.attachWriter(writer);
-  surface.resume(runtime);
-  const rollback = surface.createRollback();
-  const capturedRuntime: SurfaceRuntime = {
-    ...runtime,
-    writeBestEffort(output, data, _sync, onHandoff) {
-      writes.push({ output, data });
-      if (onHandoff) handoffs.push(onHandoff);
-      return true;
-    },
-  };
-
-  surface.dispose(capturedRuntime, { cleanExit: false, sync: false });
-  expect(terminal.isModeHeld("alternate-screen")).toBe(true);
-  expect(terminal.isModeHeld("cursor-visibility")).toBe(true);
-
-  for (const handoff of handoffs) handoff();
-  expect(terminal.isModeHeld("alternate-screen")).toBe(false);
-  expect(terminal.isModeHeld("cursor-visibility")).toBe(false);
-
-  rollback();
-  expect(surface.isInputReady).toBe(false);
-  expect(terminal.isModeHeld("alternate-screen")).toBe(false);
-  expect(terminal.isModeHeld("cursor-visibility")).toBe(false);
-});
-
-test.each([
-  ["alternate screen", "\x1b[?1049h\x1b[H", "\x1b[?1049l"],
-  ["cursor visibility", "\x1b[?25l", "\x1b[?25h"],
-] as const)(
-  "Fullscreen restores %s after its lease write throws",
-  (_name, failingWrite, restore) => {
-    const surface = createSurface("fullscreen-terminal");
-    const { runtime, terminalWrites, writes } = createRuntime();
-    const { writer } = createWriter();
-    surface.attachWriter(writer);
-    const failingRuntime: SurfaceRuntime = {
-      ...runtime,
-      writeTerminal(data, onAccepted, onAttempt) {
-        terminalWrites.push(data);
-        onAttempt?.();
-        if (data === failingWrite) throw new Error("terminal write failed after handoff");
-        onAccepted?.();
-        return true;
-      },
-    };
-
-    expect(() =>
-      surface.present({ frame: frame("top\nbottom"), history: history().history }, failingRuntime),
-    ).toThrow("terminal write failed after handoff");
-    surface.abandonPendingOutput({ physicalStateUncertain: true });
-    surface.dispose(failingRuntime, { cleanExit: false, sync: true });
-
-    expect(writes.map(({ data }) => data)).toContain(restore);
-  },
-);
 
 test("Document hands history off immediately and writes one final clean frame", () => {
-  const surface = createSurface("final-stream");
-  const { runtime, writes } = createRuntime();
+  const { runtime, terminal, writes } = createHost();
+  const surface = createSurface("final-stream", truecolor, terminal);
   const { writer } = createWriter();
   const { history: staticHistory, handed } = history("past\n");
   surface.attachWriter(writer);
@@ -261,67 +210,9 @@ test("Document hands history off immediately and writes one final clean frame", 
   expect(writes.map(({ data }) => data)).toEqual(["latest\n"]);
 });
 
-test("Fullscreen retains handed leases across output rollback", () => {
-  const surface = createSurface("fullscreen-terminal");
-  const { runtime, writes } = createRuntime();
-  const { writer } = createWriter();
-  surface.attachWriter(writer);
-  const terminalWrites: Array<{
-    readonly accept: (() => void) | undefined;
-    readonly attempt: (() => void) | undefined;
-  }> = [];
-  const pendingRuntime: SurfaceRuntime = {
-    ...runtime,
-    writeTerminal(_data, onAccepted, onAttempt) {
-      terminalWrites.push({ accept: onAccepted, attempt: onAttempt });
-      return true;
-    },
-  };
-
-  const rollback = surface.createRollback();
-  surface.present({ frame: frame("a"), history: history().history }, pendingRuntime);
-  for (const write of terminalWrites) {
-    write.attempt?.();
-    write.accept?.();
-  }
-  // OutputCoordinator reports an unhanded failure before Runtime abandons the
-  // physical write. Rollback must not erase leases already handed to the TTY.
-  rollback();
-  surface.abandonPendingOutput({ physicalStateUncertain: true });
-  surface.dispose(pendingRuntime, { cleanExit: false, sync: true });
-
-  expect(writes.map(({ data }) => data)).toContain("\x1b[?1049l");
-  expect(writes.map(({ data }) => data)).toContain("\x1b[?25h");
-});
-
-test("Fullscreen restores only the lease whose handoff started", () => {
-  const surface = createSurface("fullscreen-terminal");
-  const { runtime, writes } = createRuntime();
-  const { writer } = createWriter();
-  surface.attachWriter(writer);
-  const attempts: Array<(() => void) | undefined> = [];
-  const pendingRuntime: SurfaceRuntime = {
-    ...runtime,
-    writeTerminal(_data, _onAccepted, onAttempt) {
-      attempts.push(onAttempt);
-      return true;
-    },
-  };
-
-  surface.present({ frame: frame("a"), history: history().history }, pendingRuntime);
-  // The alternate-screen segment started stream.write(); the captured cursor
-  // segment did not. Only the former can have changed caller-owned TTY state.
-  attempts[0]?.();
-  surface.abandonPendingOutput({ physicalStateUncertain: true });
-  surface.dispose(pendingRuntime, { cleanExit: false, sync: true });
-
-  expect(writes.map(({ data }) => data)).toContain("\x1b[?1049l");
-  expect(writes.map(({ data }) => data)).not.toContain("\x1b[?25h");
-});
-
 test("Fullscreen restores the screen when the writer throws on release", () => {
-  const surface = createSurface("fullscreen-terminal");
-  const { runtime, writes } = createRuntime();
+  const { runtime, terminal, modeWrites } = createHost();
+  const surface = createSurface("fullscreen-terminal", truecolor, terminal);
   const { writer } = createWriter();
   surface.attachWriter({
     ...writer,
@@ -336,7 +227,5 @@ test("Fullscreen restores the screen when the writer throws on release", () => {
   expect(() => surface.dispose(runtime, { cleanExit: true, sync: false })).toThrow(
     "writer release failed",
   );
-
-  expect(writes.map(({ data }) => data)).toContain("\x1b[?1049l");
-  expect(writes.map(({ data }) => data)).toContain("\x1b[?25h");
+  expect(modeWrites.slice(-2)).toEqual(["\x1b[?1049l", "\x1b[?25h"]);
 });

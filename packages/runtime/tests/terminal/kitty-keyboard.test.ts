@@ -15,14 +15,16 @@ function terminalWrites(terminal: TestTerminalBackend): string[] {
   return terminal.writes.map(({ data }) => data);
 }
 
-function createEnabledController(writeOutput?: WriteKittyOutput, onStateChange?: () => void) {
-  const terminal = createTestTerminalBackend();
-  return createKittyKeyboardController(
-    terminal,
-    noQueryDetection,
-    { mode: "enabled" },
-    writeOutput,
-    onStateChange,
+/**
+ * The protocol push and pop are a mode lease, so they travel through the
+ * backend's attached mode writer; the support query still travels through the
+ * controller's own output. Both are given the same adapter here so one `writes`
+ * array records them in the order the terminal would see.
+ */
+function attachModeWrites(terminal: TestTerminalBackend, writeOutput?: WriteKittyOutput): void {
+  if (!writeOutput) return;
+  terminal.attachModeWrites((data, onHandoff, onAttempt) =>
+    writeOutput(data, onHandoff, onAttempt),
   );
 }
 
@@ -50,17 +52,26 @@ describe("Kitty keyboard output handoff", () => {
   test("does not own or pop a PUSH abandoned before handoff", async () => {
     const writes: string[] = [];
     const handoffs: Array<() => void> = [];
-    const controller = createEnabledController((data, onHandoff) => {
+    const terminal = createTestTerminalBackend();
+    const writeOutput: WriteKittyOutput = (data, onHandoff) => {
       writes.push(data);
       if (onHandoff) handoffs.push(onHandoff);
       return true;
-    });
+    };
+    attachModeWrites(terminal, writeOutput);
+    const controller = createKittyKeyboardController(
+      terminal,
+      noQueryDetection,
+      { mode: "enabled" },
+      writeOutput,
+    );
 
     const release = controller.acquireDemand();
     expect(controller.isEnabled).toBe(false);
     expect(controller.isReady).toBe(false);
 
     controller.abandonPendingOutput();
+    terminal.abandonModeOutput();
     release();
     await Promise.resolve();
     handoffs[0]?.();
@@ -73,24 +84,28 @@ describe("Kitty keyboard output handoff", () => {
   test("pops a PUSH whose physical write may have succeeded before throwing", () => {
     const writes: string[] = [];
     const terminal = createTestTerminalBackend();
+    const writeOutput: WriteKittyOutput = (data, onHandoff, onAttempt) => {
+      writes.push(data);
+      onAttempt?.();
+      if (data === "\x1b[>1u") throw new Error("accepted then threw");
+      onHandoff?.();
+      return true;
+    };
+    attachModeWrites(terminal, writeOutput);
     const controller = createKittyKeyboardController(
       terminal,
       noQueryDetection,
       { mode: "enabled" },
-      (data, onHandoff, onAttempt) => {
-        writes.push(data);
-        onAttempt?.();
-        if (data === "\x1b[>1u") throw new Error("accepted then threw");
-        onHandoff?.();
-        return true;
-      },
+      writeOutput,
     );
 
     expect(() => controller.acquireDemand()).toThrow("accepted then threw");
 
     expect(writes).toEqual(["\x1b[>1u", "\x1b[<u"]);
     expect(controller.isEnabled).toBe(false);
-    expect(terminal.isModeHeld("kitty-keyboard")).toBe(false);
+    // The failed push gave its share back: the popped device already matches
+    // the protocol's holders.
+    expect(controller.isReady).toBe(true);
     controller.dispose(true);
   });
 
@@ -105,9 +120,9 @@ describe("Kitty keyboard output handoff", () => {
     expect(terminalWrites(terminal)).toEqual(["\x1b[>1u"]);
     expect(controller.isEnabled).toBe(true);
     expect(controller.isReady).toBe(true);
-    expect(terminal.isModeHeld("kitty-keyboard")).toBe(true);
     controller.dispose();
-    expect(terminal.isModeHeld("kitty-keyboard")).toBe(false);
+    // The push was owned despite the false return, so disposal pops it.
+    expect(terminalWrites(terminal)).toEqual(["\x1b[>1u", "\x1b[<u"]);
   });
 
   test("retains blocked demand and reconciles it after the gate accepts writes", async () => {
@@ -115,12 +130,24 @@ describe("Kitty keyboard output handoff", () => {
     let blocked = true;
     let handoff: (() => void) | undefined;
     const onStateChange = vi.fn();
-    const controller = createEnabledController((data, onHandoff) => {
+    const terminal = createTestTerminalBackend();
+    const writeOutput: WriteKittyOutput = (data, onHandoff) => {
       writes.push(data);
       if (blocked) return false;
       handoff = onHandoff;
       return true;
-    }, onStateChange);
+    };
+    attachModeWrites(terminal, writeOutput);
+    // The protocol is a mode, so its transitions are reported by the backend
+    // exactly as the mounted session wires them.
+    terminal.onModeChange(() => onStateChange());
+    const controller = createKittyKeyboardController(
+      terminal,
+      noQueryDetection,
+      { mode: "enabled" },
+      writeOutput,
+      onStateChange,
+    );
 
     const release = controller.acquireDemand();
     expect(writes).toEqual(["\x1b[>1u"]);
@@ -129,6 +156,9 @@ describe("Kitty keyboard output handoff", () => {
 
     blocked = false;
     controller.reconcile();
+    // The gate that refused the push belongs to the backend, so the retry does
+    // too; the mounted session drives both in one reconcile turn.
+    terminal.reconcileModes();
     expect(writes).toEqual(["\x1b[>1u", "\x1b[>1u"]);
     expect(controller.isReady).toBe(false);
     handoff?.();
@@ -166,11 +196,19 @@ describe("Kitty keyboard output handoff", () => {
   test("writes POP only after a PUSH became owned", async () => {
     const writes: string[] = [];
     const handoffs: Array<() => void> = [];
-    const controller = createEnabledController((data, onHandoff) => {
+    const terminal = createTestTerminalBackend();
+    const writeOutput: WriteKittyOutput = (data, onHandoff) => {
       writes.push(data);
       if (onHandoff) handoffs.push(onHandoff);
       return true;
-    });
+    };
+    attachModeWrites(terminal, writeOutput);
+    const controller = createKittyKeyboardController(
+      terminal,
+      noQueryDetection,
+      { mode: "enabled" },
+      writeOutput,
+    );
 
     const release = controller.acquireDemand();
     release();
@@ -190,19 +228,21 @@ describe("Kitty keyboard output handoff", () => {
     const writes: string[] = [];
     let suspendDuringPush = true;
     let controller!: ReturnType<typeof createKittyKeyboardController>;
+    const writeOutput: WriteKittyOutput = (data, onHandoff) => {
+      writes.push(data);
+      if (suspendDuringPush) {
+        suspendDuringPush = false;
+        controller.suspend(true);
+      }
+      onHandoff?.();
+      return true;
+    };
+    attachModeWrites(terminal, writeOutput);
     controller = createKittyKeyboardController(
       terminal,
       noQueryDetection,
       { mode: "enabled" },
-      (data, onHandoff) => {
-        writes.push(data);
-        if (suspendDuringPush) {
-          suspendDuringPush = false;
-          controller.suspend(true);
-        }
-        onHandoff?.();
-        return true;
-      },
+      writeOutput,
     );
 
     controller.acquireDemand();
@@ -217,15 +257,17 @@ describe("Kitty keyboard output handoff", () => {
     const terminal = createTestTerminalBackend();
     const writes: string[] = [];
     let pushHandoff: (() => void) | undefined;
+    const writeOutput: WriteKittyOutput = (data, onHandoff) => {
+      writes.push(data);
+      pushHandoff = onHandoff;
+      return true;
+    };
+    attachModeWrites(terminal, writeOutput);
     const controller = createKittyKeyboardController(
       terminal,
       noQueryDetection,
       { mode: "enabled" },
-      (data, onHandoff) => {
-        writes.push(data);
-        pushHandoff = onHandoff;
-        return true;
-      },
+      writeOutput,
     );
 
     controller.acquireDemand();
@@ -249,16 +291,18 @@ describe("Kitty keyboard output handoff", () => {
     let queryHandoff: (() => void) | undefined;
     let pushHandoff: (() => void) | undefined;
     const terminal = createTestTerminalBackend();
+    const writeOutput: WriteKittyOutput = (data, onHandoff) => {
+      writes.push(data);
+      if (data === "\x1b[?u") queryHandoff = onHandoff;
+      else if (data === "\x1b[>1u") pushHandoff = onHandoff;
+      return true;
+    };
+    attachModeWrites(terminal, writeOutput);
     const controller = createKittyKeyboardController(
       terminal,
       detection,
       { mode: "auto" },
-      (data, onHandoff) => {
-        writes.push(data);
-        if (data === "\x1b[?u") queryHandoff = onHandoff;
-        else if (data === "\x1b[>1u") pushHandoff = onHandoff;
-        return true;
-      },
+      writeOutput,
     );
 
     controller.acquireDemand();

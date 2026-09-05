@@ -1,7 +1,7 @@
 import { expect, test } from "vite-plus/test";
 import { createTestTerminalBackend } from "../../src/terminal/test/backend.ts";
 
-test("test backend records bytes, reports fixed facts, and balances generic mode leases", () => {
+test("test backend records bytes, reports fixed facts, and issues a mode at its lease edges", () => {
   const terminal = createTestTerminalBackend({
     size: { columns: 120, rows: 40 },
     capabilities: { stdout: { isTTY: false } },
@@ -15,15 +15,24 @@ test("test backend records bytes, reports fixed facts, and balances generic mode
 
   expect(terminal.size).toEqual({ columns: 120, rows: 40 });
   expect(terminal.capabilities.stdout.isTTY).toBe(false);
+  // The enable is issued once, and the holder that left while another remains
+  // issues nothing.
   expect(terminal.writes).toEqual([
+    { output: "stdout", data: "\x1b[?1049h\x1b[H" },
     { output: "stdout", data: "one" },
     { output: "stderr", data: "two" },
   ]);
-  expect(terminal.isModeHeld("alternate-screen")).toBe(true);
 
   second.release();
   second.release();
-  expect(terminal.isModeHeld("alternate-screen")).toBe(false);
+  // The restore is issued once, when the last holder leaves; the redundant
+  // release writes nothing.
+  expect(terminal.writes).toEqual([
+    { output: "stdout", data: "\x1b[?1049h\x1b[H" },
+    { output: "stdout", data: "one" },
+    { output: "stderr", data: "two" },
+    { output: "stdout", data: "\x1b[?1049l" },
+  ]);
 });
 
 test("test backend exposes deterministic input and resize events", () => {
