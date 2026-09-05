@@ -96,7 +96,9 @@ export interface TerminalBackend {
    * Whether this mode has no transition left to make: the state it will carry
    * once every captured write has been handed off already matches its holders.
    * A write still queued counts as its target, so this can be true before the
-   * device has taken the switch.
+   * device has taken the switch. A mode whose physical state is uncertain —
+   * an abandoned capture or a throwing write may have applied it — is never
+   * settled, whatever its holders ask for.
    */
   isModeSettled(mode: TerminalMode): boolean;
   /** Install the gate mode writes travel through while a session owns output. */
