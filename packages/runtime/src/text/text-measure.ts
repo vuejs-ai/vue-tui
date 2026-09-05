@@ -12,7 +12,7 @@ import {
 import type { Cell } from "../frame/cell.ts";
 import { defaultStyle, type SgrPair, type Style } from "../frame/style.ts";
 import { hasAnsiControlCharacters, tokenizeAnsi } from "./ansi-tokenizer.ts";
-import { cellsFromStyledChars, graphemeSegmenter } from "./cell-style.ts";
+import { graphemeSegmenter } from "./cell-style.ts";
 
 export type WrapMode = "wrap" | "hard" | "truncate" | "truncate-middle" | "truncate-start";
 
@@ -471,11 +471,15 @@ export function wrapText(text: string, width: number, mode: WrapMode = "wrap"): 
   // Truncate each hard-newline segment independently, so one over-wide line
   // cannot discard or merge the ones after it: hard breaks stay, and only a
   // line that is actually shortened spends a column on the ellipsis. The plan
-  // is the cells `truncateCellLine` keeps, which is what paint writes.
+  // is the text `truncationCut` keeps, and paint cuts the cells with that same
+  // call, so the two cannot disagree.
   const position = truncatePosition(mode);
   const budget = Math.max(0, width);
   return text.split("\n").map((line) => truncatedLineText(line, budget, position));
 }
+
+/** The grapheme a cut is marked with, in the plan and in the cells alike. */
+const ellipsis = "…";
 
 type TruncatePosition = "start" | "middle" | "end";
 
@@ -485,12 +489,53 @@ function truncatePosition(mode: TruncateMode): TruncatePosition {
   return mode === "truncate-start" ? "start" : mode === "truncate-middle" ? "middle" : "end";
 }
 
-/** The visible text one truncated line holds, which is the plan layout records. */
+/**
+ * The visible text one truncated line holds, which is the plan layout records.
+ *
+ * The plan needs graphemes and the columns they display, and nothing else — no
+ * cell, no `Style`, no ANSI. It reads them off the line's visible text through
+ * {@link truncationCut}, the same arithmetic paint cuts the cells with, so the
+ * two agree by construction rather than by comparison.
+ *
+ * What the cut asks for is what gets measured. `truncate` keeps a window that
+ * ends inside the budget, so {@link sliceMeasured} stops the segmenter there and
+ * planning a line costs the budget rather than the line. `truncate-start` and
+ * `truncate-middle` anchor their window on the line's column total, which every
+ * grapheme contributes to, so their walk does reach the end — but it builds one
+ * `{ grapheme, width }` on the way instead of a styled cell.
+ */
 function truncatedLineText(line: string, width: number, position: TruncatePosition): string {
-  const cells = cellsFromStyledChars(styledGraphemesFromAnsi(line));
-  return truncateCellLine(cells, width, position)
-    .map((cell) => cell.grapheme)
-    .join("");
+  const plain = visibleText(line);
+  // `string-width` sums the same per-grapheme widths the cells carry, so this is
+  // `displayedColumns` for a line nobody has parsed into cells — and it answers
+  // from the library's printable-ASCII fast path instead of a grapheme walk.
+  const columns = stringWidth(plain);
+  if (columns <= width) return plain;
+  if (width < 1) return "";
+  if (width === 1) return ellipsis;
+
+  const cut = truncationCut(columns, width, position);
+  return `${slicePlainSlots(plain, cut.head)}${ellipsis}${slicePlainSlots(plain, cut.tail)}`;
+}
+
+/** The graphemes of a plain line inside a kept window, as the text they spell. */
+function slicePlainSlots(plain: string, window: SlotWindow | undefined): string {
+  if (!window) return "";
+  let sliced = "";
+  for (const measured of sliceMeasured(measuredGraphemes(plain), window.start, window.end)) {
+    sliced += measured.grapheme;
+  }
+  return sliced;
+}
+
+/**
+ * The graphemes of a plain line with the columns each displays, produced one at
+ * a time: a caller that stops early never segments the rest of the line.
+ */
+function* measuredGraphemes(plain: string): Generator<MeasuredGrapheme> {
+  for (const { segment } of graphemeSegmenter.segment(plain)) {
+    yield { grapheme: segment, width: stringWidth(segment) };
+  }
 }
 
 /**
@@ -589,39 +634,96 @@ function styleMeasuredWrappedLines(
   return styledLines;
 }
 
-/** The columns one line of cells displays. */
-function displayedColumns(cells: readonly Cell[]): number {
+/** A grapheme and the columns it displays: what truncation arithmetic reads. */
+interface MeasuredGrapheme {
+  readonly grapheme: string;
+  readonly width: number;
+}
+
+/** The columns one line of graphemes displays. */
+function displayedColumns(graphemes: readonly MeasuredGrapheme[]): number {
   let columns = 0;
-  for (const cell of cells) columns += cell.width;
+  for (const grapheme of graphemes) columns += grapheme.width;
   return columns;
 }
 
+/** One half-open range of slots a truncated line keeps. */
+interface SlotWindow {
+  readonly start: number;
+  readonly end: number;
+}
+
 /**
- * The cells wholly inside `[start, end)` slots: the slice opens at the first
- * grapheme starting at or after `start` and stops at the first one that would
- * cross `end`, so a grapheme a cut would split belongs to neither side.
+ * The graphemes wholly inside `[start, end)` slots: the slice opens at the first
+ * one starting at or after `start` and stops at the first one that would cross
+ * `end`, so a grapheme a cut would split belongs to neither side.
  *
  * Slots, not columns: every grapheme claims at least one of them, so a
  * zero-width grapheme takes a slot of its own while the budget the caller
  * divides up counts it as nothing. The width-zero wrap above walks the same
  * slot model.
+ *
+ * Nothing at or past `end` can qualify, so the walk stops there. Over a source
+ * that measures graphemes as it is pulled, that is what keeps a plan from
+ * measuring the part of the line no window reaches.
  */
-function sliceCells(cells: readonly Cell[], start: number, end: number): Cell[] {
-  const slice: Cell[] = [];
+function sliceMeasured<T extends MeasuredGrapheme>(
+  graphemes: Iterable<T>,
+  start: number,
+  end: number,
+): T[] {
+  const slice: T[] = [];
   let slot = 0;
-  for (const cell of cells) {
-    const cellEnd = slot + Math.max(1, cell.width);
-    if (slot >= start && slot < end && cellEnd <= end) slice.push(cell);
-    slot = cellEnd;
+  for (const grapheme of graphemes) {
+    if (slot >= end) break;
+    const graphemeEnd = slot + Math.max(1, grapheme.width);
+    if (slot >= start && graphemeEnd <= end) slice.push(grapheme);
+    slot = graphemeEnd;
   }
   return slice;
+}
+
+/** Which retained window's style the ellipsis takes, if it takes one. */
+type EllipsisStyleSource = "head" | "tail" | "none";
+
+/** How one line is cut down to a budget: see {@link truncationCut}. */
+interface TruncationCut {
+  /** Kept before the ellipsis, absent when the cut keeps nothing there. */
+  readonly head: SlotWindow | undefined;
+  /** Kept after it. */
+  readonly tail: SlotWindow | undefined;
+  readonly ellipsisStyle: EllipsisStyleSource;
+}
+
+/**
+ * Where the cut falls on a line of `columns` columns held to `width` columns.
+ *
+ * This is the whole of the truncation arithmetic. {@link wrapText} plans a
+ * truncated line with it and {@link truncateCellLine} cuts the cells with it, so
+ * layout and paint hold one implementation between them and no plan has to be
+ * checked against a second one. Callers settle the degenerate budgets first: a
+ * line that fits, a budget with no room for the ellipsis, and a budget that is
+ * the ellipsis alone never reach here.
+ */
+function truncationCut(columns: number, width: number, position: TruncatePosition): TruncationCut {
+  if (position === "start") {
+    const tail = { start: columns - width + 1, end: columns };
+    return { head: undefined, tail, ellipsisStyle: "tail" };
+  }
+  if (position === "middle") {
+    const half = Math.floor(width / 2);
+    const head = { start: 0, end: half };
+    const tail = { start: columns - (width - half) + 1, end: columns };
+    return { head, tail, ellipsisStyle: "none" };
+  }
+  return { head: { start: 0, end: width - 1 }, tail: undefined, ellipsisStyle: "head" };
 }
 
 function ellipsisCell(style: Style): Cell {
   // The ellipsis takes the touching grapheme's style but never its hyperlink:
   // a link addresses the text it covers, and the ellipsis stands for the part
   // of that text this line no longer shows.
-  return { grapheme: "…", width: 1, style, link: undefined };
+  return { grapheme: ellipsis, width: 1, style, link: undefined };
 }
 
 /**
@@ -630,9 +732,9 @@ function ellipsisCell(style: Style): Cell {
  * Column arithmetic rather than a string round trip: a line serialized back to
  * ANSI cannot carry bold and dim at once, because they share the `22m` close, so
  * whichever was written last is the only one that survives and a bold run inside
- * a dim Text came back dim. {@link wrapText} plans a truncated line by running
- * this over the same cells, so layout and paint hold one implementation between
- * them and no plan has to be checked against a second one.
+ * a dim Text came back dim. Where the cut falls is {@link truncationCut}'s
+ * answer, the one {@link wrapText} plans with, so layout and paint hold one
+ * arithmetic between them and no plan has to be checked against a second one.
  *
  * The rules this implements:
  *
@@ -641,7 +743,7 @@ function ellipsisCell(style: Style): Cell {
  *   budget of zero, which the rule below would otherwise empty;
  * - a budget under 1 keeps nothing, and a budget of exactly 1 is the bare
  *   ellipsis carrying no style at all, whatever the line held;
- * - the budget buys slots, the unit {@link sliceCells} walks, where every
+ * - the budget buys slots, the unit {@link sliceMeasured} walks, where every
  *   grapheme claims `max(1, width)` of them: `end` keeps the graphemes inside
  *   the first `width - 1` slots, `start` those inside the `width - 1` slots
  *   ending at the line's column total, and `middle` splits the budget, keeping
@@ -670,23 +772,17 @@ export function truncateCellLine(
   if (width < 1) return [];
   if (width === 1) return [ellipsisCell(defaultStyle)];
 
-  if (position === "start") {
-    const kept = sliceCells(cells, columns - width + 1, columns);
-    return [ellipsisCell(kept[0]?.style ?? defaultStyle), ...kept];
-  }
-  if (position === "middle") {
-    const half = Math.floor(width / 2);
-    const head = sliceCells(cells, 0, half);
-    const tail = sliceCells(cells, columns - (width - half) + 1, columns);
-    return [...head, ellipsisCell(defaultStyle), ...tail];
-  }
-  const kept = sliceCells(cells, 0, width - 1);
-  return [...kept, ellipsisCell(kept.at(-1)?.style ?? defaultStyle)];
+  const cut = truncationCut(columns, width, position);
+  const head = cut.head ? sliceMeasured(cells, cut.head.start, cut.head.end) : [];
+  const tail = cut.tail ? sliceMeasured(cells, cut.tail.start, cut.tail.end) : [];
+  const touching =
+    cut.ellipsisStyle === "head" ? head.at(-1) : cut.ellipsisStyle === "tail" ? tail[0] : undefined;
+  return [...head, ellipsisCell(touching?.style ?? defaultStyle), ...tail];
 }
 
 // A truncated line carries the ellipsis, which no run holds, so paint cannot
 // project the runs onto the measured line the way the wrapping modes do. It
-// truncates the styled line itself, through the same call layout planned with,
+// truncates the runs themselves, through the arithmetic layout planned with,
 // and reads only the line count off the plan.
 function styleMeasuredTruncatedLines(
   sourceLines: readonly (readonly Cell[])[],
