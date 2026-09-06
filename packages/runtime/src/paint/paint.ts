@@ -1,33 +1,39 @@
-import stringWidth from "string-width";
 import cliBoxes from "cli-boxes";
+import { blankCell, type Cell } from "../frame/cell.ts";
+import { Frame } from "../frame/frame.ts";
 import {
-  ansiCodesToString,
-  diffAnsiCodes,
-  type StyledChar,
-  styledCharsFromTokens,
-  tokenize,
-} from "@alcalzone/ansi-tokenize";
-import { hasAnsiControlCharacters, tokenizeAnsi } from "./ansi-tokenizer.ts";
-import { applyChalk, applyColor } from "./text-style.ts";
-import type { TerminalStyle } from "./terminal-style.ts";
-import { sanitizeAnsi, sanitizeAnsiMultiline } from "./sanitize-ansi.ts";
-import Yoga from "yoga-layout";
+  defaultColor,
+  defaultStyle,
+  noExtraSgr,
+  StyleAttribute,
+  type Style,
+} from "../frame/style.ts";
+import { cellsFromPlainText } from "../text/cell-style.ts";
+import { composeContentRuns } from "../text/text-content.ts";
+import { styleMeasuredTextLines } from "../text/text-measure.ts";
+import {
+  explicitTextStyleChannels,
+  parseColorValue,
+  textStyleContributions,
+  type TextStyleLevel,
+} from "../text/text-style.ts";
 import type {
   TuiNode,
-  TuiRoot,
-  TuiContainer,
   TextProps,
   TuiText,
+  TuiTextChunk,
+  TuiTextContent,
   TuiVirtualText,
   BoxProps,
-  TuiBox,
 } from "../host/nodes.ts";
 import { isContainer } from "../host/nodes.ts";
-import { wrapText, safeSliceEnd, sliceAnsiPreservingIntensity } from "../host/text-measure.ts";
-import { getTextTerminalCellWidth } from "../host/yoga.ts";
-import { isContentLayoutGuarded, type StaticLayoutRegion } from "../host/layout-transaction.ts";
-import type { InternalGeometryPaintFrame } from "../geometry/geometry-service.ts";
-import { assertPaintSurfaceSize } from "../numeric-limits.ts";
+import type {
+  ComputedLayout,
+  ComputedNodeLayout,
+  StaticLayoutRegion,
+} from "../layout/layout-transaction.ts";
+import type { PaintGeometryFrame } from "./geometry.ts";
+import { assertPaintSurfaceSize } from "./surface-limits.ts";
 
 interface ClipRect {
   x1: number | undefined;
@@ -46,456 +52,240 @@ function intersectClipRects(a: ClipRect | undefined, b: ClipRect): ClipRect {
   };
 }
 
-interface WriteOp {
-  type: "write";
-  x: number;
-  y: number;
-  lines: string[];
+/** One structural row of a write: one cell per grapheme, wide cells not yet expanded. */
+type CellRow = readonly Cell[];
+
+/**
+ * The grid columns one cell occupies. A grapheme that displays nothing still
+ * gets a cell of its own, which is how `slice-ansi` numbers its slots and what
+ * the frame's width has to account for.
+ */
+function gridColumns(cell: Cell): number {
+  return cell.width === 0 ? 1 : cell.width;
 }
 
-interface ClipOp {
-  type: "clip";
-  clip: ClipRect;
-}
-
-interface UnclipOp {
-  type: "unclip";
-}
-
-type Op = WriteOp | ClipOp | UnclipOp;
-
-const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-
-function styledGraphemesFromAnsi(line: string): StyledChar[] {
-  if (!hasAnsiControlCharacters(line)) return styledCharsFromTokens(tokenize(line));
-
-  const tokens = tokenizeAnsi(line).flatMap((token) => {
-    if (token.type === "text" || token.type === "csi" || token.type === "osc") {
-      return tokenize(token.value);
-    }
-    return [];
-  });
-  const characters = styledCharsFromTokens(tokens);
-  if (characters.length < 2) return characters;
-
-  const plain = characters.map((character) => character.value).join("");
-  const graphemes = [...graphemeSegmenter.segment(plain)];
-  if (
-    graphemes.length === characters.length &&
-    graphemes.every((part, index) => part.segment === characters[index]!.value)
-  ) {
-    return characters;
-  }
-
-  const result: StyledChar[] = [];
-  let characterIndex = 0;
-  let characterOffset = 0;
-  for (const part of graphemes) {
-    while (
-      characterIndex < characters.length - 1 &&
-      characterOffset + characters[characterIndex]!.value.length <= part.index
-    ) {
-      characterOffset += characters[characterIndex]!.value.length;
-      characterIndex++;
-    }
-    const leading = characters[characterIndex]!;
-    // A terminal cell cannot carry independent styles for code points inside
-    // one grapheme. Keep the leading code point's style and preserve the whole
-    // grapheme instead of dropping a combining or joining code point at an ANSI boundary.
-    result.push({
-      ...leading,
-      value: part.segment,
-      fullWidth: stringWidth(part.segment) > 1,
-    });
-  }
-  return result;
-}
-
-const boldOpen = "\u001B[1m";
-const dimOpen = "\u001B[2m";
-
-function isIntensityStyle(style: StyledChar["styles"][number]): boolean {
-  return style.code === boldOpen || style.code === dimOpen;
+/** The columns these cells display, which is what a clip edge is measured in. */
+function displayedColumns(cells: CellRow): number {
+  let total = 0;
+  for (const cell of cells) total += cell.width;
+  return total;
 }
 
 /**
- * Serialize styled cells while preserving bold and dim independently.
+ * The longest leading run of `cells` that fits `maxColumns`.
  *
- * Both intensities close with SGR 22. The dependency's ordinary minimal diff
- * emits that shared close when one intensity is removed, but does not reopen
- * the other intensity when it remains present in the next cell. Reapply the
- * target intensity set after such a transition; every other style transition
- * retains the dependency's existing byte sequence.
+ * A cell claims a column even when it displays nothing, while the fit is
+ * measured in displayed columns, so both counts bound the result: a wide
+ * grapheme straddling the edge is dropped whole rather than half-painted.
  */
-function styledCharsToString(chars: StyledChar[]): string {
-  let result = "";
-  let previousStyles: StyledChar["styles"] = [];
-
-  for (const character of chars) {
-    let transition = diffAnsiCodes(previousStyles, character.styles);
-    const targetCodes = new Set(character.styles.map((style) => style.code));
-    const removesIntensity = previousStyles.some(
-      (style) => isIntensityStyle(style) && !targetCodes.has(style.code),
-    );
-    if (removesIntensity) {
-      transition = [...transition, ...character.styles.filter((style) => isIntensityStyle(style))];
-    }
-    result += ansiCodesToString(transition);
-    result += character.value;
-    previousStyles = character.styles;
+function fittingCells(cells: CellRow, maxColumns: number): CellRow {
+  if (maxColumns <= 0) return [];
+  let claimed = 0;
+  let displayed = 0;
+  for (let index = 0; index < cells.length; index++) {
+    const cell = cells[index]!;
+    if (claimed >= maxColumns) return cells.slice(0, index);
+    const next = displayed + cell.width;
+    if (next > maxColumns) return cells.slice(0, index);
+    claimed += gridColumns(cell);
+    displayed = next;
   }
-
-  result += ansiCodesToString(diffAnsiCodes(previousStyles, []));
-  return result;
+  return cells;
 }
 
-interface OutputCacheLimits {
-  readonly styledEntries: number;
-  readonly styledUnits: number;
-  readonly widthEntries: number;
-  readonly widthUnits: number;
-}
-
-const defaultOutputCacheLimits: OutputCacheLimits = {
-  styledEntries: 2_048,
-  styledUnits: 65_536,
-  widthEntries: 4_096,
-  widthUnits: 262_144,
-};
-
-class BoundedLruCache<Value> {
-  private readonly values = new Map<string, { value: Value; weight: number }>();
-  private totalWeight = 0;
-
-  constructor(
-    private readonly maxEntries: number,
-    private readonly maxWeight: number,
-    private readonly weightOf: (key: string, value: Value) => number,
-  ) {}
-
-  get(key: string): Value | undefined {
-    const cached = this.values.get(key);
-    if (cached === undefined) return undefined;
-    this.values.delete(key);
-    this.values.set(key, cached);
-    return cached.value;
-  }
-
-  set(key: string, value: Value): void {
-    const weight = this.weightOf(key, value);
-    if (this.maxEntries <= 0 || weight > this.maxWeight) return;
-
-    const previous = this.values.get(key);
-    if (previous) {
-      this.values.delete(key);
-      this.totalWeight -= previous.weight;
-    }
-    while (this.values.size >= this.maxEntries || this.totalWeight + weight > this.maxWeight) {
-      const oldestKey = this.values.keys().next().value;
-      if (oldestKey === undefined) break;
-      const oldest = this.values.get(oldestKey)!;
-      this.values.delete(oldestKey);
-      this.totalWeight -= oldest.weight;
-    }
-    this.values.set(key, { value, weight });
-    this.totalWeight += weight;
-  }
-
-  clear(): void {
-    this.values.clear();
-    this.totalWeight = 0;
-  }
-}
-
-export class OutputCaches {
-  private readonly widths: BoundedLruCache<number>;
-  private readonly styledCharsCache: BoundedLruCache<StyledChar[]>;
-
-  constructor(limits: Partial<OutputCacheLimits> = {}) {
-    const resolved = { ...defaultOutputCacheLimits, ...limits };
-    this.widths = new BoundedLruCache(
-      resolved.widthEntries,
-      resolved.widthUnits,
-      (text) => text.length,
-    );
-    this.styledCharsCache = new BoundedLruCache(
-      resolved.styledEntries,
-      resolved.styledUnits,
-      (line, characters) => Math.max(line.length, characters.length),
-    );
-  }
-
-  getStyledChars(line: string): StyledChar[] {
-    let cached = this.styledCharsCache.get(line);
-    if (cached === undefined) {
-      cached = styledGraphemesFromAnsi(line);
-      this.styledCharsCache.set(line, cached);
-    }
-    return cached;
-  }
-
-  getStringWidth(text: string): number {
-    let cached = this.widths.get(text);
-    if (cached === undefined) {
-      cached = stringWidth(text);
-      this.widths.set(text, cached);
-    }
-    return cached;
-  }
-
-  getSliceStart(text: string, requestedStart: number): number {
-    let column = 0;
-
-    for (const character of this.getStyledChars(text)) {
-      if (column >= requestedStart) return column;
-      column += Math.max(1, this.getStringWidth(character.value));
-    }
-
-    return column;
-  }
-
-  clear(): void {
-    this.widths.clear();
-    this.styledCharsCache.clear();
-  }
-}
-
-const rootOutputCaches = new WeakMap<TuiRoot, OutputCaches>();
-
-function getRootOutputCaches(root: TuiRoot): OutputCaches {
-  let caches = rootOutputCaches.get(root);
-  if (!caches) {
-    caches = new OutputCaches();
-    rootOutputCaches.set(root, caches);
-  }
-  return caches;
-}
-
-export function releasePaintCaches(root: TuiRoot): void {
-  rootOutputCaches.get(root)?.clear();
-  rootOutputCaches.delete(root);
-}
-
-class Output {
-  readonly width: number;
-  readonly height: number;
-  private ops: Op[] = [];
-  private readonly caches: OutputCaches;
+/**
+ * One picture's cells, written by index and materialized once the frame's width
+ * is known. Nothing here survives the call that built it.
+ */
+class CellGrid {
+  private readonly height: number;
+  private readonly rows: (Cell | undefined)[][];
+  private readonly clips: ClipRect[] = [];
   private readonly hardClip: ClipRect | undefined;
+  private readonly boundedWidth: number;
+  private columns: number;
 
-  constructor(
-    width: number,
-    height: number,
-    private readonly terminalStyle: TerminalStyle,
-    clipToBounds = false,
-    caches = new OutputCaches(),
-  ) {
+  constructor(width: number, height: number, clipToBounds = false) {
     assertPaintSurfaceSize(width, height);
-    this.width = width;
     this.height = height;
+    this.boundedWidth = width;
+    this.columns = width;
     this.hardClip = clipToBounds ? { x1: 0, x2: width, y1: 0, y2: height } : undefined;
-    this.caches = caches;
-  }
-
-  write(x: number, y: number, lines: string[]): void {
-    this.ops.push({ type: "write", x, y, lines });
+    this.rows = Array.from({ length: height }, () => []);
   }
 
   clip(rect: ClipRect): void {
-    this.ops.push({ type: "clip", clip: rect });
+    this.clips.push(rect);
   }
 
   unclip(): void {
-    this.ops.push({ type: "unclip" });
+    this.clips.pop();
   }
 
-  get(): { output: string; height: number } {
-    // Blank cells are immutable in practice: every paint change replaces the
-    // array slot with another StyledChar. Share one baseline cell
-    // instead of allocating an object and an empty styles array per terminal
-    // cell on every frame.
-    const blankCell: StyledChar = {
-      type: "char",
-      value: " ",
-      fullWidth: false,
-      styles: [],
-    };
-    const output: StyledChar[][] = Array.from({ length: this.height }, () =>
-      Array.from({ length: this.width }, () => blankCell),
+  write(x: number, y: number, rows: readonly CellRow[]): void {
+    // Every overflow boundary remains authoritative. Intersect the complete
+    // ancestor stack so a larger nested overflow box cannot reopen cells that
+    // its narrower ancestor already excluded. The viewport is one additional
+    // hard boundary over the same accumulated clip.
+    const stackedClip = this.clips.reduce<ClipRect | undefined>(
+      (current, next) => intersectClipRects(current, next),
+      undefined,
     );
+    const clip = this.hardClip ? intersectClipRects(stackedClip, this.hardClip) : stackedClip;
 
-    const clips: ClipRect[] = [];
+    let lines = rows;
+    let top = y;
+    if (clip && typeof clip.y1 === "number" && typeof clip.y2 === "number") {
+      if (top + lines.length < clip.y1 || top > clip.y2) return;
+      const from = top < clip.y1 ? clip.y1 - top : 0;
+      const to = top + lines.length > clip.y2 ? clip.y2 - top : lines.length;
+      lines = lines.slice(from, to);
+      if (top < clip.y1) top = clip.y1;
+    }
 
-    for (const op of this.ops) {
-      if (op.type === "clip") {
-        clips.push(op.clip);
-        continue;
-      }
-      if (op.type === "unclip") {
-        clips.pop();
-        continue;
-      }
+    const clipH =
+      clip && typeof clip.x1 === "number" && typeof clip.x2 === "number"
+        ? { x1: clip.x1, x2: clip.x2 }
+        : null;
 
-      // op.type === "write"
-      let { x, y } = op;
-      let lines = op.lines;
+    // Safe early skip: entire write starts strictly PAST the right clip edge.
+    // This must be strict `>` (not `>=`). The inner per-line clip below already
+    // uses strict `>`, so x === clip.x2 clips to an empty write normally.
+    if (clipH && x > clipH.x2) return;
 
-      // Every overflow boundary remains authoritative. Intersect the complete
-      // ancestor stack so a larger nested overflow box cannot reopen cells that
-      // its narrower ancestor already excluded. The viewport is one additional
-      // hard boundary over the same accumulated clip.
-      const stackedClip = clips.reduce<ClipRect | undefined>(
-        (current, next) => intersectClipRects(current, next),
-        undefined,
-      );
-      const clip = this.hardClip ? intersectClipRects(stackedClip, this.hardClip) : stackedClip;
+    let offsetY = 0;
+    for (const line of lines) {
+      const row = top + offsetY;
 
-      if (clip) {
-        const clipV = typeof clip.y1 === "number" && typeof clip.y2 === "number";
+      // A row can fall outside the picture when text is taller than the
+      // computed layout. `offsetY` deliberately does not advance here: a write
+      // that begins above the surface keeps every later row on that same
+      // out-of-range index rather than sliding up into view.
+      if (row < 0 || row >= this.height) continue;
 
-        // Vertical early skip
-        if (clipV) {
-          const height = lines.length;
-          if (y + height < clip.y1! || y > clip.y2!) continue;
-        }
-
-        // Vertical clip
-        if (clipV) {
-          const from = y < clip.y1! ? clip.y1! - y : 0;
-          const height = lines.length;
-          const to = y + height > clip.y2! ? clip.y2! - y : height;
-          lines = lines.slice(from, to);
-          if (y < clip.y1!) y = clip.y1!;
-        }
-      }
-
-      const clipH =
-        clip && typeof clip.x1 === "number" && typeof clip.x2 === "number"
-          ? { x1: clip.x1, x2: clip.x2 }
-          : null;
-
-      // Safe early skip: entire write starts strictly PAST the right clip edge.
-      // This must be strict `>` (not `>=`). The inner per-line clip below already
-      // uses strict `>`, so x === clip.x2 clips to an empty write normally.
-      if (clipH && x > clipH.x2) continue;
-
-      let offsetY = 0;
-
-      for (let line of lines) {
-        // Every write operation is already split into structural rows. Remove
-        // C0/DEL and unsafe terminal controls before width calculation or
-        // clipping so the measured grid and emitted bytes stay identical.
-        line = sanitizeAnsi(line, { singleLine: true, terminalStyle: this.terminalStyle });
-        const currentLine = output[y + offsetY];
-
-        // Line can be missing if text is taller than pre-initialized output
-        if (!currentLine) {
-          continue;
-        }
-
-        let lineX = x;
-        if (clipH) {
-          const lineWidth = this.caches.getStringWidth(line);
-          // Skip line entirely if outside horizontal clip
-          if (lineX + lineWidth < clipH.x1 || lineX > clipH.x2) {
-            offsetY++;
-            continue;
-          }
-          const from = lineX < clipH.x1 ? clipH.x1 - lineX : 0;
-          const to = lineX + lineWidth > clipH.x2 ? clipH.x2 - lineX : lineWidth;
-          // slice-ansi drops a grapheme whole when the requested left edge lands
-          // inside it. Keep the first retained grapheme at its original surface
-          // column instead of reflowing it left over the dropped cells. For
-          // example, "中x" written at x=-1 drops "中" but keeps "x" at x=1,
-          // leaving x=0 blank.
-          if (lineX < clipH.x1) lineX += this.caches.getSliceStart(line, from);
-          const maxWidth = clipH.x2 - lineX;
-          if (from > 0 || to < lineWidth) {
-            const sliced = sliceAnsiPreservingIntensity(line, from, to);
-            line = safeSliceEnd(sliced, maxWidth);
-          }
-        }
-
-        const characters = this.caches.getStyledChars(line);
-        let offsetX = lineX;
-
-        // Nothing to write (e.g. line was clipped away)
-        if (characters.length === 0) {
+      let cells = line;
+      let lineX = x;
+      if (clipH) {
+        const displayedWidth = displayedColumns(cells);
+        if (lineX + displayedWidth < clipH.x1 || lineX > clipH.x2) {
           offsetY++;
           continue;
         }
-
-        // Wide characters (e.g. CJK) occupy two cells: a leading cell with
-        // the character and a trailing placeholder with value ''. When an
-        // overlapping write lands in the middle of a wide character, the
-        // boundary cells need cleanup so the terminal never renders a
-        // half-visible wide character.
-        if (
-          currentLine[offsetX]?.value === "" &&
-          offsetX > 0 &&
-          this.caches.getStringWidth(currentLine[offsetX - 1]?.value ?? "") > 1
-        ) {
-          currentLine[offsetX - 1] = blankCell;
-        }
-
-        // Normal relative output has no x-bounds check here. A wide character
-        // whose leading cell is in bounds but whose trailing cell exceeds the
-        // width still renders its leading cell and overflows the row; the
-        // past-width placeholder is dropped later as a sparse hole by
-        // `line.filter(item => item !== undefined)` + `.trimEnd()` (see below).
-        // A whole-glyph width guard would drop the character, including its valid
-        // leading cell, when only its trailing cell exceeds the edge. Box-level
-        // overflow:hidden clipping is handled separately above (the clipH sliceAnsi
-        // path); this loop must not re-implement a second, glyph-truncating clip.
-        // The one exception is the explicit fullscreen hard boundary below: a
-        // glyph beyond the addressable viewport would make the terminal wrap.
-        for (const character of characters) {
-          const characterWidth = Math.max(1, this.caches.getStringWidth(character.value));
-
-          // A transformer runs after the line-level clip and may expand the
-          // text again. A wide glyph may also straddle the final cell. Keep the
-          // viewport as a hard cell boundary in both cases so the terminal
-          // cannot auto-wrap an extra glyph and scroll the fullscreen surface.
-          if (this.hardClip && (offsetX < 0 || offsetX + characterWidth > this.width)) {
-            offsetX += characterWidth;
-            continue;
+        const from = lineX < clipH.x1 ? clipH.x1 - lineX : 0;
+        const to = lineX + displayedWidth > clipH.x2 ? clipH.x2 - lineX : displayedWidth;
+        if (from > 0 || to < displayedWidth) {
+          // A grapheme the left edge lands inside is dropped whole, and the
+          // first retained one keeps its original surface column instead of
+          // reflowing left over the dropped cells. For example, "中x" written
+          // at x=-1 drops "中" but keeps "x" at x=1, leaving x=0 blank.
+          let column = 0;
+          let first = 0;
+          while (first < cells.length && column < from) {
+            column += gridColumns(cells[first]!);
+            first++;
           }
-
-          currentLine[offsetX] = character;
-
-          if (characterWidth > 1) {
-            for (let i = 1; i < characterWidth; i++) {
-              currentLine[offsetX + i] = {
-                type: "char",
-                value: "",
-                fullWidth: false,
-                styles: character.styles,
-              };
-            }
+          const start = column;
+          let last = first;
+          while (last < cells.length && column < to) {
+            column += gridColumns(cells[last]!);
+            last++;
           }
-
-          offsetX += characterWidth;
+          lineX += start;
+          cells = fittingCells(cells.slice(first, last), clipH.x2 - lineX);
         }
-
-        if (currentLine[offsetX]?.value === "") {
-          currentLine[offsetX] = blankCell;
-        }
-
-        offsetY++;
       }
+
+      this.blit(cells, lineX, row);
+      offsetY++;
+    }
+  }
+
+  toFrame(): Frame {
+    const frameWidth = Math.max(1, this.hardClip ? this.boundedWidth : this.columns);
+    assertPaintSurfaceSize(frameWidth, this.height);
+    const frame = new Frame(frameWidth, this.height);
+    for (let row = 0; row < this.height; row++) {
+      this.rows[row]!.forEach((cell, column) => {
+        if (cell !== undefined && column < frameWidth) frame.set(column, row, cell);
+      });
+    }
+    return frame;
+  }
+
+  private blit(cells: CellRow, lineX: number, row: number): void {
+    // Nothing to write (e.g. the line was clipped away).
+    if (cells.length === 0) return;
+
+    let offsetX = lineX;
+
+    // Wide characters (e.g. CJK) occupy two cells: a leading cell with the
+    // character and a trailing placeholder with an empty grapheme. When an
+    // overlapping write lands in the middle of a wide character, the boundary
+    // cells need cleanup so the terminal never renders a half-visible wide
+    // character.
+    if (
+      this.cellAt(offsetX, row)?.grapheme === "" &&
+      offsetX > 0 &&
+      (this.cellAt(offsetX - 1, row)?.width ?? 0) > 1
+    ) {
+      this.setCell(offsetX - 1, row, blankCell);
     }
 
-    return {
-      output: output
-        .map((line) => styledCharsToString(line.filter((item) => item !== undefined)).trimEnd())
-        .join("\n"),
-      height: output.length,
-    };
+    // Normal relative output has no x-bounds check here. A wide character whose
+    // leading cell is in bounds but whose trailing cell exceeds the width still
+    // renders its leading cell and overflows the row. A whole-glyph width guard
+    // would drop the character, including its valid leading cell, when only its
+    // trailing cell exceeds the edge. Box-level overflow:hidden clipping is
+    // handled in `write`; this loop must not re-implement a second,
+    // glyph-truncating clip. The one exception is the explicit fullscreen hard
+    // boundary below: a glyph beyond the addressable viewport would make the
+    // terminal wrap.
+    for (const cell of cells) {
+      const cellWidth = gridColumns(cell);
+
+      // A wide glyph may straddle the final cell. Keep the viewport as a hard
+      // cell boundary so the terminal cannot auto-wrap an extra glyph and
+      // scroll the fullscreen surface.
+      if (this.hardClip && (offsetX < 0 || offsetX + cellWidth > this.boundedWidth)) {
+        offsetX += cellWidth;
+        continue;
+      }
+
+      // A grapheme that displays nothing owns its cell in the grid, and the
+      // encoder reads a zero width as the trailing half of a wide cell, so it
+      // enters the frame claiming the one column it was given.
+      this.setCell(offsetX, row, cell.width === 0 ? { ...cell, width: 1 } : cell);
+      for (let index = 1; index < cellWidth; index++) {
+        this.setCell(offsetX + index, row, {
+          grapheme: "",
+          width: 0,
+          style: cell.style,
+          link: cell.link,
+        });
+      }
+      offsetX += cellWidth;
+    }
+
+    if (this.cellAt(offsetX, row)?.grapheme === "") {
+      this.setCell(offsetX, row, blankCell);
+    }
+  }
+
+  private cellAt(x: number, y: number): Cell | undefined {
+    if (x < 0) return undefined;
+    return this.rows[y]?.[x];
+  }
+
+  private setCell(x: number, y: number, cell: Cell): void {
+    if (x < 0 || y < 0 || y >= this.height) return;
+    if (this.hardClip && x >= this.boundedWidth) return;
+    this.rows[y]![x] = cell;
+    if (x + 1 > this.columns) this.columns = x + 1;
   }
 }
 
-// Compose a Text node by styling its already-composed children as one sequence.
-// Parent modifiers remain active across nested Text boundaries, while a nested
+// Compose a Text node by styling the runs its content parsed into. Parent
+// modifiers remain active across nested Text boundaries, while a nested
 // explicit channel value overrides that channel for its own subtree.
 //
 // The surrounding Box background is the outermost Text's base. From there,
@@ -503,164 +293,53 @@ class Output {
 // modifiers: omission inherits the nearest Text value, an explicit color
 // replaces it, and "default" actively resets the terminal channel. Unsupported
 // raw-host non-string values are treated as absent.
-const InlineStyleChannel = {
-  foreground: 1 << 0,
-  background: 1 << 1,
-  dimColor: 1 << 2,
-  bold: 1 << 3,
-  italic: 1 << 4,
-  underline: 1 << 5,
-  strikethrough: 1 << 6,
-  inverse: 1 << 7,
-} as const;
-
-interface InlineTextChunk {
-  readonly value: string;
-  /**
-   * Channels whose nearest explicit nested value has already resolved. An
-   * enclosing Text must not wrap those channels again. This represents both
-   * terminal-default colors and all three modifier states without sentinel
-   * characters in user text.
-   */
-  readonly blockedAncestorStyles: number;
-}
-
-type InlineText = readonly InlineTextChunk[];
-
-function mergeInlineText(chunks: InlineText): InlineTextChunk[] {
-  const merged: InlineTextChunk[] = [];
-  for (const chunk of chunks) {
-    if (chunk.value.length === 0) continue;
-    const previous = merged.at(-1);
-    if (previous?.blockedAncestorStyles === chunk.blockedAncestorStyles) {
-      merged[merged.length - 1] = { ...previous, value: previous.value + chunk.value };
-    } else {
-      merged.push(chunk);
-    }
-  }
-  return merged;
-}
-
-function inlineTextValue(chunks: InlineText): string {
-  return chunks.map((chunk) => chunk.value).join("");
-}
-
-function renderTextWithInlineStyles(
-  node: TuiText | TuiVirtualText,
-  terminalStyle: TerminalStyle,
-  inheritedBg?: unknown,
-): InlineText {
-  if (node.style.display === "none") return [];
-  if (!node.children || node.children.length === 0) return [];
-  // Only this Text receives the surrounding Box background as its base. Nested
-  // Text nodes receive no second Box fallback: omission then inherits this
-  // Text's resolved background through the same channel cascade as foreground
-  // and modifiers.
-  const inner = squashInlineChildren(node.children, terminalStyle, undefined);
-  return applyOwnStyle(node.props, inner, terminalStyle, inheritedBg);
-}
-
-function explicitStyleMask(props: TextProps): number {
-  let mask = 0;
-  if (props.color !== undefined) mask |= InlineStyleChannel.foreground;
-  if (props.backgroundColor !== undefined) mask |= InlineStyleChannel.background;
-  if (props.dimColor !== undefined) mask |= InlineStyleChannel.dimColor;
-  if (props.bold !== undefined) mask |= InlineStyleChannel.bold;
-  if (props.italic !== undefined) mask |= InlineStyleChannel.italic;
-  if (props.underline !== undefined) mask |= InlineStyleChannel.underline;
-  if (props.strikethrough !== undefined) mask |= InlineStyleChannel.strikethrough;
-  if (props.inverse !== undefined) mask |= InlineStyleChannel.inverse;
-  return mask;
-}
-
-function omitBlockedStyles(props: TextProps, mask: number): TextProps {
-  return {
-    ...props,
-    color: mask & InlineStyleChannel.foreground ? undefined : props.color,
-    backgroundColor: mask & InlineStyleChannel.background ? undefined : props.backgroundColor,
-    dimColor: mask & InlineStyleChannel.dimColor ? undefined : props.dimColor,
-    bold: mask & InlineStyleChannel.bold ? undefined : props.bold,
-    italic: mask & InlineStyleChannel.italic ? undefined : props.italic,
-    underline: mask & InlineStyleChannel.underline ? undefined : props.underline,
-    strikethrough: mask & InlineStyleChannel.strikethrough ? undefined : props.strikethrough,
-    inverse: mask & InlineStyleChannel.inverse ? undefined : props.inverse,
-  };
-}
-
-// Apply one Text node's explicit channel values around its composed children.
-// Every explicit value resolves that channel for the complete subtree:
-// omission inherits, true enables, false disables, and `default` actively
-// selects the terminal-default foreground or background. The structural mask
-// makes enclosing wrappers skip channels already settled by a nested Text,
-// including bold and dim which share SGR 22 as their reset code.
-function applyOwnStyle(
-  props: TextProps,
-  inner: InlineText,
-  terminalStyle: TerminalStyle,
-  inheritedBg: unknown,
-): InlineText {
-  if (inner.length === 0) return inner;
-  const defined = Object.fromEntries(
-    Object.entries(props).filter(([, v]) => v !== undefined),
-  ) as TextProps;
-  // A surrounding Box supplies only the outermost Text's base background.
-  // Public Text background values are strings, including the active `default`
-  // reset. Unsupported raw-host values do not replace the base.
-  const ownBg = defined.backgroundColor;
-  const effectiveBg = typeof ownBg === "string" ? ownBg : inheritedBg;
-  const styleProps: TextProps = { ...defined, backgroundColor: effectiveBg };
-  const ownMask = explicitStyleMask(props);
-
-  return mergeInlineText(
-    inner.map((chunk) => {
-      const chunkProps = omitBlockedStyles(styleProps, chunk.blockedAncestorStyles);
-      return {
-        value: sanitizeAnsiMultiline(applyChalk(terminalStyle, chunk.value, chunkProps)),
-        blockedAncestorStyles: chunk.blockedAncestorStyles | ownMask,
-      };
-    }),
+function composeTextRuns(
+  node: TuiText,
+  content: TuiTextContent,
+  inheritedBg: string | undefined,
+): readonly Cell[] {
+  const chunkLevels = content.chunks.map((chunk) =>
+    textStyleLevelsForChunk(node, chunk, inheritedBg),
   );
+  // Content that no enclosing Text styles is already its own composition.
+  if (chunkLevels.every((levels) => levels.every((level) => level.contributions.length === 0))) {
+    return content.runs;
+  }
+  return composeContentRuns(content, chunkLevels);
 }
 
-// Squash an array of inline children into styled text. `inheritedBg` is a base for
-// nested Text descendants that inherit background through the parent's style
-// channel rather than receiving the surrounding Box value again.
-function squashInlineChildren(
-  children: readonly TuiNode[],
-  terminalStyle: TerminalStyle,
-  inheritedBg: unknown,
-): InlineText {
-  const chunks: InlineTextChunk[] = [];
-  for (const child of children) {
-    chunks.push(...squashInlineChild(child, terminalStyle, inheritedBg));
+/** The enclosing Text hosts one chunk sits inside, outermost first. */
+function textStyleLevelsForChunk(
+  node: TuiText,
+  chunk: TuiTextChunk,
+  inheritedBg: string | undefined,
+): TextStyleLevel[] {
+  const hosts: readonly (TuiText | TuiVirtualText)[] = [node, ...chunk.nesting];
+  // Every explicit value resolves its channel for the complete subtree, so a
+  // host skips the channels any host inside it sets.
+  const blockedBelow: number[] = [];
+  let inner = 0;
+  for (let index = hosts.length - 1; index >= 0; index--) {
+    blockedBelow[index] = inner;
+    inner |= explicitTextStyleChannels(hosts[index]!.props);
   }
-  return mergeInlineText(chunks);
-}
 
-// Squash a single inline child into styled text.
-//
-// A bare text-leaf has NO style of its own (it is React's `#text` node), so it
-// contributes its RAW value — NOT even the inherited Box bg. ALL styling,
-// including the effective bg (`ownBg ?? inheritedBg`), is applied exactly ONCE
-// by the enclosing <Text>'s applyOwnStyle, around the whole children
-// concatenation. Applying the inherited bg here too would emit a SECOND, INNER
-// bg-open that wins over the outer one for these glyphs — e.g.
-// `<Box bg=red><Text bg=blue>x` would render red, not blue. A nested
-// <Text>/<virtual-text> child wraps itself (renderTextWithInlineStyles),
-// carrying its own style INSIDE the parent's eventual wrap.
-function squashInlineChild(
-  child: TuiNode,
-  terminalStyle: TerminalStyle,
-  inheritedBg: unknown,
-): InlineText {
-  if (child.type === "text-leaf") {
-    return child.value.length === 0 ? [] : [{ value: child.value, blockedAncestorStyles: 0 }];
-  }
-  if (child.type === "tui-virtual-text" || child.type === "tui-text") {
-    return renderTextWithInlineStyles(child, terminalStyle, inheritedBg);
-  }
-  // Comments (null/undefined renders), boxes, etc. contribute nothing.
-  return [];
+  return hosts.map((host, index) => {
+    const props = host.props;
+    // A surrounding Box supplies only the outermost Text's base background.
+    // Public Text background values are strings, including the active `default`
+    // reset. Unsupported raw-host values do not replace the base.
+    const ownBg = props.backgroundColor;
+    const styleProps =
+      index === 0 && typeof ownBg !== "string" ? { ...props, backgroundColor: inheritedBg } : props;
+    return {
+      owner: host,
+      // The mask reads this host's own props: a Box background substituted
+      // above is not a value this Text set.
+      ownChannels: explicitTextStyleChannels(props),
+      contributions: textStyleContributions(styleProps, blockedBelow[index]!),
+    };
+  });
 }
 
 type BoxStyle = (typeof cliBoxes)[keyof cliBoxes.Boxes];
@@ -669,9 +348,16 @@ function isBoxStyleName(style: string): style is keyof cliBoxes.Boxes {
   return Object.prototype.hasOwnProperty.call(cliBoxes, style);
 }
 
+/** The cell style one authored background color selects, ignoring what it cannot parse. */
+function backgroundStyle(color: unknown): Style {
+  const background = parseColorValue(color);
+  return background === undefined
+    ? defaultStyle
+    : { foreground: defaultColor, background, attrs: 0, extraSgr: noExtraSgr };
+}
+
 function drawBorder(
-  output: Output,
-  terminalStyle: TerminalStyle,
+  grid: CellGrid,
   x: number,
   y: number,
   w: number,
@@ -712,7 +398,7 @@ function drawBorder(
   const generalDim = props["borderDimColor"] as boolean | undefined;
   const borderBackgroundColor = stringProp("borderBackgroundColor");
 
-  function colorizeEdge(s: string, edge: "top" | "bottom" | "left" | "right"): string {
+  function edgeStyle(edge: "top" | "bottom" | "left" | "right"): Style {
     const capEdge = edge.charAt(0).toUpperCase() + edge.slice(1);
     const edgeColor = stringProp(`border${capEdge}Color`) ?? borderColor;
     // Use nullish coalescing (not ||) so an explicit per-edge `false` wins over
@@ -721,56 +407,52 @@ function drawBorder(
     // An edge's background comes only from the per-edge or general border
     // background, never from the Box's content backgroundColor.
     const edgeBg = stringProp(`border${capEdge}BackgroundColor`) ?? borderBackgroundColor;
-    // Border SGR nesting deliberately differs from Text: foreground is
-    // innermost, then background, with dim outermost. Routing edges through
-    // applyChalk would emit the channels in the wrong order for borders.
-    let styled = s;
-    if (edgeColor) {
-      styled = applyColor(terminalStyle, terminalStyle.chalk, edgeColor, false)(styled);
-    }
-    if (edgeBg) styled = applyColor(terminalStyle, terminalStyle.chalk, edgeBg, true)(styled);
-    if (edgeDim) styled = terminalStyle.chalk.dim(styled);
-    return styled;
+    const foreground = parseColorValue(edgeColor) ?? defaultColor;
+    const background = parseColorValue(edgeBg) ?? defaultColor;
+    const attrs = edgeDim ? StyleAttribute.dim : 0;
+    return foreground === defaultColor && background === defaultColor && attrs === 0
+      ? defaultStyle
+      : { foreground, background, attrs, extraSgr: noExtraSgr };
   }
 
   if (top) {
-    const tl = left ? chars.topLeft : chars.top;
-    const tr = right ? chars.topRight : chars.top;
-    const fill = Math.max(0, w - stringWidth(tl) - stringWidth(tr));
-    const raw = tl + chars.top.repeat(fill) + tr;
-    output.write(x, y, [colorizeEdge(safeSliceEnd(raw, w), "top")]);
+    const style = edgeStyle("top");
+    const tl = cellsFromPlainText(left ? chars.topLeft : chars.top, style);
+    const tr = cellsFromPlainText(right ? chars.topRight : chars.top, style);
+    const fill = Math.max(0, w - displayedColumns(tl) - displayedColumns(tr));
+    const row = [...tl, ...cellsFromPlainText(chars.top.repeat(fill), style), ...tr];
+    grid.write(x, y, [fittingCells(row, w)]);
   }
   if (bottom) {
-    const bl = left ? chars.bottomLeft : chars.bottom;
-    const br = right ? chars.bottomRight : chars.bottom;
-    const fill = Math.max(0, w - stringWidth(bl) - stringWidth(br));
-    const raw = bl + chars.bottom.repeat(fill) + br;
-    output.write(x, y + h - 1, [colorizeEdge(safeSliceEnd(raw, w), "bottom")]);
+    const style = edgeStyle("bottom");
+    const bl = cellsFromPlainText(left ? chars.bottomLeft : chars.bottom, style);
+    const br = cellsFromPlainText(right ? chars.bottomRight : chars.bottom, style);
+    const fill = Math.max(0, w - displayedColumns(bl) - displayedColumns(br));
+    const row = [...bl, ...cellsFromPlainText(chars.bottom.repeat(fill), style), ...br];
+    grid.write(x, y + h - 1, [fittingCells(row, w)]);
   }
 
   // Vertical sides begin below a visible top edge, or at row zero when the top
   // edge is absent. Their run length excludes whichever horizontal edges exist.
   const offsetY = top ? 1 : 0;
   const verticalRun = Math.max(0, h - (top ? 1 : 0) - (bottom ? 1 : 0));
+  const leftRow = left ? cellsFromPlainText(chars.left, edgeStyle("left")) : undefined;
+  const rightRow = right ? cellsFromPlainText(chars.right, edgeStyle("right")) : undefined;
   for (let i = 0; i < verticalRun; i++) {
-    if (left) output.write(x, y + offsetY + i, [colorizeEdge(chars.left, "left")]);
-    if (right) output.write(x + w - 1, y + offsetY + i, [colorizeEdge(chars.right, "right")]);
+    if (leftRow) grid.write(x, y + offsetY + i, [leftRow]);
+    if (rightRow) grid.write(x + w - 1, y + offsetY + i, [rightRow]);
   }
 }
 
 function getBoxContentMetrics(
-  node: TuiBox,
+  layout: ComputedNodeLayout,
   w: number,
   h: number,
 ): { width: number; height: number } {
-  const left =
-    node.yoga.getComputedBorder(Yoga.EDGE_LEFT) + node.yoga.getComputedPadding(Yoga.EDGE_LEFT);
-  const right =
-    node.yoga.getComputedBorder(Yoga.EDGE_RIGHT) + node.yoga.getComputedPadding(Yoga.EDGE_RIGHT);
-  const top =
-    node.yoga.getComputedBorder(Yoga.EDGE_TOP) + node.yoga.getComputedPadding(Yoga.EDGE_TOP);
-  const bottom =
-    node.yoga.getComputedBorder(Yoga.EDGE_BOTTOM) + node.yoga.getComputedPadding(Yoga.EDGE_BOTTOM);
+  const left = layout.border.left + layout.padding.left;
+  const right = layout.border.right + layout.padding.right;
+  const top = layout.border.top + layout.padding.top;
+  const bottom = layout.border.bottom + layout.padding.bottom;
   const frameWidth = left + right;
   const frameHeight = top + bottom;
 
@@ -780,9 +462,17 @@ function getBoxContentMetrics(
   };
 }
 
+function spaceCells(count: number, style: Style): Cell[] {
+  return Array.from({ length: count }, () => ({
+    grapheme: " ",
+    width: 1,
+    style,
+    link: undefined,
+  }));
+}
+
 function fillBackground(
-  output: Output,
-  terminalStyle: TerminalStyle,
+  grid: CellGrid,
   x: number,
   y: number,
   w: number,
@@ -794,82 +484,62 @@ function fillBackground(
   const height = Math.max(0, Math.floor(h));
   if (width === 0 || height === 0) return;
 
-  const line = applyChalk(terminalStyle, " ".repeat(width), { backgroundColor: color });
-  for (let i = 0; i < height; i++) output.write(x, y + i, [line]);
+  const row = spaceCells(width, backgroundStyle(color));
+  for (let i = 0; i < height; i++) grid.write(x, y + i, [row]);
 }
 
-interface PreparedTextPaint {
-  readonly text: string;
-  readonly wrapped: string[];
+/** Padding and text can share a grapheme, whose leading cell owns its style. */
+function joinPaddingBoundary(cells: Cell[], index: number): void {
+  const left = cells[index]!;
+  const right = cells[index + 1]!;
+  const joined = cellsFromPlainText(left.grapheme + right.grapheme, left.style);
+  if (joined.length === 1) cells.splice(index, 2, { ...joined[0]!, link: left.link });
 }
-
-interface PreparedTextPaintCache extends PreparedTextPaint {
-  readonly revision: number;
-  readonly inheritedBg: string | undefined;
-  readonly textAlign: TextProps["textAlign"];
-  readonly wrapWidth: number;
-  readonly wrapMode: TextProps["wrap"];
-  readonly terminalStyleKey: string;
-}
-
-const preparedTextPaintCache = new WeakMap<TuiText, PreparedTextPaintCache>();
 
 function alignTextLine(
-  line: string,
+  cells: CellRow,
   width: number,
   textAlign: NonNullable<TextProps["textAlign"]>,
-  terminalStyle: TerminalStyle,
   inheritedBg: string | undefined,
-): string {
-  const remaining = Math.max(0, width - stringWidth(line));
+): CellRow {
+  // Left-aligned text with no background behind it pads nothing, so the line
+  // never has to be measured.
+  if (textAlign === "left" && !inheritedBg) return cells;
+
+  const remaining = Math.max(0, width - displayedColumns(cells));
   const leading =
     textAlign === "right" ? remaining : textAlign === "center" ? Math.floor(remaining / 2) : 0;
   const trailing = remaining - leading;
 
-  if (!inheritedBg) return " ".repeat(leading) + line;
+  if (!inheritedBg && leading === 0) return cells;
 
-  const padProps: TextProps = { backgroundColor: inheritedBg };
-  const pad = (columns: number): string =>
-    columns === 0 ? "" : applyChalk(terminalStyle, " ".repeat(columns), padProps);
-  return pad(leading) + line + pad(trailing);
+  const padStyle = inheritedBg ? backgroundStyle(inheritedBg) : defaultStyle;
+  const trailingPadding = inheritedBg ? trailing : 0;
+  const aligned = [
+    ...spaceCells(leading, padStyle),
+    ...cells,
+    ...spaceCells(trailingPadding, padStyle),
+  ];
+  if (cells.length > 0) {
+    // Join the trailing boundary first so the leading boundary's index stays fixed.
+    if (trailingPadding > 0) joinPaddingBoundary(aligned, leading + cells.length - 1);
+    if (leading > 0) joinPaddingBoundary(aligned, leading - 1);
+  }
+  return aligned;
 }
 
-function prepareTextPaint(
+/** Style the node's runs, split them over the measured lines, and align each. */
+function paintedTextLines(
   node: TuiText,
-  terminalStyle: TerminalStyle,
+  content: TuiTextContent,
   inheritedBg: string | undefined,
   wrapWidth: number,
-): PreparedTextPaint {
-  const textAlign = node.props.textAlign;
-  const wrapMode = node.props.wrap;
-  const cached = preparedTextPaintCache.get(node);
-  if (
-    cached?.revision === node.textRevision &&
-    cached.inheritedBg === inheritedBg &&
-    cached.textAlign === textAlign &&
-    cached.wrapWidth === wrapWidth &&
-    cached.wrapMode === wrapMode &&
-    cached.terminalStyleKey === terminalStyle.cacheKey
-  ) {
-    return cached;
-  }
-
-  const text = inlineTextValue(renderTextWithInlineStyles(node, terminalStyle, inheritedBg));
-  const wrapped = wrapText(text, wrapWidth, wrapMode ?? "wrap").map((line) =>
-    alignTextLine(line, wrapWidth, textAlign ?? "left", terminalStyle, inheritedBg),
+  wrappedLines: readonly string[],
+): CellRow[] {
+  const composed = composeTextRuns(node, content, inheritedBg);
+  return styleMeasuredTextLines(composed, wrappedLines, node.props.wrap ?? "wrap", wrapWidth).map(
+    (line) => alignTextLine(line, wrapWidth, node.props.textAlign ?? "left", inheritedBg),
   );
-  const prepared = { text, wrapped };
-  const entry = {
-    revision: node.textRevision,
-    inheritedBg,
-    textAlign,
-    wrapWidth,
-    wrapMode,
-    terminalStyleKey: terminalStyle.cacheKey,
-    ...prepared,
-  };
-  preparedTextPaintCache.set(node, entry);
-  return entry;
 }
 
 interface PaintRect {
@@ -880,10 +550,10 @@ interface PaintRect {
 }
 
 export interface PaintOptions {
-  /** Text styling capability resolved for this render session. */
-  readonly terminalStyle: TerminalStyle;
+  /** Immutable geometry from the layout transaction that precedes this paint. */
+  readonly layout: ComputedLayout;
   /** Private frame-local geometry collector. Publication happens after paint succeeds. */
-  readonly geometry?: InternalGeometryPaintFrame;
+  readonly geometry?: PaintGeometryFrame;
   /**
    * Clip paint and semantic geometry to an app-owned viewport. Fullscreen
    * rendering uses this to keep off-screen layout from wrapping or scrolling
@@ -905,55 +575,47 @@ function intersectPaintRect(rect: PaintRect, clip: PaintRect | undefined): Paint
 
 function recordZeroContentGeometry(
   node: TuiNode,
-  geometry: InternalGeometryPaintFrame | undefined,
+  layout: ComputedLayout,
+  geometry: PaintGeometryFrame | undefined,
 ): void {
   if (!geometry?.hasObservedSubtree(node)) return;
   if (node.type === "tui-static") {
     geometry.recordSubtree(node, "unavailable");
     return;
   }
-  const yoga = (node as { yoga?: { getDisplay?: () => number } }).yoga;
-  if (yoga?.getDisplay?.() === Yoga.DISPLAY_NONE && !isContentLayoutGuarded(node)) {
+  const computed = layout.get(node);
+  if (computed && !computed.isLaidOut && !computed.isContentLayoutGuarded) {
     geometry.recordSubtree(node, "hidden");
     return;
   }
-  if (node.type === "tui-box") {
-    const layout =
-      "yoga" in node && node.yoga && "getComputedLayout" in node.yoga
-        ? node.yoga.getComputedLayout()
-        : undefined;
-    geometry.record(node, 0, 0, Math.floor(layout?.left ?? 0), Math.floor(layout?.top ?? 0));
+  if (node.type === "tui-box" && computed) {
+    geometry.record(node, 0, 0, Math.floor(computed.rect.left), Math.floor(computed.rect.top));
   }
   if (!isContainer(node)) return;
-  for (const child of node.children) recordZeroContentGeometry(child, geometry);
+  for (const child of node.children) recordZeroContentGeometry(child, layout, geometry);
 }
 
-export function paint(root: TuiNode, options: PaintOptions): string {
+export function paint(root: TuiNode, options: PaintOptions): Frame {
   if (root.type !== "root") throw new Error("paint expects TuiRoot");
-  const layout = root.yoga.getComputedLayout();
-  const width = Math.max(1, Math.floor(options.viewport?.width ?? layout.width));
-  const height = Math.max(1, Math.floor(options.viewport?.height ?? layout.height));
-  const out = new Output(
-    width,
-    height,
-    options.terminalStyle,
-    options.viewport !== undefined,
-    getRootOutputCaches(root),
-  );
+  const rootLayout = options.layout.get(root);
+  if (!rootLayout) throw new Error("paint requires the root ComputedLayout");
+  const width = Math.max(1, Math.floor(options.viewport?.width ?? rootLayout.rect.width));
+  const height = Math.max(1, Math.floor(options.viewport?.height ?? rootLayout.rect.height));
+  const grid = new CellGrid(width, height, options.viewport !== undefined);
   const viewportClip = options.viewport ? { x: 0, y: 0, width, height } : undefined;
-  paintNode(root, out, options.terminalStyle, 0, 0, undefined, viewportClip, options.geometry);
-  return out.get().output;
+  paintNode(root, options.layout, grid, 0, 0, undefined, viewportClip, options.geometry);
+  return grid.toFrame();
 }
 
 function paintNode(
   node: TuiNode,
-  output: Output,
-  terminalStyle: TerminalStyle,
+  computedLayout: ComputedLayout,
+  grid: CellGrid,
   x0: number,
   y0: number,
   inheritedBg?: string,
   clip?: PaintRect,
-  geometry?: InternalGeometryPaintFrame,
+  geometry?: PaintGeometryFrame,
 ): void {
   // Box-size collection is demand-driven. Once no observed target exists in
   // this subtree, keep ordinary paint on its pre-measurement path.
@@ -961,10 +623,11 @@ function paintNode(
 
   // display:none collapses the node to zero size but still reports a layout;
   // skip the subtree so hidden content never leaks onto visible siblings.
-  const yogaNode = (node as { yoga?: { getDisplay?: () => number } }).yoga;
-  if (yogaNode?.getDisplay?.() === Yoga.DISPLAY_NONE) {
+  const computed = computedLayout.get(node);
+  if (computed && !computed.isLaidOut) {
     if (node.type === "tui-static") geometry?.recordSubtree(node, "unavailable");
-    else if (isContentLayoutGuarded(node)) recordZeroContentGeometry(node, geometry);
+    else if (computed.isContentLayoutGuarded)
+      recordZeroContentGeometry(node, computedLayout, geometry);
     else geometry?.recordSubtree(node, "hidden");
     return;
   }
@@ -972,18 +635,18 @@ function paintNode(
   switch (node.type) {
     case "root": {
       for (const child of node.children) {
-        paintNode(child, output, terminalStyle, x0, y0, undefined, clip, geometry);
+        paintNode(child, computedLayout, grid, x0, y0, undefined, clip, geometry);
       }
       return;
     }
     case "tui-box": {
-      const layout = node.yoga.getComputedLayout();
-      const x = x0 + layout.left;
-      const y = y0 + layout.top;
-      const w = Math.max(0, Math.floor(layout.width));
-      const h = Math.max(0, Math.floor(layout.height));
+      if (!computed) return;
+      const x = x0 + computed.rect.left;
+      const y = y0 + computed.rect.top;
+      const w = Math.max(0, Math.floor(computed.rect.width));
+      const h = Math.max(0, Math.floor(computed.rect.height));
       // Parent-relative outer layout offsets — not terminal or root coordinates.
-      geometry?.record(node, w, h, Math.floor(layout.left), Math.floor(layout.top));
+      geometry?.record(node, w, h, Math.floor(computed.rect.left), Math.floor(computed.rect.top));
       // Split the Box's own background from the value threaded to children. An
       // empty string paints no fill and does not replace an inherited background,
       // so descendants continue to inherit from the nearest non-empty Box value.
@@ -991,7 +654,7 @@ function paintNode(
       const ownBg = typeof rawBg === "string" ? rawBg : undefined;
       const childBg = ownBg ? ownBg : inheritedBg;
       if (node.props["borderStyle"]) {
-        drawBorder(output, terminalStyle, x, y, w, h, node.props);
+        drawBorder(grid, x, y, w, h, node.props);
       }
       if (ownBg) {
         const hasBorder = !!node.props["borderStyle"];
@@ -999,7 +662,7 @@ function paintNode(
         const bb = hasBorder && node.props["borderBottom"] !== false ? 1 : 0;
         const bl = hasBorder && node.props["borderLeft"] !== false ? 1 : 0;
         const br = hasBorder && node.props["borderRight"] !== false ? 1 : 0;
-        fillBackground(output, terminalStyle, x + bl, y + bt, w - bl - br, h - bt - bb, ownBg);
+        fillBackground(grid, x + bl, y + bt, w - bl - br, h - bt - bb, ownBg);
       }
 
       // Overflow clipping limits children to the box content area (inside
@@ -1010,16 +673,13 @@ function paintNode(
       const overflowX = (node.props["overflowX"] as string | undefined) ?? overflow ?? "visible";
       const overflowY = (node.props["overflowY"] as string | undefined) ?? overflow ?? "visible";
       // Axis-specific values override the broad shorthand. Active ancestor
-      // clips remain on Output's stack, so a visible inner axis cannot reopen
+      // clips remain on the grid's stack, so a visible inner axis cannot reopen
       // a region hidden by an outer Box.
       const clipH = overflowX === "hidden";
       const clipV = overflowY === "hidden";
+      const { left: bl, right: br, top: bt, bottom: bb } = computed.border;
       if (clipH || clipV) {
-        const bl = node.yoga.getComputedBorder(Yoga.EDGE_LEFT);
-        const br = node.yoga.getComputedBorder(Yoga.EDGE_RIGHT);
-        const bt = node.yoga.getComputedBorder(Yoga.EDGE_TOP);
-        const bb = node.yoga.getComputedBorder(Yoga.EDGE_BOTTOM);
-        output.clip({
+        grid.clip({
           x1: clipH ? x + bl : undefined,
           x2: clipH ? x + w - br : undefined,
           y1: clipV ? y + bt : undefined,
@@ -1027,10 +687,6 @@ function paintNode(
         });
         clipped = true;
       }
-      const bl = node.yoga.getComputedBorder(Yoga.EDGE_LEFT);
-      const br = node.yoga.getComputedBorder(Yoga.EDGE_RIGHT);
-      const bt = node.yoga.getComputedBorder(Yoga.EDGE_TOP);
-      const bb = node.yoga.getComputedBorder(Yoga.EDGE_BOTTOM);
       const childClip =
         clipH || clipV
           ? (intersectPaintRect(
@@ -1044,78 +700,81 @@ function paintNode(
             ) ?? { x: 0, y: 0, width: 0, height: 0 })
           : clip;
 
-      const contentMetrics = getBoxContentMetrics(node, w, h);
+      const contentMetrics = getBoxContentMetrics(computed, w, h);
       // A Box with no inner content area has no legal paint region for FLOW
       // children. Absolutely-positioned children, though, are placed against
       // their containing block — the padding box (inside the borders) — not the
       // content rect; paint just those and keep flow children suppressed.
       if (contentMetrics.width === 0 || contentMetrics.height === 0) {
         for (const child of node.children) {
-          const childYoga = (child as { yoga?: { getPositionType?: () => number } }).yoga;
-          if (childYoga?.getPositionType?.() === Yoga.POSITION_TYPE_ABSOLUTE) {
-            paintNode(child, output, terminalStyle, x, y, childBg, childClip, geometry);
+          if (computedLayout.get(child)?.isAbsolute) {
+            paintNode(child, computedLayout, grid, x, y, childBg, childClip, geometry);
           } else {
-            recordZeroContentGeometry(child, geometry);
+            recordZeroContentGeometry(child, computedLayout, geometry);
           }
         }
-        if (clipped) output.unclip();
+        if (clipped) grid.unclip();
         return;
       }
 
       for (const child of node.children) {
-        paintNode(child, output, terminalStyle, x, y, childBg, childClip, geometry);
+        paintNode(child, computedLayout, grid, x, y, childBg, childClip, geometry);
       }
 
-      if (clipped) output.unclip();
+      if (clipped) grid.unclip();
       return;
     }
     case "tui-text": {
-      const layout = node.yoga.getComputedLayout();
+      if (!computed) return;
       // Text keeps its pre-pixel-grid fractional geometry so measurement and
       // paint can quantize the same width without a feedback layout. Terminal
       // writes still need integral cell coordinates; floor matches the
       // conservative start edge used for its complete-cell budget.
-      const left = Math.floor(layout.left);
-      const top = Math.floor(layout.top);
+      const left = Math.floor(computed.rect.left);
+      const top = Math.floor(computed.rect.top);
       const y = y0 + top;
       // This span is only an early-clip bound. Text geometry can retain a
-      // positive fractional height, so round outward here; Output remains the
+      // positive fractional height, so round outward here; the grid remains the
       // authority for clipping the actual rows written below.
-      const h = Math.max(0, Math.ceil(layout.height));
+      const h = Math.max(0, Math.ceil(computed.rect.height));
       // A Text entirely above or below an authoritative clip cannot affect the
-      // output grid. Skip composition and write-op allocation as well. Limit
-      // this to Text: a clipped Box may still contain an absolutely positioned or
+      // output grid. Skip composition and cell allocation as well. Limit this to
+      // Text: a clipped Box may still contain an absolutely positioned or
       // overflow-visible descendant that re-enters the viewport.
       if (clip && (y + h <= clip.y || y >= clip.y + clip.height)) {
         return;
       }
       // Thread the INHERITED Box bg (NOT a pre-computed effective bg) into the
-      // squash. The Text's own backgroundColor — including an explicit "" opt-out —
-      // is resolved against this inherited bg inside applyOwnStyle, where it
-      // wraps the node's complete child sequence alongside its boolean styles.
-      // Wrap by quantizing Text's retained pre-pixel-grid width with the same
-      // pure whole-cell rule used by measurement, clamped by the final parent
-      // content box. The width can legitimately be 0 (flexBasis=0, width=0,
-      // width="0%"). At width 0,
-      // wrapText returns the leading-newline wrap "\nA" → ["", "A"], pushing
-      // the glyph onto its own second row exactly as measurement reported.
-      const wrapWidth = getTextTerminalCellWidth(node);
-      const { text, wrapped } = prepareTextPaint(node, terminalStyle, inheritedBg, wrapWidth);
+      // composition. The Text's own backgroundColor — including an explicit ""
+      // opt-out — is resolved against this inherited bg while the enclosing
+      // levels are collected, alongside its boolean styles.
+      // Layout already chose the whole-cell budget and every physical line.
+      // Paint only applies terminal styles and alignment to that immutable plan;
+      // re-wrapping here would let a second budget diverge from Yoga's measure.
+      const textLayout = computed.text;
+      if (!textLayout) return;
+      // The layout transaction parsed this node's content for the same commit,
+      // so the runs are current for every Text it laid out.
+      const content = node.content;
       // Empty text has no cells to write.
-      if (text === "") return;
+      if (!content || content.text === "") return;
+      const { wrapWidth, wrappedLines } = textLayout;
       // Pad each line to the cell width with the INHERITED Box background only —
       // this fills the space behind the text with the Box's bg (the Box also fills
       // it via fillBackground), and is the reason a Box bg pads to full width while
       // a text-only bg does not. The padding uses `inheritedBg`, NOT the effective
       // bg: a Text that overrides or opts out (backgroundColor / "") only recolors
-      // its OWN glyphs, never the surrounding Box fill. The already-rendered glyphs
-      // in `wrapped[i]` keep their effective bg, so a `backgroundColor=""` Text
-      // stays bare even though we pad the trailing cells with the inherited bg.
-      // Pad to wrapWidth (not a ≥1-clamped width): at width 0 there is nothing to
-      // pad. Clamping to 1 here would
-      // bg-pad the empty leading wrap line "" into a stray 1-cell fill that
-      // collides with a row-sibling at the 0-width box origin.
-      output.write(x0 + left, y0 + top, wrapped);
+      // its OWN glyphs, never the surrounding Box fill. The already-styled cells
+      // keep their effective bg, so a `backgroundColor=""` Text stays bare even
+      // though we pad the trailing cells with the inherited bg.
+      // Pad to wrapWidth (not a >=1-clamped width): at width 0 there is nothing to
+      // pad. Clamping to 1 here would bg-pad the empty leading wrap line into a
+      // stray 1-cell fill that collides with a row-sibling at the 0-width box origin.
+      grid.write(
+        x0 + left,
+        y0 + top,
+        paintedTextLines(node, content, inheritedBg, wrapWidth, wrappedLines),
+      );
       return;
     }
     case "tui-static": {
@@ -1127,25 +786,16 @@ function paintNode(
     case "tui-virtual-text":
     case "text-leaf":
     case "comment":
-      // virtual-text and text-leaf are handled inside renderTextWithInlineStyles.
+      // virtual-text and text-leaf are painted through their enclosing Text.
       // Comments are invisible.
       return;
   }
 }
 
-export function paintContainer(container: TuiContainer, terminalStyle: TerminalStyle): string {
-  // Used by Static channel and tests.
-  if (container.type === "root") return paint(container, { terminalStyle });
-  throw new Error("paintContainer currently only supports root");
-}
-
-export function paintStaticLayout(
-  region: StaticLayoutRegion,
-  terminalStyle: TerminalStyle,
-): string {
-  const out = new Output(region.width, region.height, terminalStyle);
+export function paintStaticLayout(region: StaticLayoutRegion, layout: ComputedLayout): Frame {
+  const grid = new CellGrid(region.width, region.height);
   for (const child of region.children) {
-    paintNode(child, out, terminalStyle, region.offsetX, region.offsetY);
+    paintNode(child, layout, grid, region.offsetX, region.offsetY);
   }
-  return out.get().output;
+  return grid.toFrame();
 }

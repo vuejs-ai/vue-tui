@@ -126,7 +126,10 @@ async function settleLifecycle(): Promise<void> {
 }
 
 function count(writes: readonly string[], sequence: string): number {
-  return writes.filter((write) => write === sequence).length;
+  // Over the joined stream, not per chunk: the output coordinator merges
+  // adjacent segments, so a second pop could arrive inside another chunk and a
+  // chunk-equality count would not see it.
+  return writes.join("").split(sequence).length - 1;
 }
 
 function expectReleased(stdin: TrackedStdin, refBalance: () => number): void {
@@ -179,6 +182,29 @@ describe("private Kitty negotiation at the Runtime boundary", () => {
       expect(writes).toContain("\x1b[<u");
       expectReleased(stdin, refBalance);
       stdin.destroy();
+      stdout.destroy();
+    }
+  });
+
+  test("pops the protocol when stdin is gone before teardown", async () => {
+    const { stdin } = makeTrackedStdin();
+    const { stdout, writes } = makeTrackedStdout();
+    const { app } = mountInputApp({ stdin, stdout });
+
+    try {
+      expect(writes).toContain("\x1b[?u");
+      stdin.write("\x1b[?1u");
+      await settleLifecycle();
+      expect(writes).toContain("\x1b[>1u");
+    } finally {
+      // A PTY hangup, or a host closing stdin while tearing down. The pop only
+      // travels outward, so losing stdin must not leave the protocol pushed.
+      stdin.destroy();
+      app.unmount();
+      // Balance, not presence: the protocol is a stack, and a second pop would
+      // take a level the parent shell pushed.
+      expect(count(writes, "\x1b[>1u")).toBe(1);
+      expect(count(writes, "\x1b[<u")).toBe(1);
       stdout.destroy();
     }
   });

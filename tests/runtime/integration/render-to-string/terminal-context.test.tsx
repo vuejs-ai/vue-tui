@@ -92,26 +92,18 @@ describe("renderToString terminal context", () => {
     expect(output).toContain("with stderr");
   });
 
-  test("string terminal streams are isolated and direct writes remain inert", () => {
+  test("string terminal input is isolated while output helpers remain inert", () => {
     let capturedStdin: Readable | undefined;
-    let capturedStdout: NodeJS.WriteStream | undefined;
-    let capturedStderr: NodeJS.WriteStream | undefined;
     const App = defineComponent(() => {
       capturedStdin = useStdin().stdin;
-      capturedStdout = useStdout().stdout;
-      capturedStderr = useStderr().stderr;
-      capturedStdout.write("discard stdout");
-      capturedStderr.write("discard stderr");
+      useStdout().write("discard stdout");
+      useStderr().write("discard stderr");
       return () => <Text>isolated</Text>;
     });
 
     expect(renderToString(App, { width: 29 })).toBe("isolated");
     expect(capturedStdin).not.toBe(process.stdin);
-    expect(capturedStdout).not.toBe(process.stdout);
-    expect(capturedStderr).not.toBe(process.stderr);
     expect(Reflect.get(capturedStdin!, "isTTY")).toBe(false);
-    expect(capturedStdout?.isTTY).toBe(false);
-    expect(capturedStdout?.columns).toBe(29);
   });
 
   // ── B29: renderToString serves the TERMINAL composables with inert no-op

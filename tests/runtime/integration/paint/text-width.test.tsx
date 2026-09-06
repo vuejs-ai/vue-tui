@@ -179,13 +179,8 @@ test("CJK overlay on 2nd cell of CJK clears both sides", () => {
   expect(stripAnsi(lines[0]!)).toBe("あい 漢字テスト けこ");
 });
 
-// A wide char whose leading cell is in bounds but trailing cell exceeds the
-// terminal/box width still renders the glyph and overflows the row. The
-// out-of-bounds trailing placeholder is dropped later by line.filter + trimEnd.
-// Box width 4 (== terminal); 你 (width 2) overlaid at left=3 lands on cols 3,4,
-// so its trailing cell exceeds the width. A whole-glyph bounds guard would drop
-// 你, including its valid
-// leading cell at column 3.
+// A document frame widens to retain an overflow-visible grapheme whose leading
+// cell starts inside the box. Box width 4; 你 at left=3 occupies columns 3 and 4.
 test("wide char with an in-bounds leading cell still renders when its trailing cell overflows", () => {
   const output = renderToString(
     defineComponent(() => () => (
@@ -200,4 +195,19 @@ test("wide char with an in-bounds leading cell still renders when its trailing c
   );
   expect(stripAnsi(output)).toBe("aa 你");
   expect(stringWidth(stripAnsi(output))).toBe(5);
+});
+
+test("overflow-hidden clips far-offscreen text before Frame allocation", () => {
+  expect(() =>
+    renderToString(
+      defineComponent(() => () => (
+        <Box width={1} height={17} overflow="hidden">
+          <Box position="absolute" left={65_535}>
+            <Text>X</Text>
+          </Box>
+        </Box>
+      )),
+      { width: 1, height: 17 },
+    ),
+  ).not.toThrow();
 });

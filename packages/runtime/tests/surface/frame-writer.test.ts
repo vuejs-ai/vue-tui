@@ -1,0 +1,100 @@
+import ansiEscapes from "ansi-escapes";
+import { describe, expect, test } from "vite-plus/test";
+import { createTestTerminalBackend } from "../../src/terminal/test/backend.ts";
+import { createFrameWriter } from "../../src/surface/frame-writer.ts";
+import logUpdate from "../../src/surface/log-update.ts";
+
+function chunks(terminal: ReturnType<typeof createTestTerminalBackend>): string[] {
+  return terminal.writes.map((write) => write.data);
+}
+
+describe("standard log updates", () => {
+  test("renders and replaces every requested frame", () => {
+    const terminal = createTestTerminalBackend();
+    const render = logUpdate.create(terminal);
+
+    expect(render("Hello\n")).toBe(true);
+    expect(render("Hello\n")).toBe(true);
+    expect(render("World\n")).toBe(true);
+
+    expect(chunks(terminal)).toEqual([
+      "Hello\n",
+      ansiEscapes.eraseLines(2) + "Hello\n",
+      ansiEscapes.eraseLines(2) + "World\n",
+    ]);
+  });
+
+  test("clear erases the current frame and reset only forgets it", () => {
+    const terminal = createTestTerminalBackend();
+    const render = logUpdate.create(terminal);
+
+    render("Hello\n");
+    render.clear();
+    expect(chunks(terminal).at(-1)).toBe(ansiEscapes.eraseLines(2));
+
+    const count = chunks(terminal).length;
+    render("Hello\n");
+    render.reset();
+    expect(chunks(terminal)).toHaveLength(count + 1);
+    render("Hello\n");
+    expect(chunks(terminal)).toHaveLength(count + 2);
+  });
+});
+
+describe("frame writer", () => {
+  test("writes each requested frame and resets its physical region", () => {
+    const terminal = createTestTerminalBackend();
+    const writer = createFrameWriter(terminal);
+
+    writer.write("Hello\n");
+    const afterFirst = chunks(terminal).length;
+    writer.write("Hello\n");
+    expect(chunks(terminal).length).toBeGreaterThan(afterFirst);
+
+    writer.clear();
+    const afterClear = chunks(terminal).length;
+    writer.write("Hello\n");
+    expect(chunks(terminal).length).toBeGreaterThan(afterClear);
+
+    writer.reset();
+    const afterReset = chunks(terminal).length;
+    writer.write("Hello\n");
+    expect(chunks(terminal).length).toBeGreaterThan(afterReset);
+  });
+
+  test("retries a write that throws", () => {
+    const terminal = createTestTerminalBackend();
+    let fail = true;
+    const chunksWritten: string[] = [];
+    const writer = createFrameWriter(terminal, {
+      write(chunk) {
+        if (fail && chunk.includes("NEXT")) {
+          fail = false;
+          throw new Error("injected write failure");
+        }
+        chunksWritten.push(chunk);
+        return true;
+      },
+    });
+
+    writer.write("OLD\n");
+    expect(() => writer.write("NEXT\n")).toThrow("injected write failure");
+
+    writer.write("NEXT\n");
+    expect(chunksWritten.at(-1)).toContain("NEXT");
+  });
+
+  test("a transaction rollback restores the previous region height", () => {
+    const terminal = createTestTerminalBackend();
+    const writer = createFrameWriter(terminal);
+
+    writer.write("OLD\n");
+    const rollback = writer.createRollback();
+    writer.write("NEXT\n");
+    rollback();
+    rollback();
+    writer.write("FINAL\n");
+
+    expect(chunks(terminal).at(-1)).toBe(ansiEscapes.eraseLines(2) + "FINAL\n");
+  });
+});

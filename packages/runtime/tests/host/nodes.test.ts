@@ -7,7 +7,8 @@ import {
   createVirtualText,
   isContainer,
 } from "../../src/host/nodes.ts";
-import { buildNodeOps } from "../../src/host/node-ops.ts";
+import { getYogaNode } from "../../src/layout/yoga.ts";
+import { buildNodeOps } from "../../src/vue/node-ops.ts";
 
 test("createBox returns shape with empty children", () => {
   const box = createBox();
@@ -16,6 +17,7 @@ test("createBox returns shape with empty children", () => {
   expect(box.parent).toBe(null);
   expect(box.props).toEqual({});
   expect(box.style.display).toBe("");
+  expect("yoga" in box).toBe(false);
   expect(Object.keys(box)).not.toContain("style");
 });
 
@@ -26,16 +28,16 @@ test("Box style.display maps Vue v-show writes onto Yoga display", () => {
 
   expect(box.style.display).toBe("");
   expect(Object.keys(box)).not.toContain("style");
-  expect(box.yoga.getDisplay()).toBe(Yoga.DISPLAY_FLEX);
+  expect(getYogaNode(box).getDisplay()).toBe(Yoga.DISPLAY_FLEX);
 
   box.style.display = "none";
   expect(box.style.display).toBe("none");
-  expect(box.yoga.getDisplay()).toBe(Yoga.DISPLAY_NONE);
+  expect(getYogaNode(box).getDisplay()).toBe(Yoga.DISPLAY_NONE);
   expect(commits).toBe(1);
 
   box.style.display = "";
   expect(box.style.display).toBe("");
-  expect(box.yoga.getDisplay()).toBe(Yoga.DISPLAY_FLEX);
+  expect(getYogaNode(box).getDisplay()).toBe(Yoga.DISPLAY_FLEX);
   expect(commits).toBe(2);
 });
 
@@ -45,25 +47,25 @@ test("private raw-host display stays hidden under v-show and restores its latest
 
   ops.patchProp(box, "display", undefined, "flex");
   box.style.display = "none";
-  expect(box.yoga.getDisplay()).toBe(Yoga.DISPLAY_NONE);
+  expect(getYogaNode(box).getDisplay()).toBe(Yoga.DISPLAY_NONE);
 
   // A private raw-host update while v-show is still false must not reveal the subtree.
   ops.patchProp(box, "display", "flex", "none");
   ops.patchProp(box, "display", "none", "flex");
   expect(box.style.display).toBe("none");
-  expect(box.yoga.getDisplay()).toBe(Yoga.DISPLAY_NONE);
+  expect(getYogaNode(box).getDisplay()).toBe(Yoga.DISPLAY_NONE);
 
   // Vue restores the original style string when v-show becomes true. The host
   // reveals using the latest raw-host value, not a stale mount-time value.
   box.style.display = "flex";
   expect(box.style.display).toBe("flex");
-  expect(box.yoga.getDisplay()).toBe(Yoga.DISPLAY_FLEX);
+  expect(getYogaNode(box).getDisplay()).toBe(Yoga.DISPLAY_FLEX);
 
   // Private raw-host display=none wins even while v-show itself is true.
   ops.patchProp(box, "display", "flex", "none");
   box.style.display = "flex";
   expect(box.style.display).toBe("none");
-  expect(box.yoga.getDisplay()).toBe(Yoga.DISPLAY_NONE);
+  expect(getYogaNode(box).getDisplay()).toBe(Yoga.DISPLAY_NONE);
 });
 
 test("Box style.display becomes inert before its Yoga node is freed", () => {
@@ -88,16 +90,16 @@ test("top-level Text style.display maps Vue v-show writes onto Yoga display", ()
 
   expect(text.style.display).toBe("");
   expect(Object.keys(text)).not.toContain("style");
-  expect(text.yoga.getDisplay()).toBe(Yoga.DISPLAY_FLEX);
+  expect(getYogaNode(text).getDisplay()).toBe(Yoga.DISPLAY_FLEX);
 
   text.style.display = "none";
   expect(text.style.display).toBe("none");
-  expect(text.yoga.getDisplay()).toBe(Yoga.DISPLAY_NONE);
+  expect(getYogaNode(text).getDisplay()).toBe(Yoga.DISPLAY_NONE);
   expect(commits).toBe(1);
 
   text.style.display = "";
   expect(text.style.display).toBe("");
-  expect(text.yoga.getDisplay()).toBe(Yoga.DISPLAY_FLEX);
+  expect(getYogaNode(text).getDisplay()).toBe(Yoga.DISPLAY_FLEX);
   expect(commits).toBe(2);
 });
 
@@ -126,16 +128,16 @@ test("nested Text style.display invalidates its top-level Text measure owner", (
   ops.insert(nested, text, null);
   ops.insert(leaf, nested, null);
 
-  box.yoga.calculateLayout(20, undefined, Yoga.DIRECTION_LTR);
-  expect(text.yoga.getComputedLayout().width).toBe(5);
+  getYogaNode(box).calculateLayout(20, undefined, Yoga.DIRECTION_LTR);
+  expect(getYogaNode(text).getComputedLayout().width).toBe(5);
 
   nested.style.display = "none";
-  box.yoga.calculateLayout(20, undefined, Yoga.DIRECTION_LTR);
-  expect(text.yoga.getComputedLayout().width).toBe(0);
+  getYogaNode(box).calculateLayout(20, undefined, Yoga.DIRECTION_LTR);
+  expect(getYogaNode(text).getComputedLayout().width).toBe(0);
 
   nested.style.display = "";
-  box.yoga.calculateLayout(20, undefined, Yoga.DIRECTION_LTR);
-  expect(text.yoga.getComputedLayout().width).toBe(5);
+  getYogaNode(box).calculateLayout(20, undefined, Yoga.DIRECTION_LTR);
+  expect(getYogaNode(text).getComputedLayout().width).toBe(5);
 });
 
 test("createTextLeaf carries its value", () => {
@@ -154,23 +156,23 @@ test("text measurement reuses one revision and invalidates after a text update",
   const leaf = ops.createText("hello") as ReturnType<typeof createTextLeaf>;
   ops.insert(text, box, null);
   ops.insert(leaf, text, null);
-  box.yoga.calculateLayout(20, undefined, Yoga.DIRECTION_LTR);
-  expect(text.yoga.getComputedLayout().width).toBe(5);
-  expect(text.yoga.getComputedLayout().height).toBe(1);
-  const revisionAfterFirst = text.textRevision;
+  getYogaNode(box).calculateLayout(20, undefined, Yoga.DIRECTION_LTR);
+  expect(getYogaNode(text).getComputedLayout().width).toBe(5);
+  expect(getYogaNode(text).getComputedLayout().height).toBe(1);
+  const revisionAfterFirst = text.contentRevision;
 
   // Remeasuring without a text change keeps the same revision and dimensions.
-  text.yoga.markDirty();
-  box.yoga.calculateLayout(20, undefined, Yoga.DIRECTION_LTR);
-  expect(text.textRevision).toBe(revisionAfterFirst);
-  expect(text.yoga.getComputedLayout().width).toBe(5);
+  getYogaNode(text).markDirty();
+  getYogaNode(box).calculateLayout(20, undefined, Yoga.DIRECTION_LTR);
+  expect(text.contentRevision).toBe(revisionAfterFirst);
+  expect(getYogaNode(text).getComputedLayout().width).toBe(5);
 
   // setText dirties the measure owner so a later layout remeasures the new content.
   ops.setText(leaf, "changed");
-  expect(text.textRevision).toBeGreaterThan(revisionAfterFirst);
-  box.yoga.calculateLayout(20, undefined, Yoga.DIRECTION_LTR);
-  expect(text.yoga.getComputedLayout().width).toBe(7);
-  expect(text.yoga.getComputedLayout().height).toBe(1);
+  expect(text.contentRevision).toBeGreaterThan(revisionAfterFirst);
+  getYogaNode(box).calculateLayout(20, undefined, Yoga.DIRECTION_LTR);
+  expect(getYogaNode(text).getComputedLayout().width).toBe(7);
+  expect(getYogaNode(text).getComputedLayout().height).toBe(1);
 });
 
 test("createTextLeaf coerces a non-string value to a string (Ink setTextNodeValue)", () => {
@@ -194,10 +196,8 @@ test("isContainer rejects text-leaf and accepts box", () => {
 });
 
 test("setElementText rejecting a non-text container leaves existing children intact", () => {
-  // Regression: setElementText used to remove ALL children FIRST, then try to
-  // insert the text-leaf — which throws the text-context guard for a non-text
-  // container, leaving the box half-cleared (children gone, nothing inserted).
-  // The context must be validated BEFORE the destructive remove.
+  // Validate the text context before replacing children so a rejected update
+  // leaves the existing child list intact.
   const ops = buildNodeOps({ onCommit: () => {} });
   const box = ops.createElement("tui-box") as ReturnType<typeof createBox>;
   const child = ops.createElement("tui-text");
@@ -205,7 +205,6 @@ test("setElementText rejecting a non-text container leaves existing children int
   expect(box.children.length).toBe(1);
 
   expect(() => ops.setElementText(box, "hello")).toThrow(/must be rendered inside <Text>/);
-  // Key assertion: the rejected insert must not have removed the box's children.
   expect(box.children.length).toBe(1);
   expect(box.children[0]).toBe(child);
 });

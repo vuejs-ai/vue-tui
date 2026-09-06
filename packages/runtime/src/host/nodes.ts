@@ -1,9 +1,4 @@
-import type { AppContext } from "../context.ts";
-import type { Node as YogaNode } from "yoga-layout";
-
 export const NESTED_STATIC_ERROR = "<Static> cannot be nested inside another <Static>";
-
-export type YogaNodeRef = YogaNode;
 
 export interface BoxProps {
   [k: string]: unknown;
@@ -35,26 +30,98 @@ export interface TuiRoot extends NodeBase {
   type: "root";
   parent: null;
   children: TuiNode[];
-  yoga: YogaNodeRef;
-  appContext: AppContext;
+  /** Opaque Vue-facing application identity, interpreted at the renderer edge. */
+  appContext: object;
 }
 
 export interface TuiBox extends NodeBase {
   type: "tui-box";
   children: TuiNode[];
-  yoga: YogaNodeRef;
   style: TuiHostStyle;
   props: BoxProps;
+}
+
+/** One authored SGR pair with no structured field, and the code that ends it. */
+export interface TuiTextRunSgrPair {
+  readonly code: string;
+  readonly endCode: string;
+}
+
+/** One terminal colour, stored independently from its ANSI encoding. */
+export type TuiTextRunColor =
+  | { readonly kind: "default" }
+  | { readonly kind: "ansi16"; readonly index: number }
+  | { readonly kind: "ansi256"; readonly index: number }
+  | { readonly kind: "rgb"; readonly red: number; readonly green: number; readonly blue: number };
+
+/** The inline visual state one parsed run resolved from the content's SGR. */
+export interface TuiTextRunStyle {
+  readonly foreground: TuiTextRunColor;
+  readonly background: TuiTextRunColor;
+  readonly attrs: number;
+  readonly extraSgr: readonly TuiTextRunSgrPair[];
+}
+
+/** The OSC 8 hyperlink one parsed run carries. */
+export interface TuiTextRunLink {
+  readonly parameters: string;
+  readonly target: string;
+}
+
+/**
+ * One grapheme of a Text node's parsed content, already in the shape paint
+ * writes into a frame: this is field for field a `frame/` cell. `text/`
+ * produces these and `layout/` stores them here, but `host/` imports nothing,
+ * so the shape is declared rather than imported — assigning a cell into a node
+ * and a run back out keeps the two declarations in agreement.
+ */
+export interface TuiTextRun {
+  readonly grapheme: string;
+  /** The columns this grapheme displays, which is zero for a combining mark. */
+  readonly width: number;
+  readonly style: TuiTextRunStyle;
+  readonly link: TuiTextRunLink | undefined;
+}
+
+/** One SGR sequence a chunk's content writes, with the pair it opens. */
+export interface TuiTextSgrToken {
+  readonly code: string;
+  readonly endCode: string;
+  /** The exact sequence written, which one pair may share with others. */
+  readonly source: string;
+}
+
+/** The runs one nested inline host contributes, in content order. */
+export interface TuiTextChunk {
+  readonly runs: number;
+  /**
+   * The SGR this chunk writes, in the order it writes it: entry `k` stands
+   * between run `k - 1` and run `k`, so there is one more entry than runs.
+   */
+  readonly codes: readonly (readonly TuiTextSgrToken[])[];
+  /** The nested inline hosts enclosing this chunk, outermost first. */
+  readonly nesting: readonly TuiVirtualText[];
+}
+
+/** A Text node's content, parsed once per content revision. */
+export interface TuiTextContent {
+  /** The `contentRevision` this was parsed from. */
+  readonly revision: number;
+  /** The sanitized source text, which `layout/` measures and wraps. */
+  readonly text: string;
+  readonly runs: readonly TuiTextRun[];
+  readonly chunks: readonly TuiTextChunk[];
 }
 
 export interface TuiText extends NodeBase {
   type: "tui-text";
   children: TuiInlineNode[];
-  yoga: YogaNodeRef;
   style: TuiHostStyle;
   props: TextProps;
-  /** Increments whenever cached text composition or measurement can become stale. */
-  textRevision: number;
+  /** Increments whenever this node's content, and only its content, changes. */
+  contentRevision: number;
+  /** The parse of that content, refreshed by `layout/` when the revision moves. */
+  content: TuiTextContent | null;
 }
 
 export interface TuiVirtualText extends NodeBase {
@@ -80,7 +147,6 @@ export interface TuiComment extends NodeBase {
 export interface TuiStatic extends NodeBase {
   type: "tui-static";
   children: TuiNode[];
-  yoga: YogaNodeRef;
   style: TuiHostStyle;
   props: BoxProps;
   /**
@@ -101,6 +167,51 @@ export type TuiInlineNode = TuiVirtualText | TuiTextLeaf | TuiComment;
 export type TuiContainer = TuiRoot | TuiBox | TuiStatic | TuiText | TuiVirtualText;
 export type TuiNode = TuiContainer | TuiTextLeaf | TuiComment;
 
+/** One run of source text beneath a text host, and the hosts that style it. */
+export interface TuiTextChunkSource {
+  /** The raw text this chunk contributes, in content order. */
+  text: string;
+  /** The nested inline hosts enclosing it, outermost first. */
+  readonly nesting: readonly TuiVirtualText[];
+}
+
+/**
+ * Collect the source text beneath one text host without interpreting it, split
+ * where the nested inline hosts that style it change. Adjacent leaves under one
+ * host stay in a single chunk, so an escape sequence written across two of them
+ * survives; `text/` interprets each chunk.
+ */
+export function collectTextChunks(node: TuiText | TuiVirtualText): TuiTextChunkSource[] {
+  const chunks: TuiTextChunkSource[] = [];
+  collectTextChunksInto(node, [], chunks);
+  return chunks;
+}
+
+function collectTextChunksInto(
+  node: TuiText | TuiVirtualText,
+  nesting: readonly TuiVirtualText[],
+  chunks: TuiTextChunkSource[],
+): void {
+  if (node.style.display === "none") return;
+  let open: TuiTextChunkSource | undefined;
+  for (const child of node.children) {
+    if (child.type === "text-leaf") {
+      if (child.value === "") continue;
+      if (open) open.text += child.value;
+      else {
+        open = { text: child.value, nesting };
+        chunks.push(open);
+      }
+    } else if (child.type === "tui-virtual-text") {
+      const before = chunks.length;
+      collectTextChunksInto(child, [...nesting, child], chunks);
+      // A nested host that contributed nothing leaves the surrounding text in
+      // one chunk, exactly as one uninterrupted run of leaves would be.
+      if (chunks.length !== before) open = undefined;
+    }
+  }
+}
+
 // Host identity is nominal inside one runtime instance. Structural checks such
 // as `typeof value.type === "string"` can mistake an ordinary Vue component's
 // public prop for a renderer node, while this registry also recognizes direct
@@ -116,16 +227,14 @@ export function isTuiNode(value: unknown): value is TuiNode {
   return typeof value === "object" && value !== null && tuiNodes.has(value);
 }
 
-// Constructors take the bare minimum and leave yoga binding to yoga.ts.
-// The `yoga` field is set to a sentinel and replaced by `attachYoga(node)`.
-const UNATTACHED_YOGA = Symbol("vue-tui:yoga-unattached") as unknown as YogaNodeRef;
+// Constructors take the bare minimum. `layout/` keeps their engine state in a
+// private node-to-engine map, so host identity remains engine-independent.
 
-export function createRoot(appContext: AppContext): TuiRoot {
+export function createRoot(appContext: object): TuiRoot {
   return trackTuiNode({
     type: "root",
     parent: null,
     children: [],
-    yoga: UNATTACHED_YOGA,
     appContext,
   });
 }
@@ -135,10 +244,8 @@ export function createBox(): TuiBox {
     type: "tui-box",
     parent: null,
     children: [],
-    yoga: UNATTACHED_YOGA,
-    // buildNodeOps replaces this placeholder with a Yoga-backed accessor after
-    // attaching the Yoga node. Keeping the field on the bare constructor makes
-    // the host shape truthful even in renderer-internal unit tests.
+    // buildNodeOps replaces this placeholder with Vue's display bridge after
+    // attaching the private layout-engine node.
     style: { display: "" },
     props: {},
   } satisfies TuiBox;
@@ -153,12 +260,14 @@ export function createText(): TuiText {
     type: "tui-text",
     parent: null,
     children: [],
-    yoga: UNATTACHED_YOGA,
     style: { display: "" },
     props: {},
-    textRevision: 0,
+    contentRevision: 0,
+    content: null,
   } satisfies TuiText;
   Object.defineProperty(node, "style", { enumerable: false });
+  // The parse is derived from the children, not declarative tree state.
+  Object.defineProperty(node, "content", { enumerable: false });
   return trackTuiNode(node);
 }
 
@@ -197,7 +306,6 @@ export function createStatic(): TuiStatic {
     type: "tui-static",
     parent: null,
     children: [],
-    yoga: UNATTACHED_YOGA,
     // Static is an output boundary rather than a layout node. Keep Vue's
     // built-in v-show directive operational while deliberately ignoring its
     // display writes: mounted identity, not visual display, controls eligibility.

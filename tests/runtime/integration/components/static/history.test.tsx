@@ -83,13 +83,13 @@ test("changing the Vue key remounts Static and commits a new block", async () =>
   expect(staticTranscript(result.frames)).toBe("first\nsecond\n");
 });
 
-test("an output-free Static stays open until its first later non-empty output", async () => {
+test("a visually blank Static stays open until its first later non-empty output", async () => {
   const ready = shallowRef(false);
   const value = shallowRef("first");
   const unmounted: string[] = [];
   const Deferred = defineComponent(() => {
     onUnmounted(() => unmounted.push("deferred"));
-    return () => <Text>{ready.value ? value.value : ""}</Text>;
+    return () => <Text>{ready.value ? value.value : "\u00a0"}</Text>;
   });
   const App = defineComponent(() => () => (
     <Box flexDirection="column">
@@ -112,6 +112,35 @@ test("an output-free Static stays open until its first later non-empty output", 
   value.value = "ignored";
   await flush(result);
   expect(staticTranscript(result.frames)).toBe("first\n");
+});
+
+// A Static block is committed on what its painted frame holds, not on what the
+// resolved colour level can show. A host that shows no colour still writes the
+// author's styled row -- blank as the terminal renders it -- and settles.
+test("a colourless host commits a Static block whose only content is styling", async () => {
+  const unmounted: string[] = [];
+  const Swatch = defineComponent(() => {
+    onUnmounted(() => unmounted.push("swatch"));
+    return () => <Box width={4} height={1} backgroundColor="green" />;
+  });
+  const App = defineComponent(() => () => (
+    <Box flexDirection="column">
+      <Static>
+        <Swatch />
+      </Static>
+      <Text>[live]</Text>
+    </Box>
+  ));
+
+  const result = await render(App, { color: false });
+  // One history row, blank: the row is written, and the styling the terminal
+  // refused is the terminal's own concern.
+  expect(staticTranscript(result.frames)).toBe("\n");
+  expect(unmounted).toEqual(["swatch"]);
+
+  await flush(result);
+  expect(staticTranscript(result.frames)).toBe("\n");
+  expect(result.lastFrame()).toBe("[live]");
 });
 
 test("accepting a ready sibling leaves an output-free Static open for later content", async () => {
