@@ -3,13 +3,9 @@ import { expect, test } from "vite-plus/test";
 import { render } from "@vue-tui/testing";
 import { Box, renderToString, Text } from "@vue-tui/runtime";
 
-// What a truncated line keeps. Every retained grapheme keeps the style its
-// author wrote — including two attributes that share one end code, such as an
-// inner `bold` under an outer `dimColor`, which a serialized line cannot carry
-// because `22m` closes both. The ellipsis inherits the complete style of the
-// retained grapheme it touches in `truncate` and `truncate-start`, and nothing
-// at all in `truncate-middle`, where the two retained pieces are cut
-// independently and it belongs to neither.
+// Retained graphemes keep their complete style, including simultaneous bold
+// and dim. The ellipsis inherits the touching grapheme's style except in middle
+// truncation, where it belongs to neither retained piece.
 
 const ESC = "\x1b";
 const BEL = "\x07";
@@ -163,11 +159,6 @@ test("each hard-newline line is truncated against the same budget", () => {
   );
 });
 
-// "Complete style" includes a sequence with colon sub-parameters, which Runtime
-// carries through as the exact pair the author wrote. Truncating on cells rather
-// than on a serialized line is what makes that reachable: a scan over an SGR
-// string that accepts only digits and semicolons stops at the colon and leaves
-// the ellipsis bare.
 test("the ellipsis inherits a colon-form sequence like any other style", () => {
   const line = (wrap: "truncate" | "truncate-start" | "truncate-middle") =>
     truncated(4, () => (
@@ -181,18 +172,8 @@ test("the ellipsis inherits a colon-form sequence like any other style", () => {
   expect(line("truncate-middle")).toBe(`${ESC}[4:3mab${ESC}[24m…${ESC}[4:3mf${ESC}[24m`);
 });
 
-// What a grapheme costs the budget. Runtime measures every grapheme with
-// `string-width` and gives it `max(1, width)` slots, so a zero-width grapheme
-// spends no column of the budget while still holding a slot of its own, and a
-// wide one spends two. Every byte below is `0b781b41`'s too, except the
-// variation-selector cases: `string-width` reads `"a\ufe0f"` as the one column
-// its base displays, while the string round trip `0b781b41` truncated with took
-// the width from `@alcalzone/ansi-tokenize`, which calls any cluster holding
-// U+FE0F full-width — so `0b781b41` renders `"a\ufe0f…"` for the first case.
-//
-// The invisible characters are written as escapes: a literal one in a source
-// string cannot be read, and every expectation here turns on exactly which one
-// is present.
+// The budget counts displayed columns; slicing assigns max(1, width) slots to
+// each grapheme. Escapes make the invisible characters in each case readable.
 
 const VS16 = "\ufe0f";
 const ZWSP = "\u200b";

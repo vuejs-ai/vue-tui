@@ -40,8 +40,6 @@ test("unknown color name falls back to no color", () => {
   expect(parseColorValue("not-a-real-color")).toBeUndefined();
 });
 
-// The string pipeline wrote this pair directly rather than through Chalk, so
-// the span never repaired itself around a close or a hard newline.
 test("default colors write their channel's end sequence at both edges", () => {
   expect(colorContribution("default", false)).toEqual({
     open: pair("\x1b[39m", "\x1b[39m"),

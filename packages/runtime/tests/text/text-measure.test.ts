@@ -278,9 +278,7 @@ test("styleMeasuredTextLines restores styles for a layout-selected truncation", 
 
   const lines = styleMeasuredTextLines(parsedCells(styled), layoutPlan, "truncate-middle", 5);
   expect(lines.map(graphemesOf)).toEqual(layoutPlan);
-  // Every retained grapheme keeps the style its source run carried. The
-  // ellipsis belongs to no source run, and takes whatever the truncation left
-  // active where it was inserted.
+  // Retained graphemes keep their source styles; the middle ellipsis is unstyled.
   expect(lines[0]!.map((cell) => `${cell.grapheme}:${cell.style.foreground.kind}`)).toEqual([
     "a:ansi16",
     "b:ansi16",

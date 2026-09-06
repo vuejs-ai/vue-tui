@@ -121,7 +121,7 @@ export function createKittyKeyboardController(
     return terminal.isModeActive("kitty-keyboard");
   }
 
-  /** Whether the device already matches this controller's protocol demand. */
+  /** Whether the protocol demand is satisfied by applied or queued mode writes. */
   function isProtocolSettled(): boolean {
     return terminal.isModeSettled("kitty-keyboard");
   }

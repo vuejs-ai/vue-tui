@@ -729,12 +729,8 @@ function ellipsisCell(style: Style): Cell {
 /**
  * Truncate one line of cells to `width` columns, marking the cut with `…`.
  *
- * Column arithmetic rather than a string round trip: a line serialized back to
- * ANSI cannot carry bold and dim at once, because they share the `22m` close, so
- * whichever was written last is the only one that survives and a bold run inside
- * a dim Text came back dim. Where the cut falls is {@link truncationCut}'s
- * answer, the one {@link wrapText} plans with, so layout and paint hold one
- * arithmetic between them and no plan has to be checked against a second one.
+ * Retained cells keep their complete style, including simultaneous bold and
+ * dim. Layout and paint share the windows supplied by {@link truncationCut}.
  *
  * The rules this implements:
  *
@@ -753,9 +749,7 @@ function ellipsisCell(style: Style): Cell {
  *   columns the line displays rather than at the slots it occupies, so each
  *   zero-width grapheme in the line moves that window one slot to the left:
  *   `truncate-start` over `"ab\u200bcdef"` in four columns keeps `"…cde"`, not
- *   `"…def"`. That is the arithmetic `0b781b41` performed through `cli-truncate`
- *   and `slice-ansi`, which walked this same slot model, and the truncation
- *   suite pins it;
+ *   `"…def"`;
  * - the ellipsis inherits the complete style of the retained grapheme it
  *   touches — the last one for `end`, the first one for `start` — including a
  *   colon-form sequence Runtime carries as an exact pair. In `middle` it

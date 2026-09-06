@@ -213,9 +213,6 @@ function chunkItems(
 function joinSpans(spans: readonly ContentSpan[]): ContentSpan[] {
   const joined: ContentSpan[] = [];
   for (const span of spans) {
-    // A chunk that sanitized away leaves nothing for a level to wrap, so it
-    // never separates the spans on either side of it.
-    if (span.items.length === 0) continue;
     const previous = joined.at(-1);
     if (previous?.resolved !== span.resolved) {
       joined.push({ ...span, items: [...span.items] });
