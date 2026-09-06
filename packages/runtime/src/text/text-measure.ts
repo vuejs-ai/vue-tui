@@ -257,7 +257,7 @@ function normalizeOscForStyledCharacters(value: string): string {
 
 /** One styled string's tokens, with the pairing this module has to repair. */
 export function styledTokensFromAnsi(text: string): ContentToken[] {
-  const tokens = tokenizeAnsi(text).flatMap<ContentToken>((token) => {
+  return tokenizeAnsi(text).flatMap<ContentToken>((token) => {
     if (token.type === "text") return withSource(tokenizeStyledAnsi(token.value), token.value);
     if (token.type === "csi") {
       if (token.finalCharacter !== "m" || token.intermediateString !== "") return [];
@@ -271,13 +271,6 @@ export function styledTokensFromAnsi(text: string): ContentToken[] {
     }
     return [];
   });
-  // The tokenizer pairs `21m` with the generic reset; `24m` ends both underline
-  // forms, so double underline must leave with it rather than outlive it.
-  return tokens.map((token) =>
-    token.type === "ansi" && token.code === "\u001b[21m"
-      ? { ...token, endCode: "\u001b[24m" }
-      : token,
-  );
 }
 
 function isPlainAsciiCharacter(value: string): boolean {
