@@ -159,7 +159,7 @@ export function cellVisualFromAnsiCodes(codes: readonly SgrPair[]): {
 }
 
 /** One parsed grapheme as the cell it will be painted as. */
-export function cellFromStyledChar(character: StyledChar): Cell {
+function cellFromStyledChar(character: StyledChar): Cell {
   const { style, link } = cellVisualFromAnsiCodes(character.styles);
   return { grapheme: character.value, width: stringWidth(character.value), style, link };
 }

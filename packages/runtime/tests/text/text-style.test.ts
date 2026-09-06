@@ -1,8 +1,7 @@
 import { expect, test } from "vite-plus/test";
 import {
-  colorContribution,
+  explicitTextStyleChannels,
   parseColorValue,
-  TextStyleChannel,
   textStyleContributions,
 } from "../../src/text/text-style.ts";
 
@@ -41,34 +40,44 @@ test("unknown color name falls back to no color", () => {
 });
 
 test("default colors write their channel's end sequence at both edges", () => {
-  expect(colorContribution("default", false)).toEqual({
-    open: pair("\x1b[39m", "\x1b[39m"),
-    close: pair("\x1b[39m", "\x1b[39m"),
-    reopens: false,
-  });
-  expect(colorContribution("default", true)).toEqual({
-    open: pair("\x1b[49m", "\x1b[49m"),
-    close: pair("\x1b[49m", "\x1b[49m"),
-    reopens: false,
-  });
+  expect(textStyleContributions({ color: "default" }, 0)).toEqual([
+    {
+      open: pair("\x1b[39m", "\x1b[39m"),
+      close: pair("\x1b[39m", "\x1b[39m"),
+      reopens: false,
+    },
+  ]);
+  expect(textStyleContributions({ backgroundColor: "default" }, 0)).toEqual([
+    {
+      open: pair("\x1b[49m", "\x1b[49m"),
+      close: pair("\x1b[49m", "\x1b[49m"),
+      reopens: false,
+    },
+  ]);
 });
 
 test("a color contribution opens the sequence its structured value spells", () => {
-  expect(colorContribution("#ff8800", false)).toEqual({
-    open: pair("\x1b[38;2;255;136;0m", "\x1b[39m"),
-    close: pair("\x1b[39m", "\x1b[39m"),
-    reopens: true,
-  });
-  expect(colorContribution("ansi256(194)", true)).toEqual({
-    open: pair("\x1b[48;5;194m", "\x1b[49m"),
-    close: pair("\x1b[49m", "\x1b[49m"),
-    reopens: true,
-  });
-  expect(colorContribution("blueBright", false)).toEqual({
-    open: pair("\x1b[94m", "\x1b[39m"),
-    close: pair("\x1b[39m", "\x1b[39m"),
-    reopens: true,
-  });
+  expect(textStyleContributions({ color: "#ff8800" }, 0)).toEqual([
+    {
+      open: pair("\x1b[38;2;255;136;0m", "\x1b[39m"),
+      close: pair("\x1b[39m", "\x1b[39m"),
+      reopens: true,
+    },
+  ]);
+  expect(textStyleContributions({ backgroundColor: "ansi256(194)" }, 0)).toEqual([
+    {
+      open: pair("\x1b[48;5;194m", "\x1b[49m"),
+      close: pair("\x1b[49m", "\x1b[49m"),
+      reopens: true,
+    },
+  ]);
+  expect(textStyleContributions({ color: "blueBright" }, 0)).toEqual([
+    {
+      open: pair("\x1b[94m", "\x1b[39m"),
+      close: pair("\x1b[39m", "\x1b[39m"),
+      reopens: true,
+    },
+  ]);
 });
 
 test("ansi256 colors resolve the indexed form", () => {
@@ -83,12 +92,12 @@ test("rgb colors resolve the truecolor form", () => {
 // Functional color parsing accepts ansi256(N) only when N is numeric.
 test("unparseable ansi256(foo) resolves nothing", () => {
   expect(parseColorValue("ansi256(foo)")).toBeUndefined();
-  expect(colorContribution("ansi256(foo)", true)).toBeUndefined();
+  expect(textStyleContributions({ backgroundColor: "ansi256(foo)" }, 0)).toEqual([]);
 });
 
 test("ansi(194) is not a supported form", () => {
   expect(parseColorValue("ansi(194)")).toBeUndefined();
-  expect(colorContribution("ansi(194)", false)).toBeUndefined();
+  expect(textStyleContributions({ color: "ansi(194)" }, 0)).toEqual([]);
 });
 
 test("multiple modifiers each contribute their own attribute, outermost first", () => {
@@ -125,7 +134,7 @@ test("a blocked channel contributes nothing, whatever the props set it to", () =
   expect(
     textStyleContributions(
       { color: "red", bold: true },
-      TextStyleChannel.foreground | TextStyleChannel.bold,
+      explicitTextStyleChannels({ color: "red", bold: true }),
     ),
   ).toEqual([]);
 });

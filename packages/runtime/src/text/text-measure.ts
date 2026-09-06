@@ -141,7 +141,7 @@ export type ContentToken =
   | { readonly type: "control"; readonly code: string };
 
 /** The SGR member of a content token stream. */
-export type ContentSgr = Extract<ContentToken, { readonly type: "ansi" }>;
+type ContentSgr = Extract<ContentToken, { readonly type: "ansi" }>;
 
 function withSource(tokens: readonly Token[], source: string): ContentToken[] {
   return tokens.map((token) => (token.type === "ansi" ? { ...token, source } : token));
@@ -749,7 +749,7 @@ function ellipsisCell(style: Style): Cell {
  *   inherits nothing: the two retained pieces are cut independently and it
  *   belongs to neither, so it is written bare.
  */
-export function truncateCellLine(
+function truncateCellLine(
   cells: readonly Cell[],
   width: number,
   position: "start" | "middle" | "end",

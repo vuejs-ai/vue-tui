@@ -135,7 +135,7 @@ export function parseColorValue(color: unknown): Color | undefined {
  * channel again: the mask represents terminal-default colors and all three
  * modifier states without sentinel characters in user text.
  */
-export const TextStyleChannel = {
+const TextStyleChannel = {
   foreground: 1 << 0,
   background: 1 << 1,
   dimColor: 1 << 2,
@@ -189,10 +189,7 @@ export function textStyleContributions(
 }
 
 /** One colour channel's contribution, with `default` selecting the terminal's own. */
-export function colorContribution(
-  color: unknown,
-  background: boolean,
-): TextStyleContribution | undefined {
+function colorContribution(color: unknown, background: boolean): TextStyleContribution | undefined {
   if (!color) return undefined;
   const end = background ? backgroundEndCode : foregroundEndCode;
   const close = sgrToken(end, end);
