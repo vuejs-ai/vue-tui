@@ -486,7 +486,9 @@ export function createStdinController(
       // for anything; resume() takes one lease back for each of them.
       if (!suspended) {
         rawModeLease = terminal.acquire("raw");
-        rawModeLeases.push(rawModeLease);
+        // A borrowed stream's callback can suspend or dispose this session.
+        if (suspended || disposed) rawModeLease.release({ sync: true });
+        else rawModeLeases.push(rawModeLease);
       }
       reconcileSharedSubscription();
       reconcileKittyDemand();

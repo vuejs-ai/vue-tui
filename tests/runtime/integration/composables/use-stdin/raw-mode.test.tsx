@@ -378,6 +378,58 @@ test("suspension restores and resume reacquires a surviving public raw hold", as
   stdout.destroy();
 });
 
+test("a public raw hold survives synchronous suspension during acquisition", async () => {
+  const stdout = makeFakeWritable();
+  const { stream: stdin, rawModeCalls, refBalance } = makeTrackedStdin();
+  const suspension = createManualSuspensionHost();
+  const originalSetRawMode = stdin.setRawMode.bind(stdin);
+  let suspendOnEnable = false;
+  let pendingSuspension: Promise<void> | undefined;
+  stdin.setRawMode = (enabled) => {
+    const result = originalSetRawMode(enabled);
+    if (enabled && suspendOnEnable) {
+      suspendOnEnable = false;
+      pendingSuspension = suspension.suspend();
+    }
+    return result;
+  };
+  let raw: UseStdinReturn | undefined;
+  const App = defineComponent(() => {
+    raw = useStdin();
+    return () => <Text>raw suspension</Text>;
+  });
+  const app = createApp(App);
+  try {
+    app.mount(
+      disabledKittyOptions({
+        stdout,
+        stdin,
+        patchConsole: false,
+        [INTERNAL_SUSPENSION_HOST]: suspension,
+      }),
+    );
+    suspendOnEnable = true;
+    raw!.setRawMode(true);
+    await pendingSuspension;
+    expect(stdin.isRaw).toBe(false);
+    expect(refBalance()).toBe(0);
+
+    expect(rawModeCalls).toEqual([true, false]);
+    await suspension.resume();
+    expect(stdin.isRaw).toBe(true);
+    expect(rawModeCalls).toEqual([true, false, true]);
+    expect(refBalance()).toBe(1);
+
+    app.unmount();
+    expect(stdin.isRaw).toBe(false);
+    expect(refBalance()).toBe(0);
+  } finally {
+    app.unmount();
+    stdin.destroy();
+    stdout.destroy();
+  }
+});
+
 test("string rendering supplies one isolated inert Readable and disables retained setters", () => {
   let raw: UseStdinReturn | undefined;
   const App = defineComponent(() => {
