@@ -483,25 +483,11 @@ function truncatePosition(mode: TruncateMode): TruncatePosition {
 }
 
 /**
- * The visible text one truncated line holds, which is the plan layout records.
- *
- * The plan needs graphemes and the columns they display, and nothing else — no
- * cell, no `Style`, no ANSI. It reads them off the line's visible text through
- * {@link truncationCut}, the same arithmetic paint cuts the cells with, so the
- * two agree by construction rather than by comparison.
- *
- * What the cut asks for is what gets measured. `truncate` keeps a window that
- * ends inside the budget, so {@link sliceMeasured} stops the segmenter there and
- * planning a line costs the budget rather than the line. `truncate-start` and
- * `truncate-middle` anchor their window on the line's column total, which every
- * grapheme contributes to, so their walk does reach the end — but it builds one
- * `{ grapheme, width }` on the way instead of a styled cell.
+ * Plan truncated visible text with the same {@link truncationCut} windows paint
+ * applies to styled cells. The full line width decides whether a cut is needed.
  */
 function truncatedLineText(line: string, width: number, position: TruncatePosition): string {
   const plain = visibleText(line);
-  // `string-width` sums the same per-grapheme widths the cells carry, so this is
-  // `displayedColumns` for a line nobody has parsed into cells — and it answers
-  // from the library's printable-ASCII fast path instead of a grapheme walk.
   const columns = stringWidth(plain);
   if (columns <= width) return plain;
   if (width < 1) return "";
@@ -656,9 +642,7 @@ interface SlotWindow {
  * divides up counts it as nothing. The width-zero wrap above walks the same
  * slot model.
  *
- * Nothing at or past `end` can qualify, so the walk stops there. Over a source
- * that measures graphemes as it is pulled, that is what keeps a plan from
- * measuring the part of the line no window reaches.
+ * A lazy source stops once this window cannot retain another grapheme.
  */
 function sliceMeasured<T extends MeasuredGrapheme>(
   graphemes: Iterable<T>,
