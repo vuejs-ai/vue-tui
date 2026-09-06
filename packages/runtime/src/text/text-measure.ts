@@ -448,9 +448,9 @@ export function wrapText(text: string, width: number, mode: WrapMode = "wrap"): 
     // line, one grapheme per line) — but it has a width<=0 bug: it cannot recognise the
     // SGR codes in a STYLED string and byte-splits them, so wrapAnsi("\x1b[41mA\x1b[49m", 0)
     // = "\x1b\n[\n4\n1\nm\nA\n…", scattering the escape bytes across rows and corrupting
-    // the frame. Because styles are composed before wrapping, reproduce
-    // wrap-ansi's plain-text layout ANSI-awarely. slice-ansi is grapheme-aware
-    // and re-emits the active SGR span around each slice.
+    // the frame. At width 0, derive line breaks from visible text and preserve
+    // authored ANSI in each slice. slice-ansi is grapheme-aware and re-emits the
+    // active SGR span around each slice.
     if (width <= 0) return wrapZeroWidthAnsi(text, mode);
 
     if (mode === "wrap") {

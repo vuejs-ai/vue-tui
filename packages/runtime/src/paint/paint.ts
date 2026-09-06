@@ -488,6 +488,14 @@ function fillBackground(
   for (let i = 0; i < height; i++) grid.write(x, y + i, [row]);
 }
 
+/** Padding and text can share a grapheme, whose leading cell owns its style. */
+function joinPaddingBoundary(cells: Cell[], index: number): void {
+  const left = cells[index]!;
+  const right = cells[index + 1]!;
+  const joined = cellsFromPlainText(left.grapheme + right.grapheme, left.style);
+  if (joined.length === 1) cells.splice(index, 2, { ...joined[0]!, link: left.link });
+}
+
 function alignTextLine(
   cells: CellRow,
   width: number,
@@ -503,12 +511,21 @@ function alignTextLine(
     textAlign === "right" ? remaining : textAlign === "center" ? Math.floor(remaining / 2) : 0;
   const trailing = remaining - leading;
 
-  if (!inheritedBg) {
-    return leading === 0 ? cells : [...spaceCells(leading, defaultStyle), ...cells];
-  }
+  if (!inheritedBg && leading === 0) return cells;
 
-  const padStyle = backgroundStyle(inheritedBg);
-  return [...spaceCells(leading, padStyle), ...cells, ...spaceCells(trailing, padStyle)];
+  const padStyle = inheritedBg ? backgroundStyle(inheritedBg) : defaultStyle;
+  const trailingPadding = inheritedBg ? trailing : 0;
+  const aligned = [
+    ...spaceCells(leading, padStyle),
+    ...cells,
+    ...spaceCells(trailingPadding, padStyle),
+  ];
+  if (cells.length > 0) {
+    // Join the trailing boundary first so the leading boundary's index stays fixed.
+    if (trailingPadding > 0) joinPaddingBoundary(aligned, leading + cells.length - 1);
+    if (leading > 0) joinPaddingBoundary(aligned, leading - 1);
+  }
+  return aligned;
 }
 
 /** Style the node's runs, split them over the measured lines, and align each. */
