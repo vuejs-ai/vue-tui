@@ -1,4 +1,5 @@
 import type { Frame } from "../frame/frame.ts";
+import type { ColorCapability } from "../frame/color-profile.ts";
 import type { TerminalBackend, TerminalOutput } from "../terminal/backend.ts";
 import type { FrameWriter } from "./frame-writer.ts";
 import type { ResolvedLiveSurface } from "./surface-types.ts";
@@ -22,9 +23,7 @@ export interface SurfacePresentation {
 
 /** Runtime operations a surface needs while it writes through the terminal boundary. */
 export interface SurfaceRuntime {
-  readonly terminal: TerminalBackend;
   readonly stdout: TerminalOutput;
-  readonly isResumeInProgress: boolean;
   readonly isStdoutTty: boolean;
   readonly isStdoutWritable: boolean;
   readonly viewportColumns: number;
@@ -36,13 +35,9 @@ export interface SurfaceRuntime {
     sync: boolean,
     onHandoff?: () => void,
   ): boolean;
-  /** Track both a physical write attempt and its later confirmed handoff. */
-  writeTerminal(data: string, onAccepted?: () => void, onAttempt?: () => void): boolean;
   runCoordinatedWrite(body: () => void, finalize: () => void): void;
   runLifecycleTransaction<T>(operation: () => T): T;
   runSynchronizedOutput(body: () => void): void;
-  requestTerminalReconcile(): void;
-  reportTerminalAcquired(): void;
   reportTerminalReleased(): void;
   setSurfaceAvailable(available: boolean): void;
 }
@@ -84,7 +79,6 @@ export interface Surface {
   resume(runtime: SurfaceRuntime): boolean;
   dispose(runtime: SurfaceRuntime, options: SurfaceDisposeOptions): void;
   resize(runtime: SurfaceRuntime, resize: SurfaceResize): void;
-  abandonPendingOutput(options?: { readonly physicalStateUncertain?: boolean }): void;
   /** Restore logical output facts after an unhanded transaction. */
   createRollback(): () => void;
 }
@@ -100,6 +94,13 @@ export abstract class SurfaceBase implements Surface {
 
   private frame: Frame | undefined;
   private frameNeedsTerminalLineAdvance = false;
+
+  constructor(
+    /** The one color capability this surface encodes every frame to. */
+    protected readonly color: ColorCapability,
+    /** The device whose modes this surface leases. */
+    protected readonly terminal: TerminalBackend,
+  ) {}
 
   protected get previousFrame(): Frame | undefined {
     return this.frame;
@@ -165,7 +166,7 @@ export abstract class SurfaceBase implements Surface {
   abstract layoutHeight(viewportRows: number | null): SurfaceLayoutHeight;
 
   encodeHistory(frames: readonly Frame[]): string {
-    return encodeFrameHistory(frames);
+    return encodeFrameHistory(frames, this.color);
   }
 
   abstract present(presentation: SurfacePresentation, runtime: SurfaceRuntime): boolean;
@@ -174,8 +175,4 @@ export abstract class SurfaceBase implements Surface {
   abstract resume(runtime: SurfaceRuntime): boolean;
   abstract dispose(runtime: SurfaceRuntime, options: SurfaceDisposeOptions): void;
   abstract resize(runtime: SurfaceRuntime, resize: SurfaceResize): void;
-
-  abandonPendingOutput(_options?: { readonly physicalStateUncertain?: boolean }): void {
-    // Most surfaces have no asynchronous physical acquisition to abandon.
-  }
 }

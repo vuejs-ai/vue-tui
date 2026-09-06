@@ -1,7 +1,6 @@
 import { writeSync as fsWriteSync } from "node:fs";
 import process from "node:process";
 import type { Readable, Writable } from "node:stream";
-import { MAX_LAYOUT_VALUE } from "../../layout/numeric-limits.ts";
 import { createNodeProcessLifecycle, type NodeProcessLifecycle } from "./lifecycle.ts";
 import type { SuspensionHost } from "./process-suspension.ts";
 import type {
@@ -10,12 +9,14 @@ import type {
   TerminalInputEvent,
   TerminalLease,
   TerminalMode,
+  TerminalModeReleaseOptions,
+  TerminalModeWrite,
   TerminalOutput,
   TerminalOutputCapabilities,
   TerminalOutputEvent,
   TerminalSize,
 } from "../backend.ts";
-import { createModeLedger } from "../backend.ts";
+import { createTerminalModeLeases, type TerminalModeLeases } from "../mode-leases.ts";
 import {
   probeControllingTerminalSize,
   type TerminalSizeProbe,
@@ -100,11 +101,21 @@ function canRead(stream: NodeReadable): boolean {
   return !stream.destroyed && !stream.readableEnded && stream.readable !== false;
 }
 
+/**
+ * The platform window-size contract carries rows and columns as unsigned 16-bit
+ * fields (`struct winsize`), so a reported dimension beyond this did not come
+ * from a terminal window. `terminal/` imports nothing, so this backend states
+ * its own limit; `layout/` keeps `MAX_LAYOUT_VALUE` for the layout envelope,
+ * and the two numbers coincide only because that envelope is chosen to hold a
+ * whole window.
+ */
+const MAX_WINDOW_DIMENSION = 65_535;
+
 function positiveCellCount(value: unknown): number | null {
   return typeof value === "number" &&
     Number.isSafeInteger(value) &&
     value > 0 &&
-    value <= MAX_LAYOUT_VALUE
+    value <= MAX_WINDOW_DIMENSION
     ? value
     : null;
 }
@@ -152,7 +163,7 @@ function outputCapabilitiesFor(
 }
 
 /** Read the process default output only for renderToString({ color: true }). */
-export function getDefaultNodeTerminalStyleFacts(): {
+export function getDefaultNodeColorFacts(): {
   readonly stdout: TerminalOutputCapabilities;
   readonly environment: Readonly<Record<string, string | undefined>>;
 } {
@@ -177,7 +188,7 @@ export class NodeTerminalBackend implements TerminalBackend {
   readonly #stdout: NodeWritable;
   readonly #stderr: NodeWritable;
   readonly #dataListeners = new Set<(data: string | Uint8Array) => void>();
-  private readonly modes = createModeLedger();
+  private readonly modes: TerminalModeLeases = createTerminalModeLeases(this);
   readonly #colorDepths = new Map<TerminalOutput, number | undefined>();
   #inputFlowOwned = false;
   #reconcilingInputFlow = false;
@@ -313,8 +324,40 @@ export class NodeTerminalBackend implements TerminalBackend {
     return this.modes.acquire(mode);
   }
 
-  isModeHeld(mode: TerminalMode): boolean {
-    return this.modes.isModeHeld(mode);
+  isModeActive(mode: TerminalMode): boolean {
+    return this.modes.isActive(mode);
+  }
+
+  isModeSettled(mode: TerminalMode): boolean {
+    return this.modes.isSettled(mode);
+  }
+
+  attachModeWrites(write: TerminalModeWrite | null): void {
+    this.modes.attachWrites(write);
+  }
+
+  abandonModeOutput(options?: { readonly physicalStateUncertain?: boolean }): void {
+    this.modes.abandonPendingOutput(options);
+  }
+
+  reconcileModes(): void {
+    this.modes.reconcile();
+  }
+
+  restoreMode(mode: TerminalMode, options?: TerminalModeReleaseOptions): void {
+    this.modes.restore(mode, options);
+  }
+
+  restoreModes(options?: TerminalModeReleaseOptions): void {
+    this.modes.restoreAll(options);
+  }
+
+  onModeChange(listener: ((mode: TerminalMode) => void) | null): void {
+    this.modes.onChange(listener);
+  }
+
+  onModeFailure(listener: ((error: unknown) => void) | null): void {
+    this.modes.onFailure(listener);
   }
 
   write(

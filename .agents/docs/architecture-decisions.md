@@ -1,6 +1,6 @@
 # Architecture decisions
 
-Judgments Yunfei actually expressed about the internal structure of `@vue-tui/runtime` — selections, acceptances, and rejections. A finished implementation, a passed review, resemblance to a peer, or silence is not acceptance. Never invent a rationale; where no reason was given, the entry says so. Entries record the act of judgment, not the structure itself; [Runtime architecture](./architecture.md) records the structure, with the remaining work in [TODOs — architecture](./todos-architecture.md). Edit entries in place; git keeps history.
+Judgments Yunfei actually expressed about the internal structure of `@vue-tui/runtime`, and about how that structure is tested — selections, acceptances, and rejections. A finished implementation, a passed review, resemblance to a peer, or silence is not acceptance. Never invent a rationale; where no reason was given, the entry says so. Entries record the act of judgment, not the structure itself; [Runtime architecture](./architecture.md) records the structure. Edit entries in place; git keeps history.
 
 Judgments about the **public** surface belong in the [Runtime API decision ledger](./runtime-api-decisions.md) and are not duplicated here. Boundaries between packages are settled in [Package architecture](./package-architecture.md).
 
@@ -49,6 +49,43 @@ Entries without a stamp are drafts of judgments Yunfei expressed. A stamp alone 
 - **Limits:** This settles who receives an event, not how far the delivery model goes: bubbling, pointer capture, hover, and click chains are each undecided. It does not change `useInput`, whose accepted contract is broadcast and whose Limits already require that a future facility "must be a separate opt-in primitive rather than changing this default delivery contract". Scope remains Fullscreen only, per the first entry above. The implementation must respect clipping, but no hit-attribution representation is selected until the work qualifies under the product-work rule.
 - **Why:** Yunfei chose targeted delivery after both models and their consequences were laid out, including that an application cannot perform the resolution itself — `useBoxMetrics` reports a parent-relative rectangle by accepted contract, explicitly excluding terminal coordinates and pointer facts, so an application receiving a coordinate has no way to map it to one of its own components. He gave no further reason.
 - **Source:** Yunfei, 2026-08-30, explicit instruction to take targeted delivery, given after the two models were compared; no durable session URL is available, so this entry is the durable record.
+
+### Runtime behavior is proved by end-to-end and integration tests
+
+[VOUCHED @hyfdev 2026-09-04]
+
+- **Ruling:** For `@vue-tui/runtime`, end-to-end and integration tests are the primary evidence for behavior and unit tests are supplementary. Internal code is never changed, and no code is added to it, for the sake of a unit test.
+- **Limits:** The ruling does not enumerate forms; what it forbids is a change a unit test needs and production does not. This does not forbid unit tests of pure functions that already exist as units, and it does not remove tests already in the repository. It does not decide suite placement, file naming, or harness details, which the repository's testing rules in `AGENTS.md` already govern. It covers Runtime code; how the other packages are tested is not decided here.
+- **Why:** Yunfei gave this ruling as a direct instruction and stated no reason for it, so none is recorded.
+- **Source:** Yunfei, 2026-09-04, explicit instruction to adopt this principle and stamp it; no durable session URL is available, so this entry is the durable record.
+
+### Content is parsed once per revision and the runs live on the node
+
+- **Ruling:** A `Text` node's content is parsed into styled runs once per content revision, and the runs are kept on the node as plain data. The layout pass wraps them for its width and records the wrapped lines in `ComputedLayout`; paint reads the node's runs and those wrapped lines and keeps no cache of its own.
+- **Limits:** This does not decide whether the parse runs when the content is set or on the first measurement after a change. It does not change the May-import tables, and it does not decide the memory layout of the runs.
+- **Why:** Yunfei adopted the recommendation as it was given: the parse does not depend on width, so it need not repeat per measurement, and one set of runs on the node replaces the two caches. He gave no further reason.
+- **Source:** Yunfei, 2026-09-05, adopted the recommendation by reference after the alternative was laid out; no durable session URL is available, so this entry is the durable record.
+
+### Colour degrades in the encoder
+
+- **Ruling:** The encoder in `surface/` degrades a cell's colour to the resolved colour level. The level is resolved once per host from the `color` option and the environment and handed to the encoder by the session and by `renderToString`; the painter and `Style` carry structured colour only and do not know the level.
+- **Limits:** This does not decide the mapping from truecolor to 256 or 16 colours, and it does not change the public `color` option. Content ANSI colours and prop colours degrade through the same encoder.
+- **Why:** Yunfei adopted the recommendation as it was given: the target painter produces no strings, so degradation needs one home both hosts reach, and the encoder is that place. He gave no further reason.
+- **Source:** Yunfei, 2026-09-05, adopted the recommendation by reference after the alternative was laid out; no durable session URL is available, so this entry is the durable record.
+
+### A reset inside content is undefined behaviour
+
+- **Ruling:** Runtime parses a `Text`'s content into cells with the component's props as the base style and the content's own SGR layered on it; what an authored `\x1b[0m` inside content does beyond clearing the content's own styling is not a contract, is not pinned by a test, and Runtime carries no mechanism to reproduce any particular byte outcome for it.
+- **Limits:** This does not change what content SGR with proper end codes produces, nor OSC 8, nor `extraSgr`.
+- **Why:** Yunfei's meaning: emit what the author wrote, the behaviour is whatever falls out of that, and the behaviour itself is undefined.
+- **Source:** Yunfei, 2026-09-05, ruling given when the two readings were laid out; no durable session URL is available, so this entry is the durable record.
+
+### Static writes what the author wrote, whatever the terminal shows
+
+- **Ruling:** A `Static` block is committed when its painted frame has content, independent of the resolved colour level; when the terminal cannot show the styling, the row is written anyway.
+- **Limits:** This decides Static's commit test only, not what counts as content in a frame generally.
+- **Why:** Yunfei's meaning: write out what the author wrote; a terminal that shows nothing because it disabled colour is the terminal's concern.
+- **Source:** Yunfei, 2026-09-05, ruling given when the blank-row case was laid out; no durable session URL is available, so this entry is the durable record.
 
 ## Open
 

@@ -114,6 +114,35 @@ test("a visually blank Static stays open until its first later non-empty output"
   expect(staticTranscript(result.frames)).toBe("first\n");
 });
 
+// A Static block is committed on what its painted frame holds, not on what the
+// resolved colour level can show. A host that shows no colour still writes the
+// author's styled row -- blank as the terminal renders it -- and settles.
+test("a colourless host commits a Static block whose only content is styling", async () => {
+  const unmounted: string[] = [];
+  const Swatch = defineComponent(() => {
+    onUnmounted(() => unmounted.push("swatch"));
+    return () => <Box width={4} height={1} backgroundColor="green" />;
+  });
+  const App = defineComponent(() => () => (
+    <Box flexDirection="column">
+      <Static>
+        <Swatch />
+      </Static>
+      <Text>[live]</Text>
+    </Box>
+  ));
+
+  const result = await render(App, { color: false });
+  // One history row, blank: the row is written, and the styling the terminal
+  // refused is the terminal's own concern.
+  expect(staticTranscript(result.frames)).toBe("\n");
+  expect(unmounted).toEqual(["swatch"]);
+
+  await flush(result);
+  expect(staticTranscript(result.frames)).toBe("\n");
+  expect(result.lastFrame()).toBe("[live]");
+});
+
 test("accepting a ready sibling leaves an output-free Static open for later content", async () => {
   const ready = shallowRef(false);
   const completed = shallowRef(["IMMEDIATE"]);

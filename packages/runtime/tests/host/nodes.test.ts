@@ -159,17 +159,17 @@ test("text measurement reuses one revision and invalidates after a text update",
   getYogaNode(box).calculateLayout(20, undefined, Yoga.DIRECTION_LTR);
   expect(getYogaNode(text).getComputedLayout().width).toBe(5);
   expect(getYogaNode(text).getComputedLayout().height).toBe(1);
-  const revisionAfterFirst = text.textRevision;
+  const revisionAfterFirst = text.contentRevision;
 
   // Remeasuring without a text change keeps the same revision and dimensions.
   getYogaNode(text).markDirty();
   getYogaNode(box).calculateLayout(20, undefined, Yoga.DIRECTION_LTR);
-  expect(text.textRevision).toBe(revisionAfterFirst);
+  expect(text.contentRevision).toBe(revisionAfterFirst);
   expect(getYogaNode(text).getComputedLayout().width).toBe(5);
 
   // setText dirties the measure owner so a later layout remeasures the new content.
   ops.setText(leaf, "changed");
-  expect(text.textRevision).toBeGreaterThan(revisionAfterFirst);
+  expect(text.contentRevision).toBeGreaterThan(revisionAfterFirst);
   getYogaNode(box).calculateLayout(20, undefined, Yoga.DIRECTION_LTR);
   expect(getYogaNode(text).getComputedLayout().width).toBe(7);
   expect(getYogaNode(text).getComputedLayout().height).toBe(1);

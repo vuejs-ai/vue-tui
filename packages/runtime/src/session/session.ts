@@ -1,6 +1,11 @@
 import { type Component, type ComponentPublicInstance, type App as VueApp, nextTick } from "vue";
 import { createRenderer } from "vue";
-import type { TerminalBackend, TerminalLease, TerminalOutput } from "../terminal/backend.ts";
+import type {
+  TerminalBackend,
+  TerminalLease,
+  TerminalMode,
+  TerminalOutput,
+} from "../terminal/backend.ts";
 import { createNodeTerminalBackend } from "../terminal/node/backend.ts";
 import {
   INTERNAL_KITTY_KEYBOARD,
@@ -13,11 +18,7 @@ import {
   type StdinController,
 } from "./stdin-controller.ts";
 import { createRoot, type TuiNode, type TuiRoot, type TuiStatic } from "../host/nodes.ts";
-import {
-  runLayoutTransaction,
-  type ComputedLayout,
-  type LayoutHeightConstraint,
-} from "../layout/layout-transaction.ts";
+import type { LayoutHeightConstraint } from "../layout/layout-transaction.ts";
 import { attachYoga, detachYoga } from "../layout/yoga.ts";
 import { buildNodeOps } from "../vue/node-ops.ts";
 import {
@@ -27,15 +28,11 @@ import {
   type HostYogaNode,
 } from "../layout/yoga-allocation-ledger.ts";
 import { createCommitScheduler } from "./scheduler.ts";
-import { paint, releasePaintCaches } from "../paint/paint.ts";
+import { runRenderCommit } from "./render-commit.ts";
 import type { Frame } from "../frame/frame.ts";
 import { sanitizeAnsiMultiline } from "../text/sanitize-ansi.ts";
-import { resolveTerminalStyle, type TerminalStyle } from "../text/terminal-style.ts";
-import {
-  findStatics,
-  prepareStaticOutput,
-  type PreparedStaticOutput,
-} from "../paint/static-channel.ts";
+import { resolveColorCapability, type ColorCapability } from "../frame/color-profile.ts";
+import { findStatics, type PreparedStaticOutput } from "../paint/static-channel.ts";
 import { createFrameWriter } from "../surface/frame-writer.ts";
 import { createSurface, type Surface, type SurfaceRuntime } from "../surface/surface.ts";
 import { encodeFrame } from "../surface/frame-encoder.ts";
@@ -52,8 +49,8 @@ import {
   registerConsoleSink,
   type ConsoleSinkRegistration,
 } from "../terminal/node/console-manager.ts";
-import { nextLineEscape } from "../surface/cursor-helpers.ts";
-import { bsu, esu, shouldSynchronize } from "../terminal/write-synchronized.ts";
+import { nextLineEscape } from "../surface/line-helpers.ts";
+import { shouldSynchronize } from "../terminal/write-synchronized.ts";
 import { emitTestEvent, hasTestEventSink, RUNTIME_TEST_EVENT } from "./test-events.ts";
 import {
   AppContextKey,
@@ -129,7 +126,7 @@ export const INTERNAL_RENDER_OBSERVER: unique symbol = Symbol.for(
 export interface InternalMountOptionPayload {
   readonly onRender?: (info: { renderTime: number }) => void;
   readonly maxFps?: number;
-  readonly terminalStyle?: TerminalStyle;
+  readonly colorCapability?: ColorCapability;
   readonly [INTERNAL_KITTY_KEYBOARD]?: InternalKittyKeyboardMountOptions;
   readonly [INTERNAL_RENDER_OBSERVER]?: InternalRenderObserver;
   readonly [INTERNAL_TERMINAL_SIZE_PROBE]?: TerminalSizeProbe;
@@ -312,7 +309,6 @@ class Session implements SessionMember {
   kittyController: ReturnType<typeof createKittyKeyboardController> | null = null;
   emergencyKittyController: ReturnType<typeof createKittyKeyboardController> | null = null;
   emergencyStdinController: StdinController | null = null;
-  synchronizedOutputReleases: Set<() => void> | null = null;
   abandonPendingTerminalOutput:
     | ((options?: { readonly physicalStateUncertain?: boolean }) => void)
     | null = null;
@@ -321,8 +317,18 @@ class Session implements SessionMember {
   // Tracks whether this Session owns the liveInstances entry for stdout. An
   // instance-reuse guard never constructs a Session, so its teardown is inert.
   asOwner = false;
+  // Whether this session has announced terminal ownership to the test-event
+  // sink, so `terminal:acquired` and `terminal:released` stay paired. The
+  // lifecycle cannot carry it: ownership is announced by the first write that
+  // actually reaches the device, and a running session that has not painted
+  // yet -- or one whose stdout is no terminal -- has announced nothing.
   terminalEventOwnershipActive = false;
-  lifecycle: SessionLifecycle = { state: "mounting" };
+  lifecycle: SessionLifecycle = {
+    state: "mounting",
+    suspension: "none",
+    vueTree: "unstarted",
+    consoleWrites: "closed",
+  };
   exitSelection: ExitSelection = { kind: "open" };
   exitSettlement: ExitSettlement = "open";
   runtimeFailure: Error | null = null;
@@ -330,21 +336,11 @@ class Session implements SessionMember {
   mountRuntimeFailure: Error | null = null;
   mountFailure: MountFailureState = "none";
   fatalReport: string | null = null;
-  teardown: TeardownControl = {
-    request: "none",
-    sync: "async",
-    execution: "idle",
-    outputWait: "idle",
-    consoleWait: "idle",
-    finalCommit: "pending",
-    emergency: "idle",
-    flushing: "idle",
-  };
+  // Re-entrancy guard for one synchronous flush, not a lifecycle state: it is
+  // set and cleared inside the call it guards, so nothing can observe it
+  // between two turns.
+  #flushingDeferredLifecycle = false;
   lifecycleTransactionDepth = 0;
-  vueMountStarted = false;
-  vueMountCompleted = false;
-  vueCleanupCompleted = false;
-  consoleTeardownWritesAllowed = false;
   suspensionGate: { readonly ready: Promise<void>; readonly open: () => void } | null = null;
 
   constructor(terminal: TerminalBackend, surface: Surface, runtime: SessionRuntime) {
@@ -366,17 +362,139 @@ class Session implements SessionMember {
   }
 
   /**
+   * The mounted state this session is in, read through a teardown to the state
+   * it began from. Suspension and a resume transaction outlive the transition
+   * into teardown: the terminal they released has not been reacquired.
+   */
+  #mounted(): MountedLifecycle | null {
+    const current = this.lifecycle;
+    switch (current.state) {
+      case "mounting":
+      case "running":
+      case "suspended":
+        return current;
+      case "tearing-down":
+        return current.from;
+      case "torn-down":
+        return null;
+      default:
+        return unreachableLifecycle(current);
+    }
+  }
+
+  /** Replace the mounted state wherever the lifecycle currently carries it. */
+  #setMounted(next: MountedLifecycle): void {
+    const current = this.lifecycle;
+    if (current.state === "tearing-down") {
+      this.lifecycle = { ...current, from: next };
+      return;
+    }
+    if (current.state === "torn-down") return;
+    this.lifecycle = next;
+  }
+
+  /**
    * Suspension outlives the transition into teardown. The terminal was released
    * for the suspension and has not been reacquired, so anything that would write
    * to it -- a commit, a console line from an unmount hook, an input acquisition
    * -- must still be refused while the session tears down.
    */
   isTerminalSuspended(): boolean {
-    const { lifecycle } = this;
-    return (
-      lifecycle.state === "suspended" ||
-      (lifecycle.state === "tearing-down" && lifecycle.from === "suspended")
-    );
+    return this.#mounted()?.state === "suspended";
+  }
+
+  /**
+   * A suspension requested while the mount transaction is still acquiring
+   * terminal resources. Mount releases the complete set once it has one.
+   */
+  deferSuspensionUntilMounted(): void {
+    const mounted = this.#mounted();
+    if (mounted?.state !== "mounting") return;
+    this.#setMounted({ ...mounted, suspension: "pending" });
+  }
+
+  /** Take that deferred suspension, if the mount transaction recorded one. */
+  takeDeferredSuspension(): boolean {
+    const mounted = this.#mounted();
+    if (mounted?.state !== "mounting" || mounted.suspension === "none") return false;
+    this.#setMounted({ ...mounted, suspension: "none" });
+    return true;
+  }
+
+  /** True while a resume transaction is running, in any of its steps. */
+  isResuming(): boolean {
+    return this.#resumeStep() !== "idle";
+  }
+
+  /**
+   * True only while the resume transaction writes its prepared frame. Every
+   * other step still refuses a commit: the screen is not back yet, or input is
+   * still being reacquired.
+   */
+  isResumePainting(): boolean {
+    return this.#resumeStep() === "painting";
+  }
+
+  setResumeStep(step: ResumeStep): void {
+    const mounted = this.#mounted();
+    if (mounted?.state !== "suspended" || mounted.resume === step) return;
+    this.#setMounted({ state: "suspended", resume: step });
+  }
+
+  #resumeStep(): ResumeStep {
+    const mounted = this.#mounted();
+    return mounted?.state === "suspended" ? mounted.resume : "idle";
+  }
+
+  /** How far Vue's own mount has got, and whether its tree has been released. */
+  vueTree(): VueTree {
+    const current = this.lifecycle;
+    if (current.state === "tearing-down") return current.vueTree;
+    if (current.state === "torn-down") return "released";
+    return mountedVueTree(current);
+  }
+
+  setVueTree(next: VueTree): void {
+    const current = this.lifecycle;
+    if (current.state === "mounting" || current.state === "tearing-down") {
+      this.lifecycle = { ...current, vueTree: next };
+    }
+    // Running and suspended imply a mounted tree and nothing writes it there:
+    // Vue's mount runs inside the mount transaction, and the release runs from
+    // the mount rollback or from teardown.
+  }
+
+  /** Whether Vue was asked to mount and its tree has not been released since. */
+  isVueTreeStarted(): boolean {
+    const tree = this.vueTree();
+    return tree === "mounting" || tree === "mounted";
+  }
+
+  /**
+   * Whether a console line written during teardown may still reach the
+   * terminal: the window that opens when Vue's cleanup path hands the tree
+   * over with a console sink installed, and closes when `#performTeardownNow`
+   * releases that sink. A mount rollback opens it even when Vue never mounted,
+   * because its own unmount hooks may still write; the teardown path does not,
+   * because there are no hooks to run.
+   */
+  allowsTeardownConsoleWrite(): boolean {
+    const current = this.lifecycle;
+    if (current.state === "mounting" || current.state === "tearing-down") {
+      return current.consoleWrites === "open";
+    }
+    return false;
+  }
+
+  openTeardownConsoleWrites(): void {
+    this.#setConsoleWrites(this.consoleSink === null ? "closed" : "open");
+  }
+
+  #setConsoleWrites(next: ConsoleTeardownWrites): void {
+    const current = this.lifecycle;
+    if (current.state === "mounting" || current.state === "tearing-down") {
+      this.lifecycle = { ...current, consoleWrites: next };
+    }
   }
 
   isTearingDown(): boolean {
@@ -404,42 +522,21 @@ class Session implements SessionMember {
     gate?.open();
   }
 
-  transition(next: SessionLifecycleState): void {
+  transition(next: SessionLifecycleTarget): void {
     const current = this.lifecycle;
     if (current.state === next) return;
+    this.lifecycle = nextLifecycle(current, next);
+  }
 
-    switch (current.state) {
-      case "mounting":
-        if (next === "running") break;
-        if (next === "tearing-down") {
-          this.lifecycle = { state: "tearing-down", from: current.state };
-          return;
-        }
-        throw new Error(`Cannot transition Runtime Session from ${current.state} to ${next}.`);
-      case "running":
-        if (next === "suspended") break;
-        if (next === "tearing-down") {
-          this.lifecycle = { state: "tearing-down", from: current.state };
-          return;
-        }
-        throw new Error(`Cannot transition Runtime Session from ${current.state} to ${next}.`);
-      case "suspended":
-        if (next === "running") break;
-        if (next === "tearing-down") {
-          this.lifecycle = { state: "tearing-down", from: current.state };
-          return;
-        }
-        throw new Error(`Cannot transition Runtime Session from ${current.state} to ${next}.`);
-      case "tearing-down":
-        if (next === "torn-down") break;
-        throw new Error(`Cannot transition Runtime Session from ${current.state} to ${next}.`);
-      case "torn-down":
-        throw new Error(`Cannot transition Runtime Session from ${current.state} to ${next}.`);
-      default:
-        unreachableLifecycle(current);
-    }
+  /** The teardown this session is running, or null unless it is tearing down. */
+  #teardown(): TeardownLifecycle | null {
+    return this.lifecycle.state === "tearing-down" ? this.lifecycle : null;
+  }
 
-    this.lifecycle = { state: next };
+  #updateTeardown(changes: TeardownChanges): void {
+    const current = this.lifecycle;
+    if (current.state !== "tearing-down") return;
+    this.lifecycle = { ...current, ...changes };
   }
 
   hasExitFailure(): boolean {
@@ -496,26 +593,14 @@ class Session implements SessionMember {
     emitTestEvent(RUNTIME_TEST_EVENT.terminalReleased);
   }
 
-  acquireSynchronizedOutputLease(): () => void {
-    const releases = this.synchronizedOutputReleases;
-    const lease: TerminalLease<"synchronized-output"> | undefined =
-      this.terminal?.acquire("synchronized-output");
-    let active = true;
-    const release = (): void => {
-      if (!active) return;
-      active = false;
-      releases?.delete(release);
-      lease?.release();
-    };
-    releases?.add(release);
-    return release;
-  }
-
+  /** Close a synchronized block this session opened but has not been able to end. */
   closeOutstandingSynchronizedOutput(): void {
-    const releases = this.synchronizedOutputReleases;
-    if (!releases || releases.size === 0) return;
-    if (this.terminal) this.writeBestEffort("stdout", esu, true);
-    for (const release of releases) release();
+    try {
+      this.terminal?.restoreMode("synchronized-output", { sync: true });
+    } catch {
+      // Closing the block is best effort: a stream that refuses the end marker
+      // must not stop the remaining terminal restoration.
+    }
   }
 
   writeBestEffort(
@@ -588,32 +673,35 @@ class Session implements SessionMember {
       return;
     }
     if (this.isTearingDown()) {
-      const control = this.teardown;
-      if (!this.isTornDown() && sync) control.sync = "sync";
-      if (immediateTermination && control.execution !== "idle" && !this.isTornDown()) {
-        this.#performEmergencyTerminalRestore();
+      const teardown = this.#teardown();
+      // Torn down: every resource is released, so a further dispose is inert.
+      if (!teardown) return;
+      if (sync) this.#updateTeardown({ nextAttempt: "sync" });
+      if (teardownAttemptInFlight(teardown.step)) {
+        if (immediateTermination) {
+          this.#performEmergencyTerminalRestore();
+          return;
+        }
+        // A restoration that was handed off but has not drained still owns the
+        // gate. A synchronous teardown takes it back and restores immediately.
+        if (sync && teardown.step === "draining") {
+          this.outputCoordinator?.abort(
+            new Error("Output transaction was interrupted by synchronous teardown."),
+          );
+          this.abandonPendingTerminalOutput?.();
+          this.#updateTeardown({ step: "idle", nextAttempt: "async" });
+          this.#performTeardown(true, false);
+        }
         return;
       }
-      if (immediateTermination && !this.isTornDown() && control.execution === "idle") {
-        const effectiveSync = sync || control.sync === "sync";
-        control.request = "none";
-        control.sync = "async";
+      if (immediateTermination) {
+        const effectiveSync = sync || teardown.nextAttempt === "sync";
+        this.#updateTeardown({ step: "idle", nextAttempt: "async" });
         this.#performTeardown(effectiveSync, true);
         return;
       }
-      if (sync && !this.isTornDown() && control.execution === "idle") {
-        control.request = "none";
-        control.sync = "async";
-        this.#performTeardown(true, false);
-        return;
-      }
-      if (sync && !this.isTornDown() && control.execution === "waiting") {
-        this.outputCoordinator?.abort(
-          new Error("Output transaction was interrupted by synchronous teardown."),
-        );
-        this.abandonPendingTerminalOutput?.();
-        control.execution = "idle";
-        control.sync = "async";
+      if (sync) {
+        this.#updateTeardown({ step: "idle", nextAttempt: "async" });
         this.#performTeardown(true, false);
       }
       return;
@@ -624,7 +712,7 @@ class Session implements SessionMember {
     // A normal unmount can wait for an in-flight lifecycle transaction. A
     // synchronous teardown must restore terminal ownership immediately.
     if (this.lifecycleTransactionDepth > 0 && !immediateTermination && !sync) {
-      this.teardown.request = "deferred";
+      this.#updateTeardown({ step: "deferred" });
       return;
     }
 
@@ -632,15 +720,14 @@ class Session implements SessionMember {
   }
 
   #flushDeferredLifecycle(): void {
-    const control = this.teardown;
-    if (this.lifecycleTransactionDepth > 0 || control.flushing === "flushing") return;
-    control.flushing = "flushing";
+    if (this.lifecycleTransactionDepth > 0 || this.#flushingDeferredLifecycle) return;
+    this.#flushingDeferredLifecycle = true;
     try {
       while (this.lifecycleTransactionDepth === 0) {
-        if (control.request === "deferred" && this.isTearingDown() && !this.isTornDown()) {
-          const sync = control.sync === "sync";
-          control.request = "none";
-          control.sync = "async";
+        const teardown = this.#teardown();
+        if (teardown?.step === "deferred") {
+          const sync = teardown.nextAttempt === "sync";
+          this.#updateTeardown({ step: "idle", nextAttempt: "async" });
           this.#performTeardown(sync, false);
           continue;
         }
@@ -653,14 +740,13 @@ class Session implements SessionMember {
         break;
       }
     } finally {
-      control.flushing = "idle";
+      this.#flushingDeferredLifecycle = false;
     }
   }
 
   #performEmergencyTerminalRestore(): void {
-    const control = this.teardown;
-    if (control.emergency === "restoring") return;
-    control.emergency = "restoring";
+    if (this.#teardown()?.emergency === "restored") return;
+    this.#updateTeardown({ emergency: "restored" });
     this.outputCoordinator?.abort(
       new Error("Output transaction was interrupted by emergency terminal restoration."),
     );
@@ -696,11 +782,15 @@ class Session implements SessionMember {
         this.surface?.dispose(this.surfaceRuntime!, { cleanExit: false, sync: true }),
       );
     }
+
+    // One sweep behind every owner: a lease whose restore was queued behind a
+    // failed segment is still owed to the terminal.
+    runBestEffort(() => this.terminal?.restoreModes({ sync: true }));
   }
 
   #performTeardown(sync = false, immediateTermination = false): void {
-    const control = this.teardown;
-    if (this.isTornDown() || control.execution !== "idle") return;
+    const teardown = this.#teardown();
+    if (!teardown || teardownAttemptInFlight(teardown.step)) return;
     if (!this.appContext) {
       this.transition("torn-down");
       return;
@@ -711,45 +801,42 @@ class Session implements SessionMember {
       this.abandonPendingTerminalOutput?.();
     }
 
-    const waitForCoordinator = (): void => {
-      if (!coordinator || control.outputWait === "waiting") return;
-      control.outputWait = "waiting";
-      void coordinator.waitForIdle().then(
+    // A waiter belongs to the step that registered it. Another attempt may take
+    // the teardown over while it is pending; the waiter then finds its own step
+    // gone and leaves the rest to whoever moved it.
+    const waitForStep = (
+      step: "awaiting-output" | "awaiting-console",
+      idle: () => Promise<void>,
+    ): void => {
+      this.#updateTeardown({ step });
+      const takeBack = (): TeardownLifecycle | null => {
+        const pending = this.#teardown();
+        return pending?.step === step ? pending : null;
+      };
+      void idle().then(
         () => {
-          control.outputWait = "idle";
-          if (!this.isTornDown() && control.execution === "idle") {
-            const effectiveSync = control.sync === "sync";
-            control.sync = "async";
-            this.#performTeardown(effectiveSync, false);
-          }
+          const pending = takeBack();
+          if (!pending) return;
+          this.#updateTeardown({ step: "idle", nextAttempt: "async" });
+          this.#performTeardown(pending.nextAttempt === "sync", false);
         },
         () => {
-          control.outputWait = "idle";
-          if (!this.isTornDown() && control.execution === "idle")
-            this.#performTeardown(false, false);
+          if (!takeBack()) return;
+          this.#updateTeardown({ step: "idle" });
+          this.#performTeardown(false, false);
         },
       );
     };
 
+    const waitForCoordinator = (): void => {
+      if (!coordinator || this.#teardown()?.step === "awaiting-output") return;
+      waitForStep("awaiting-output", () => coordinator.waitForIdle());
+    };
+
     const waitForConsoleSink = (): void => {
       const consoleSink = this.consoleSink;
-      if (!consoleSink || control.consoleWait === "waiting") return;
-      control.consoleWait = "waiting";
-      void consoleSink.waitForIdle().then(
-        () => {
-          control.consoleWait = "idle";
-          if (!this.isTornDown() && control.execution === "idle") {
-            const effectiveSync = control.sync === "sync";
-            control.sync = "async";
-            this.#performTeardown(effectiveSync, false);
-          }
-        },
-        () => {
-          control.consoleWait = "idle";
-          if (!this.isTornDown() && control.execution === "idle")
-            this.#performTeardown(false, false);
-        },
-      );
+      if (!consoleSink || this.#teardown()?.step === "awaiting-console") return;
+      waitForStep("awaiting-console", () => consoleSink.waitForIdle());
     };
 
     this.#runtime.stopScheduling();
@@ -763,18 +850,18 @@ class Session implements SessionMember {
     if (
       !sync &&
       !immediateTermination &&
-      control.finalCommit === "pending" &&
+      this.#teardown()?.finalCommit === "owed" &&
       this.mountFailure === "none" &&
       !this.isSelectedExitSilent() &&
       this.commit &&
       stdoutWritable &&
       (this.surface?.isLive !== false || !this.hasExitFailure())
     ) {
-      control.finalCommit = "complete";
+      this.#updateTeardown({ finalCommit: "written" });
       try {
         const finalCommit = this.commit();
         if (finalCommit.status === "blocked") {
-          control.finalCommit = "pending";
+          this.#updateTeardown({ finalCommit: "owed" });
           waitForCoordinator();
           return;
         }
@@ -786,10 +873,10 @@ class Session implements SessionMember {
         // Final rendering is best-effort. Continue with terminal restoration.
       }
     } else {
-      control.finalCommit = "complete";
+      this.#updateTeardown({ finalCommit: "written" });
     }
 
-    if (!immediateTermination && !this.vueCleanupCompleted) {
+    if (!immediateTermination && this.vueTree() !== "released") {
       this.#runtime.runMountedVueCleanup(this);
     }
     if (!sync && !immediateTermination && this.consoleSink?.isIdle() === false) {
@@ -804,6 +891,10 @@ class Session implements SessionMember {
 
     const completeTeardown = (): void => {
       if (this.isTornDown()) return;
+      // The output gate closes with the session; later restores write directly.
+      this.terminal?.attachModeWrites(null);
+      this.terminal?.onModeChange(null);
+      this.terminal?.onModeFailure(null);
       if (this.asOwner && this.terminal) {
         liveInstances.delete(this.terminal.outputOwnerFor("stdout"));
         this.asOwner = false;
@@ -819,7 +910,6 @@ class Session implements SessionMember {
       this.abandonPendingTerminalOutput = null;
       this.terminalReconcile = null;
       this.closeOutstandingSynchronizedOutput();
-      this.synchronizedOutputReleases = null;
       this.transition("torn-down");
       this.reportTerminalReleased();
       this.surface = null;
@@ -841,7 +931,7 @@ class Session implements SessionMember {
       this.#flushDeferredLifecycle();
     };
 
-    control.execution = "running";
+    this.#updateTeardown({ step: "restoring" });
     if (sync || immediateTermination || !coordinator) {
       this.#performTeardownNow(sync, immediateTermination);
       completeTeardown();
@@ -857,32 +947,32 @@ class Session implements SessionMember {
         },
       );
       if (restoration.status === "blocked") {
-        control.execution = "idle";
+        this.#updateTeardown({ step: "idle" });
         waitForCoordinator();
         return;
       }
       if (restoration.writable) completeTeardown();
       else {
-        if (control.sync === "sync") {
-          control.sync = "async";
+        if (this.#teardown()?.nextAttempt === "sync") {
+          this.#updateTeardown({ nextAttempt: "async" });
           coordinator.abort(
             new Error("Output transaction was interrupted by synchronous teardown."),
           );
           this.abandonPendingTerminalOutput?.();
-          control.execution = "idle";
+          this.#updateTeardown({ step: "idle" });
           this.#performTeardown(true, false);
           return;
         }
-        control.execution = "waiting";
+        this.#updateTeardown({ step: "draining" });
         void restoration.ready.then(
           () => {
-            if (control.execution !== "waiting" || this.isTornDown()) return;
-            control.execution = "running";
+            if (this.#teardown()?.step !== "draining") return;
+            this.#updateTeardown({ step: "restoring" });
             completeTeardown();
           },
           (error) => {
-            if (control.execution !== "waiting" || this.isTornDown()) return;
-            control.execution = "running";
+            if (this.#teardown()?.step !== "draining") return;
+            this.#updateTeardown({ step: "restoring" });
             this.recordTeardownError(error);
             rollbackRestoration?.();
             this.#performEmergencyTerminalRestore();
@@ -924,7 +1014,7 @@ class Session implements SessionMember {
         this.consoleSink = null;
         runBestEffort(consoleSink.release);
       }
-      this.consoleTeardownWritesAllowed = false;
+      this.#setConsoleWrites("closed");
       if (this.renderedTargets) {
         const renderedTargets = this.renderedTargets;
         this.renderedTargets = null;
@@ -951,12 +1041,13 @@ class Session implements SessionMember {
           this.surface?.dispose(this.surfaceRuntime!, { cleanExit: !this.hasExitFailure(), sync }),
         );
       }
-      if (this.root) runBestEffort(() => releasePaintCaches(this.root!));
       runBestEffort(() => this.hostYogaLedger?.rollback());
       if (this.root) runBestEffort(() => detachYoga(this.root!));
       this.root = null;
       this.hostYogaLedger = null;
-      this.vueMountCompleted = false;
+      // Yoga no longer holds the tree. A teardown that skipped Vue's unmount --
+      // a non-returning exit -- still leaves no mounted tree behind.
+      this.setVueTree("released");
       if (this.resizeHandler) {
         const unsubscribeResize = this.resizeHandler;
         runBestEffort(unsubscribeResize);
@@ -980,6 +1071,10 @@ class Session implements SessionMember {
         runBestEffort(() => stdinController.dispose(sync, immediateTermination));
         stdinController.setCleanupErrorSink(null);
       }
+      // Every owner above has released what it holds. One sweep restores a mode
+      // an owner could not, so "restored on a clean exit, not on suspension or
+      // a failure" cannot come back.
+      runBestEffort(() => this.terminal?.restoreModes({ sync }));
       if (this.renderSession) {
         const renderSession = this.renderSession;
         runBestEffort(() => renderSession.dispose());
@@ -1012,17 +1107,80 @@ class Session implements SessionMember {
   }
 }
 
-type SessionLifecycle =
-  | { readonly state: "mounting" }
-  | { readonly state: "running" }
-  | { readonly state: "suspended" }
+/** Whether a suspension arrived before the mount transaction could release. */
+type MountSuspension = "none" | "pending";
+
+/**
+ * How far Vue's own mount has got inside this session's mount, and whether the
+ * tree has been released since. `mounting` and `tearing-down` carry it; running
+ * and suspended imply `"mounted"`, because reaching either means Vue's mount
+ * returned.
+ */
+type VueTree = "unstarted" | "mounting" | "mounted" | "released";
+
+/** Whether a console line written during teardown may still reach the terminal. */
+type ConsoleTeardownWrites = "closed" | "open";
+
+/**
+ * Where the resume transaction stands. It prepares the next frame while the
+ * terminal is still released, re-enters the screen, writes that frame, and only
+ * then reacquires input, rolling every step back when one of them fails.
+ */
+type ResumeStep = "idle" | "preparing" | "re-entering" | "painting" | "reacquiring-input";
+
+/** What a teardown is doing. At most one attempt holds the teardown at a time. */
+type TeardownStep =
+  /** Requested inside a lifecycle transaction; it runs when that unwinds. */
+  | "deferred"
+  /** No attempt in flight, and none deferred. */
+  | "idle"
+  /** An attempt is waiting for the output gate to drain. */
+  | "awaiting-output"
+  /** An attempt is waiting for the console sink to drain. */
+  | "awaiting-console"
+  /** An attempt is releasing this session's resources. */
+  | "restoring"
+  /** The restoration is written; waiting for the stream to take it. */
+  | "draining";
+
+/** The states a session tears down from. Teardown keeps the one it began in. */
+type MountedLifecycle =
   | {
-      readonly state: "tearing-down";
-      readonly from: "mounting" | "running" | "suspended";
+      readonly state: "mounting";
+      readonly suspension: MountSuspension;
+      readonly vueTree: VueTree;
+      readonly consoleWrites: ConsoleTeardownWrites;
     }
-  | { readonly state: "torn-down" };
+  | { readonly state: "running" }
+  | { readonly state: "suspended"; readonly resume: ResumeStep };
+
+interface TeardownLifecycle {
+  readonly state: "tearing-down";
+  /** The state teardown began from, with the sub-state it had reached. */
+  readonly from: MountedLifecycle;
+  readonly step: TeardownStep;
+  /** How a teardown requested while this one runs must run: its cause. */
+  readonly nextAttempt: "async" | "sync";
+  /** Whether the last frame this session owes the screen has been written. */
+  readonly finalCommit: "owed" | "written";
+  /** Whether a non-returning exit already swept this session's terminal state. */
+  readonly emergency: "none" | "restored";
+  /** The Vue tree's progress, which teardown owns once it has begun. */
+  readonly vueTree: VueTree;
+  /** Whether the console sink's teardown window is open. */
+  readonly consoleWrites: ConsoleTeardownWrites;
+}
+
+type SessionLifecycle = MountedLifecycle | TeardownLifecycle | { readonly state: "torn-down" };
 
 type SessionLifecycleState = SessionLifecycle["state"];
+
+/** Mount enters `mounting`; every later state is reached by a transition. */
+type SessionLifecycleTarget = Exclude<SessionLifecycleState, "mounting">;
+
+type TeardownChanges = Partial<
+  Pick<TeardownLifecycle, "step" | "nextAttempt" | "finalCommit" | "emergency">
+>;
 
 type ExitSelection =
   | { readonly kind: "open" }
@@ -1038,19 +1196,86 @@ type ExitSettlement = "open" | "deferred" | "settling" | "settled" | "abandoned"
 type RuntimeFailureQueue = "idle" | "queued";
 type MountFailureState = "none" | "failed";
 
-interface TeardownControl {
-  request: "none" | "deferred";
-  sync: "async" | "sync";
-  execution: "idle" | "running" | "waiting";
-  outputWait: "idle" | "waiting";
-  consoleWait: "idle" | "waiting";
-  finalCommit: "pending" | "complete";
-  emergency: "idle" | "restoring";
-  flushing: "idle" | "flushing";
+/** One lifecycle transition, or the reason this one cannot happen. */
+function nextLifecycle(current: SessionLifecycle, next: SessionLifecycleTarget): SessionLifecycle {
+  switch (current.state) {
+    case "mounting":
+      if (next === "running") return { state: "running" };
+      if (next === "tearing-down") return beginTeardown(current);
+      break;
+    case "running":
+      if (next === "suspended") return { state: "suspended", resume: "idle" };
+      if (next === "tearing-down") return beginTeardown(current);
+      break;
+    case "suspended":
+      if (next === "running") return { state: "running" };
+      if (next === "tearing-down") return beginTeardown(current);
+      break;
+    case "tearing-down":
+      if (next === "torn-down") return { state: "torn-down" };
+      break;
+    case "torn-down":
+      break;
+    default:
+      return unreachableLifecycle(current);
+  }
+  throw new Error(`Cannot transition Runtime Session from ${current.state} to ${next}.`);
+}
+
+function beginTeardown(from: MountedLifecycle): TeardownLifecycle {
+  return {
+    state: "tearing-down",
+    from,
+    step: "idle",
+    nextAttempt: "async",
+    finalCommit: "owed",
+    emergency: "none",
+    vueTree: mountedVueTree(from),
+    // Only a mount rollback opens the window before teardown begins; running
+    // and suspended have run no cleanup, so nothing is owed to the console.
+    consoleWrites: from.state === "mounting" ? from.consoleWrites : "closed",
+  };
+}
+
+/** Reaching running or suspended means Vue's mount returned. */
+function mountedVueTree(mounted: MountedLifecycle): VueTree {
+  switch (mounted.state) {
+    case "mounting":
+      return mounted.vueTree;
+    case "running":
+    case "suspended":
+      return "mounted";
+    default:
+      return unreachableLifecycle(mounted);
+  }
+}
+
+/**
+ * Whether an attempt holds the teardown right now. The waiting steps have let
+ * it go: another attempt may take over, and the waiter that registered one
+ * finds its own step gone when it resolves.
+ */
+function teardownAttemptInFlight(step: TeardownStep): boolean {
+  switch (step) {
+    case "deferred":
+    case "idle":
+    case "awaiting-output":
+    case "awaiting-console":
+      return false;
+    case "restoring":
+    case "draining":
+      return true;
+    default:
+      return unreachableTeardownStep(step);
+  }
 }
 
 function unreachableLifecycle(value: never): never {
   throw new Error(`Unexpected Runtime Session lifecycle: ${JSON.stringify(value)}`);
+}
+
+function unreachableTeardownStep(value: never): never {
+  throw new Error(`Unexpected Runtime Session teardown step: ${JSON.stringify(value)}`);
 }
 
 /**
@@ -1147,10 +1372,6 @@ export function createSessionApp(
 
   function reportTerminalReleased(): void {
     session?.reportTerminalReleased();
-  }
-
-  function acquireSynchronizedOutputLease(): () => void {
-    return session?.acquireSynchronizedOutputLease() ?? (() => {});
   }
 
   function closeOutstandingSynchronizedOutput(): void {
@@ -1405,11 +1626,11 @@ export function createSessionApp(
   const originalUnmount = baseApp.unmount.bind(baseApp);
 
   function runMountedVueCleanup(activeSession: Session): void {
-    if (activeSession.vueCleanupCompleted) return;
-    activeSession.vueCleanupCompleted = true;
-    if (!activeSession.vueMountStarted) return;
-    activeSession.vueMountStarted = false;
-    activeSession.consoleTeardownWritesAllowed = activeSession.consoleSink !== null;
+    const tree = activeSession.vueTree();
+    if (tree === "released") return;
+    activeSession.setVueTree("released");
+    if (tree === "unstarted") return;
+    activeSession.openTeardownConsoleWrites();
     try {
       originalUnmount();
     } catch (error) {
@@ -1418,10 +1639,10 @@ export function createSessionApp(
   }
 
   function rollbackPartialVueMount(activeSession: Session): void {
-    if (activeSession.vueCleanupCompleted) return;
-    activeSession.vueCleanupCompleted = true;
-    activeSession.vueMountStarted = false;
-    activeSession.consoleTeardownWritesAllowed = activeSession.consoleSink !== null;
+    const tree = activeSession.vueTree();
+    if (tree === "released") return;
+    activeSession.setVueTree("released");
+    activeSession.openTeardownConsoleWrites();
     // Vue-side rollback goes exactly as far as Vue itself does, and no further.
     // If app.mount() returned and a later Runtime step failed, the ordinary Vue
     // unmount tears the tree down. If Vue's own mount threw, Vue never took
@@ -1430,8 +1651,7 @@ export function createSessionApp(
     // missing ownership link out of Vue-private state to do more. Runtime-owned
     // resources are still released: the Yoga ledger below frees every
     // allocation, and the caller's rollback restores terminal and stream state.
-    if (activeSession.vueMountCompleted) {
-      activeSession.vueMountCompleted = false;
+    if (tree === "mounted") {
       try {
         originalUnmount();
       } catch (error) {
@@ -1489,16 +1709,16 @@ export function createSessionApp(
       throw new Error("Cannot mount vue-tui: the selected stdout already has a live app.");
     }
     const stdoutFacts = currentStdoutFacts(terminal);
-    const terminalStyle =
-      color === true && internalOptions.terminalStyle !== undefined
-        ? internalOptions.terminalStyle
+    const colorCapability =
+      color === true && internalOptions.colorCapability !== undefined
+        ? internalOptions.colorCapability
         : color === true
-          ? resolveTerminalStyle({
+          ? resolveColorCapability({
               color,
               stdout: terminal.capabilities.stdout,
               environment: terminal.capabilities.environment,
             })
-          : resolveTerminalStyle({ color });
+          : resolveColorCapability({ color });
     // Internal deterministic-test observer. It observes the resolved session
     // and renderer content commits without selecting another output path.
     const renderObserver = internalOptions[INTERNAL_RENDER_OBSERVER];
@@ -1510,7 +1730,7 @@ export function createSessionApp(
       requestedMode,
       stdout: stdoutFacts,
     });
-    const outputSurface = createSurface(resolvedSurface.kind);
+    const outputSurface = createSurface(resolvedSurface.kind, colorCapability, terminal);
 
     // Deterministic option, stream, capability, ownership, and surface
     // preflight ends here. From this point every consumed operation is covered
@@ -1529,7 +1749,7 @@ export function createSessionApp(
       },
     });
     try {
-      const renderSession = createLiveRenderSessionService(resolvedSurface, terminalStyle);
+      const renderSession = createLiveRenderSessionService(resolvedSurface, colorCapability);
 
       function readCurrentDimensions(preferFreshProbe = false): ResolvedLiveDimensions | null {
         const currentStdout = currentStdoutFacts(terminal, preferFreshProbe);
@@ -1561,10 +1781,29 @@ export function createSessionApp(
       });
       failureOutputCoordinator = outputCoordinator;
       session!.outputCoordinator = outputCoordinator;
-      session!.synchronizedOutputReleases = new Set();
+      // Mode leases issue their bytes through this session's output gate, so a
+      // mode change keeps its place among the frames it belongs between.
+      terminal.attachModeWrites(writeTerminalOutput);
+      terminal.onModeChange(onTerminalModeChange);
+      // A mode the backend defers past its caller — raw input waiting one
+      // microtask for a same-tick replacement — has no one left to raise to.
+      terminal.onModeFailure(requestRuntimeFailure);
       let terminalReconcileTurn: Promise<void> | null = null;
       let terminalReconcileRequested = false;
       let reconcileManagedTerminalOutput: () => void = () => {};
+
+      /**
+       * One mode reached, or was refused by, the device. Managed input depends on
+       * the surface's own modes, so ownership is reported from here rather than
+       * from the commit that happened to trigger the write.
+       */
+      function onTerminalModeChange(mode: TerminalMode): void {
+        // Synchronized output opens and closes inside one frame. No reconciler
+        // waits on it, and reporting it would schedule a turn per frame.
+        if (mode === "synchronized-output") return;
+        if (outputSurface.isInputReady && !session!.isResuming()) reportTerminalAcquired();
+        requestTerminalReconcile();
+      }
 
       function requestTerminalReconcile(): void {
         if (isTearingDown()) return;
@@ -1654,7 +1893,7 @@ export function createSessionApp(
        */
       function refuseSideChannelWrite(): CoordinatedWriteResult | undefined {
         if (isTearingDown()) {
-          const allowed = session!.consoleTeardownWritesAllowed && !isTerminalSuspended();
+          const allowed = session!.allowsTeardownConsoleWrite() && !isTerminalSuspended();
           return allowed ? undefined : acceptedCoordinatedWrite;
         }
         if (!isTerminalSuspended()) return undefined;
@@ -1688,9 +1927,6 @@ export function createSessionApp(
         writable: true,
       }) satisfies CoordinatedWriteResult;
 
-      let pendingMountSuspension = false;
-      let terminalResumeInProgress = false;
-      let terminalResumePainting = false;
       let resizeEventGeneration = 0;
       let resizeHandledGeneration = 0;
       let resizePaintPending = false;
@@ -1699,7 +1935,7 @@ export function createSessionApp(
       let surfaceRuntime: SurfaceRuntime | null = null;
       let rejectedFullscreenStatic = false;
       session!.abandonPendingTerminalOutput = (abandonment) => {
-        outputSurface.abandonPendingOutput(abandonment);
+        terminal.abandonModeOutput(abandonment);
         (session!.kittyController ?? session!.emergencyKittyController)?.abandonPendingOutput();
         (
           session!.stdinController ?? session!.emergencyStdinController
@@ -1742,7 +1978,7 @@ export function createSessionApp(
           // A hostile raw/stream callback can request suspension while mount is
           // only halfway through acquiring terminal resources. Finish the mount
           // transaction first, then release the complete resource set once.
-          pendingMountSuspension = true;
+          session!.deferSuspensionUntilMounted();
           return;
         }
         outputCoordinator.abort(new Error("Output transaction was interrupted by suspension."));
@@ -1750,26 +1986,26 @@ export function createSessionApp(
         closeOutstandingSynchronizedOutput();
         runLifecycleTransaction(() => {
           session!.transition("suspended");
-          terminalResumeInProgress = false;
           runSuspensionStep(() => session!.scheduler?.cancel());
           runSuspensionStep(() => session!.kittyController?.suspend(true));
           runSuspensionStep(() => session!.stdinController?.suspend(true));
           releaseOutputSurfaceForSuspension();
+          runSuspensionStep(() => terminal.restoreModes({ sync: true }));
         });
       }
 
       async function resumeSession(): Promise<void> {
-        if (pendingMountSuspension) {
+        if (session!.takeDeferredSuspension()) {
           // The host resumed before the mount transaction reached its deferred
           // suspend boundary, so no physical transition is needed.
-          pendingMountSuspension = false;
           return;
         }
-        if (isTearingDown() || !isSuspended() || terminalResumeInProgress) return;
+        if (isTearingDown() || !isSuspended() || session!.isResuming()) return;
         let applyPreparedSurface: (() => CoordinatedWriteResult) | null = null;
         let resumeCoveredResizeGeneration = resizeHandledGeneration;
         let resumed = false;
         const prepareContinuedSurface = (): void => {
+          session!.setResumeStep("preparing");
           resumeCoveredResizeGeneration = resizeEventGeneration;
           applyPreparedSurface = prepareResumeSurface?.() ?? null;
           if (!applyPreparedSurface) {
@@ -1792,7 +2028,7 @@ export function createSessionApp(
         };
         try {
           runLifecycleTransaction(() => {
-            terminalResumeInProgress = true;
+            session!.setResumeStep("preparing");
             if (outputSurface.isLive) {
               prepareContinuedSurface();
             }
@@ -1838,9 +2074,10 @@ export function createSessionApp(
               }
             }
             retryForNewerResize = false;
-            if (isTearingDown() || !isSuspended() || !terminalResumeInProgress) break;
+            if (isTearingDown() || !isSuspended() || !session!.isResuming()) break;
             if (rejectUnsupportedFullscreenStatic()) break;
 
+            session!.setResumeStep("re-entering");
             const surfaceResult = runOutputTransaction(() => {
               runLifecycleTransaction(() => {
                 if (surfaceRuntime) outputSurface.resume(surfaceRuntime);
@@ -1857,7 +2094,7 @@ export function createSessionApp(
               continue;
             }
 
-            terminalResumePainting = true;
+            session!.setResumeStep("painting");
             try {
               const paint = applyPreparedSurface as (() => CoordinatedWriteResult) | null;
               if (paint) {
@@ -1868,7 +2105,7 @@ export function createSessionApp(
                 }
               }
             } finally {
-              terminalResumePainting = false;
+              session!.setResumeStep("reacquiring-input");
             }
             if (isTearingDown()) break;
             if (resumeCoveredResizeGeneration !== resizeEventGeneration) {
@@ -1919,7 +2156,7 @@ export function createSessionApp(
             retryForNewerResize &&
             !isTearingDown() &&
             isSuspended() &&
-            terminalResumeInProgress
+            session!.isResuming()
           );
           if (resumed) requestPendingResizeRefresh();
         } catch {
@@ -1931,8 +2168,7 @@ export function createSessionApp(
             });
           }
         } finally {
-          terminalResumePainting = false;
-          terminalResumeInProgress = false;
+          session!.setResumeStep("idle");
         }
       }
 
@@ -2080,7 +2316,6 @@ export function createSessionApp(
         acquireKittyKeyboard() {
           return kittyController?.acquireDemand() ?? (() => {});
         },
-        writeTerminal: writeTerminalOutput,
         requestTerminalReconcile,
         reportManagedInputFailure(error) {
           requestRuntimeFailure(error);
@@ -2125,6 +2360,9 @@ export function createSessionApp(
           try {
             kittyController?.reconcile();
             stdinController.reconcileTerminalState();
+            // Retry the device transitions a blocked or failed gate refused,
+            // once the demand above has settled.
+            terminal.reconcileModes();
           } catch (error) {
             if (!isTearingDown()) {
               requestRuntimeFailure(error);
@@ -2180,20 +2418,14 @@ export function createSessionApp(
         }
 
         let error: unknown;
-        let releaseSynchronizedOutput: (() => void) | undefined;
+        const synchronized = terminal.acquire("synchronized-output");
         try {
-          writeRuntimeOutput("stdout", bsu, undefined, () => {
-            releaseSynchronizedOutput ??= acquireSynchronizedOutputLease();
-          });
           body();
         } catch (caught) {
           error = caught;
         } finally {
           try {
-            writeRuntimeOutput("stdout", esu, undefined, () => {
-              releaseSynchronizedOutput?.();
-              releaseSynchronizedOutput = undefined;
-            });
+            synchronized.release();
           } catch (caught) {
             error ??= caught;
           }
@@ -2204,15 +2436,9 @@ export function createSessionApp(
       function runCoordinatedWrite(body: () => void, finalize: () => void): void {
         let error: unknown;
         let bodyStarted = false;
-        let syncStarted = false;
-        let releaseSynchronizedOutput: (() => void) | undefined;
+        let synchronized: TerminalLease<"synchronized-output"> | undefined;
         try {
-          if (synchronize) {
-            writeRuntimeOutput("stdout", bsu, undefined, () => {
-              releaseSynchronizedOutput ??= acquireSynchronizedOutputLease();
-            });
-            syncStarted = true;
-          }
+          if (synchronize) synchronized = terminal.acquire("synchronized-output");
           bodyStarted = true;
           body();
         } catch (caught) {
@@ -2225,12 +2451,9 @@ export function createSessionApp(
               error ??= caught;
             }
           }
-          if (syncStarted) {
+          if (synchronized) {
             try {
-              writeRuntimeOutput("stdout", esu, undefined, () => {
-                releaseSynchronizedOutput?.();
-                releaseSynchronizedOutput = undefined;
-              });
+              synchronized.release();
             } catch (caught) {
               error ??= caught;
             }
@@ -2240,11 +2463,7 @@ export function createSessionApp(
       }
 
       surfaceRuntime = {
-        terminal,
         stdout: "stdout",
-        get isResumeInProgress() {
-          return terminalResumeInProgress;
-        },
         get isStdoutTty() {
           return terminal.capabilities.stdout.isTTY;
         },
@@ -2261,12 +2480,9 @@ export function createSessionApp(
           return writeRuntimeOutput(output, data, undefined, onHandoff);
         },
         writeBestEffort,
-        writeTerminal: writeTerminalOutput,
         runCoordinatedWrite,
         runLifecycleTransaction,
         runSynchronizedOutput,
-        requestTerminalReconcile,
-        reportTerminalAcquired,
         reportTerminalReleased,
         setSurfaceAvailable(available) {
           session!.geometry?.setSurfaceAvailable(available);
@@ -2310,25 +2526,6 @@ export function createSessionApp(
           },
           requireSurfaceRuntime(),
         );
-      }
-
-      // Produce the visual dynamic frame for a given terminal width. Static
-      // output is handled separately by commit().
-      function renderFrame(
-        layout: ComputedLayout,
-        width: number,
-        viewportRows?: number,
-        geometry?: InternalGeometryPaintFrame,
-      ): Frame | undefined {
-        const frame = paint(tuiRoot, {
-          layout,
-          terminalStyle: renderSession.terminalStyle,
-          viewport: viewportRows === undefined ? undefined : { width, height: viewportRows },
-          geometry,
-        });
-        // `Frame` cannot have zero rows. Still paint to collect geometry, then
-        // omit that synthetic one-row frame from an empty at-most viewport.
-        return viewportRows === 0 ? undefined : frame;
       }
 
       let blockedFrameRetryPending = false;
@@ -2375,7 +2572,7 @@ export function createSessionApp(
           return acceptedCoordinatedWrite;
         }
         if (rejectedFullscreenStatic) return acceptedCoordinatedWrite;
-        if (isTerminalSuspended() && !terminalResumePainting) {
+        if (isTerminalSuspended() && !session!.isResumePainting()) {
           // Suspension pauses physical terminal ownership, not Vue or accepted
           // component lifetimes. Keep rendered-target validity current so a
           // hidden or detached focus boundary cannot retain logical ownership
@@ -2456,12 +2653,14 @@ export function createSessionApp(
             onFullyHanded() {
               acceptCommit();
               if (frameWritten) {
-                if (!terminalResumeInProgress) reportTerminalAcquired();
+                if (!session!.isResuming()) reportTerminalAcquired();
                 if (hasTestEventSink()) {
                   emitTestEvent(RUNTIME_TEST_EVENT.paintCommitted, {
                     frame:
                       committedFrameEncoding ??
-                      (committedFrame === undefined ? "" : encodeFrame(committedFrame)),
+                      (committedFrame === undefined
+                        ? ""
+                        : encodeFrame(committedFrame, renderSession.colorCapability)),
                   });
                 }
               }
@@ -2483,7 +2682,7 @@ export function createSessionApp(
       function commitFrame(hooks: CommitSettlementHooks) {
         if (session!.runtimeFailure || session!.mountFailure !== "none") return;
         if (rejectedFullscreenStatic) return;
-        if (isTerminalSuspended() && !terminalResumePainting) return;
+        if (isTerminalSuspended() && !session!.isResumePainting()) return;
         const staticNodes = findStatics(tuiRoot);
         if (rejectUnsupportedFullscreenStatic(staticNodes)) return;
         const leaveLifecycleTransaction = enterLifecycleTransaction();
@@ -2531,29 +2730,28 @@ export function createSessionApp(
         const dynamicHeight: LayoutHeightConstraint = outputSurface.layoutHeight(
           renderSession.session.dimensions.layout.rows,
         );
-        const layout = runLayoutTransaction({
+        geometryFrame = session!.geometry?.beginFrame();
+        const {
+          frame,
+          preparedStatic: prepared,
+          layout,
+        } = runRenderCommit({
           dynamicRoot: tuiRoot,
           staticRoots: staticNodes,
           columns: w,
           dynamicHeight,
+          paintViewport: "height-constraint",
+          focusController: session!.focusController,
+          geometry: geometryFrame,
         });
+        preparedStatic = prepared;
         try {
-          session!.focusController?.reconcileAfterLayout();
-          preparedStatic = prepareStaticOutput(layout, renderSession.terminalStyle);
-          const staticOutput = outputSurface.encodeHistory(preparedStatic.frames);
+          const staticOutput = outputSurface.encodeHistory(prepared.frames);
           const hasStaticOutput = staticOutput !== "";
-          const paintViewportRows =
-            dynamicHeight.mode === "exact"
-              ? dynamicHeight.rows
-              : dynamicHeight.mode === "at-most"
-                ? Math.min(dynamicHeight.rows, layout.dynamicHeight)
-                : undefined;
-
-          geometryFrame = session!.geometry?.beginFrame();
-          const frame = renderFrame(layout.computed, w, paintViewportRows, geometryFrame);
           let encodedFrame: string | undefined;
           if (renderObserver?.onCommit) {
-            encodedFrame = frame === undefined ? "" : encodeFrame(frame);
+            encodedFrame =
+              frame === undefined ? "" : encodeFrame(frame, renderSession.colorCapability);
             renderObserver.onCommit({
               dynamic: encodedFrame,
               staticOutput: hasStaticOutput ? staticOutput : "",
@@ -2569,7 +2767,7 @@ export function createSessionApp(
 
           if (onRender) onRender({ renderTime: performance.now() - start });
           if (
-            presentFrame(frame, encodedFrame, staticOutput, preparedStatic, {
+            presentFrame(frame, encodedFrame, staticOutput, prepared, {
               onHandoff: () => hooks.markStaticHanded(frame, encodedFrame),
               onPrepared: hooks.capturePostStaticRollback,
             })
@@ -2655,10 +2853,10 @@ export function createSessionApp(
       // and Vue-propagated initial failures through partial-tree cleanup and the
       // same idempotent terminal rollback before preserving the original error.
       let proxy: ComponentPublicInstance;
-      session!.vueMountStarted = true;
+      session!.setVueTree("mounting");
       try {
         proxy = originalMount(tuiRoot);
-        session!.vueMountCompleted = true;
+        session!.setVueTree("mounted");
         // A semantic route created during Vue setup can begin Kitty detection,
         // but its shared stdin ingress already exists. Ordinary input beside a
         // synchronous reply is retained until setup has installed the complete
@@ -2833,12 +3031,12 @@ export function createSessionApp(
       const leaveLifecycleTransaction = leaveMountLifecycleTransaction;
       leaveMountLifecycleTransaction = null;
       leaveLifecycleTransaction();
+      // Read before the transition: the mounting state is what carries a
+      // suspension the mount transaction deferred.
+      const suspensionDeferredByMount = session!.takeDeferredSuspension();
       if (!isTearingDown()) session!.transition("running");
       session!.endSuspensionGate();
-      if (pendingMountSuspension && !isTearingDown()) {
-        pendingMountSuspension = false;
-        suspendSession();
-      }
+      if (suspensionDeferredByMount && !isTearingDown()) suspendSession();
       if (session!.mountRuntimeFailure) throw session!.mountRuntimeFailure;
       return session!.userRoot ?? proxy;
     } catch (error) {
@@ -2876,7 +3074,7 @@ export function createSessionApp(
 
   // The app owner can wait for Vue, console, renderer, and stream work to settle.
   async function waitUntilRenderFlush(): Promise<void> {
-    if (!session?.appContext || !session.vueMountStarted || isTearingDown()) {
+    if (!session?.appContext || !session.isVueTreeStarted() || isTearingDown()) {
       if (isTearingDown() && !isTornDown()) {
         await exitPromise.catch(() => {});
       }

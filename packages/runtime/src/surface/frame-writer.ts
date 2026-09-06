@@ -1,4 +1,4 @@
-import logUpdate, { type LogUpdate, type LogUpdateWrite, type ResetOptions } from "./log-update.ts";
+import logUpdate, { type LogUpdate, type LogUpdateWrite } from "./log-update.ts";
 import type { TerminalBackend, TerminalOutput } from "../terminal/backend.ts";
 
 export interface FrameWriter {
@@ -6,8 +6,7 @@ export interface FrameWriter {
   done: () => void;
   clear: () => void;
   /** Forget the current physical region without writing terminal bytes. */
-  reset: (options?: ResetOptions) => void;
-  isCursorHidden: () => boolean;
+  reset: () => void;
   /** Restore bookkeeping after a captured transaction fails before full handoff. */
   createRollback: () => () => void;
 }
@@ -31,11 +30,8 @@ export function createFrameWriter(
     clear() {
       log.clear();
     },
-    reset(resetOptions?: ResetOptions) {
-      log.reset(resetOptions);
-    },
-    isCursorHidden() {
-      return log.isCursorHidden();
+    reset() {
+      log.reset();
     },
     createRollback() {
       const rollbackLog = log.createRollback();

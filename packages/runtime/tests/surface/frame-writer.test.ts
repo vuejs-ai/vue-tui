@@ -1,8 +1,6 @@
 import ansiEscapes from "ansi-escapes";
 import { describe, expect, test } from "vite-plus/test";
-import type { TerminalBackend } from "../../src/terminal/backend.ts";
 import { createTestTerminalBackend } from "../../src/terminal/test/backend.ts";
-import { hideCursorEscape, showCursorEscape } from "../../src/surface/cursor-helpers.ts";
 import { createFrameWriter } from "../../src/surface/frame-writer.ts";
 import logUpdate from "../../src/surface/log-update.ts";
 
@@ -13,7 +11,7 @@ function chunks(terminal: ReturnType<typeof createTestTerminalBackend>): string[
 describe("standard log updates", () => {
   test("renders and replaces every requested frame", () => {
     const terminal = createTestTerminalBackend();
-    const render = logUpdate.create(terminal, { showCursor: true });
+    const render = logUpdate.create(terminal);
 
     expect(render("Hello\n")).toBe(true);
     expect(render("Hello\n")).toBe(true);
@@ -28,7 +26,7 @@ describe("standard log updates", () => {
 
   test("clear erases the current frame and reset only forgets it", () => {
     const terminal = createTestTerminalBackend();
-    const render = logUpdate.create(terminal, { showCursor: true });
+    const render = logUpdate.create(terminal);
 
     render("Hello\n");
     render.clear();
@@ -40,54 +38,6 @@ describe("standard log updates", () => {
     expect(chunks(terminal)).toHaveLength(count + 1);
     render("Hello\n");
     expect(chunks(terminal)).toHaveLength(count + 2);
-  });
-});
-
-describe("terminal cursor ownership", () => {
-  test("hides lazily on a TTY and restores on done", () => {
-    const terminal = createTestTerminalBackend();
-    const render = logUpdate.create(terminal);
-
-    expect(render.isCursorHidden()).toBe(false);
-    render("Hello\n");
-    expect(chunks(terminal)[0]).toBe(hideCursorEscape);
-    expect(render.isCursorHidden()).toBe(true);
-
-    render.done();
-    expect(chunks(terminal).at(-1)).toBe(showCursorEscape);
-    expect(render.isCursorHidden()).toBe(false);
-  });
-
-  test("does not emit terminal cursor controls for non-TTY output", () => {
-    const terminal = createTestTerminalBackend({ capabilities: { stdout: { isTTY: false } } });
-    const render = logUpdate.create(terminal);
-
-    render("Hello\n");
-    render.done();
-
-    expect(chunks(terminal)).toEqual(["Hello\n"]);
-    expect(render.isCursorHidden()).toBe(false);
-  });
-
-  test("does not write restoration bytes after output becomes unavailable", () => {
-    const base = createTestTerminalBackend();
-    let writable = true;
-    const terminal: TerminalBackend = {
-      ...base,
-      get capabilities() {
-        return {
-          ...base.capabilities,
-          stdout: { ...base.capabilities.stdout, canWrite: writable },
-        };
-      },
-    };
-    const render = logUpdate.create(terminal);
-    render("Hello\n");
-    writable = false;
-
-    expect(() => render.done()).not.toThrow();
-    expect(chunks(base).at(-1)).not.toBe(showCursorEscape);
-    expect(render.isCursorHidden()).toBe(false);
   });
 });
 

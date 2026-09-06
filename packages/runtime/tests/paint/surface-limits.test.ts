@@ -4,10 +4,7 @@ import { createRoot } from "../../src/host/nodes.ts";
 import { runLayoutTransaction } from "../../src/layout/layout-transaction.ts";
 import { attachYoga, detachYoga } from "../../src/layout/yoga.ts";
 import { MAX_PAINT_SURFACE_CELLS, assertPaintSurfaceSize } from "../../src/paint/surface-limits.ts";
-import { paint, releasePaintCaches } from "../../src/paint/paint.ts";
-import { createTerminalStyle } from "../../src/text/terminal-style.ts";
-
-const terminalStyle = createTerminalStyle(3);
+import { paint } from "../../src/paint/paint.ts";
 
 test("accepts the exact paint-surface resource boundary without allocating it", () => {
   expect(() => assertPaintSurfaceSize(1_024, 1_024)).not.toThrow();
@@ -34,12 +31,11 @@ test("paint rejects an oversized surface with a Runtime error before grid alloca
   });
 
   try {
-    expect(() => paint(root, { layout: layout.computed, terminalStyle })).toThrow(
+    expect(() => paint(root, { layout: layout.computed })).toThrow(
       new RangeError("Paint surface 1024x1025 exceeds the 1048576-cell resource limit."),
     );
   } finally {
     layout.dispose();
-    releasePaintCaches(root);
     detachYoga(root);
   }
 });

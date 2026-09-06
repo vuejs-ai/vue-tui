@@ -12,10 +12,35 @@ export type TerminalMode =
   | "bracketed-paste"
   | "kitty-keyboard";
 
+export interface TerminalModeReleaseOptions {
+  /**
+   * Write the restore sequence synchronously, so it reaches the device before a
+   * signal exit re-raises or an emergency restore abandons the output gate.
+   */
+  readonly sync?: boolean;
+}
+
+/**
+ * How a mode's bytes reach the device while a session owns the output gate.
+ *
+ * `onAttempt` runs immediately before the backend write, including when that
+ * call throws; `onHandoff` runs only once the write has been handed off.
+ */
+export type TerminalModeWrite = (
+  data: string,
+  onHandoff?: () => void,
+  onAttempt?: () => void,
+) => boolean;
+
 /** A paired ownership handle for one terminal-wide mode. */
 export interface TerminalLease<Mode extends TerminalMode = TerminalMode> {
   readonly mode: Mode;
-  release(): void;
+  /**
+   * Re-issue this mode's enable bytes without changing ownership, for output
+   * that restates the mode at the head of its own region.
+   */
+  reassert(): void;
+  release(options?: TerminalModeReleaseOptions): void;
 }
 
 export interface TerminalOutputCapabilities {
@@ -60,13 +85,36 @@ export interface TerminalBackend {
   outputOwnerFor(output: TerminalOutput): object;
   /** Opaque identity used to share one physical input observer safely. */
   readonly inputOwner: object;
-  acquire<Mode extends TerminalMode>(mode: Mode): TerminalLease<Mode>;
   /**
-   * Whether any lease on this mode is outstanding. Both backends share the
-   * count; each mode still restores at its own site, which the architecture
-   * task list records as the remaining work.
+   * Take one share of a terminal-wide mode. The first holder's arrival issues
+   * the mode's enable bytes and the last one's departure issues its restore.
    */
-  isModeHeld(mode: TerminalMode): boolean;
+  acquire<Mode extends TerminalMode>(mode: Mode): TerminalLease<Mode>;
+  /** Whether the device is known to carry this mode now. */
+  isModeActive(mode: TerminalMode): boolean;
+  /**
+   * Whether this mode has no transition left to make: the state it will carry
+   * once every captured write has been handed off already matches its holders.
+   * A write still queued counts as its target, so this can be true before the
+   * device has taken the switch. A mode whose physical state is uncertain —
+   * an abandoned capture or a throwing write may have applied it — is never
+   * settled, whatever its holders ask for.
+   */
+  isModeSettled(mode: TerminalMode): boolean;
+  /** Install the gate mode writes travel through while a session owns output. */
+  attachModeWrites(write: TerminalModeWrite | null): void;
+  /** Forget mode writes captured by a transaction that never handed them off. */
+  abandonModeOutput(options?: { readonly physicalStateUncertain?: boolean }): void;
+  /** Re-run every mode's physical reconciliation against its current holders. */
+  reconcileModes(): void;
+  /** Drop every lease on one mode and restore the device. */
+  restoreMode(mode: TerminalMode, options?: TerminalModeReleaseOptions): void;
+  /** Sweep every mode this backend still owns back to its restored state. */
+  restoreModes(options?: TerminalModeReleaseOptions): void;
+  /** Observe mode transitions the device has taken or refused. */
+  onModeChange(listener: ((mode: TerminalMode) => void) | null): void;
+  /** Observe a failure from mode work the backend deferred past its caller. */
+  onModeFailure(listener: ((error: unknown) => void) | null): void;
   /** Physical raw-mode fact captured from the selected input device. */
   readonly isRawModeEnabled: boolean;
   setRawMode(enabled: boolean): void;
@@ -84,34 +132,4 @@ export interface TerminalBackend {
   onData(listener: (data: string | Uint8Array) => void): () => void;
   onInputEvent(event: TerminalInputEvent, listener: (error?: unknown) => void): () => void;
   onResize(listener: () => void): () => void;
-}
-
-/**
- * Reference-counted mode ownership, shared by every backend so that the count a
- * test observes is the count production keeps.
- */
-export function createModeLedger(): {
-  acquire<Mode extends TerminalMode>(mode: Mode): TerminalLease<Mode>;
-  isModeHeld(mode: TerminalMode): boolean;
-} {
-  const counts = new Map<TerminalMode, number>();
-  return {
-    acquire<Mode extends TerminalMode>(mode: Mode): TerminalLease<Mode> {
-      counts.set(mode, (counts.get(mode) ?? 0) + 1);
-      let active = true;
-      return Object.freeze({
-        mode,
-        release() {
-          if (!active) return;
-          active = false;
-          const next = Math.max(0, (counts.get(mode) ?? 1) - 1);
-          if (next === 0) counts.delete(mode);
-          else counts.set(mode, next);
-        },
-      });
-    },
-    isModeHeld(mode) {
-      return (counts.get(mode) ?? 0) > 0;
-    },
-  };
 }

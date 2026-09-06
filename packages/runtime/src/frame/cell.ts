@@ -6,9 +6,14 @@ export interface Hyperlink {
   readonly target: string;
 }
 
-/** One terminal cell: its grapheme, occupied width, inline style, and optional OSC 8 link. */
+/** One terminal cell: its grapheme, displayed width, inline style, and optional OSC 8 link. */
 export interface Cell {
   readonly grapheme: string;
+  /**
+   * The columns the grapheme displays. Inside a {@link Frame} a `0` marks the
+   * trailing half of a wide grapheme and carries no grapheme of its own, so a
+   * grapheme that displays nothing still enters a frame claiming its one column.
+   */
   readonly width: number;
   readonly style: Style;
   readonly link: Hyperlink | undefined;

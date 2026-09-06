@@ -28,6 +28,7 @@ import {
   reconcileMarginEdges,
   reconcilePaddingEdges,
   bindTextMeasure,
+  markTextContentDirty,
   markTextDirty,
 } from "../layout/yoga.ts";
 import {
@@ -173,7 +174,7 @@ function dirtyTextMeasureOwner(parent: TuiNode): void {
     return;
   }
   const owner = findMeasureOwner(parent);
-  if (owner?.type === "tui-text") markTextDirty(owner);
+  if (owner?.type === "tui-text") markTextContentDirty(owner);
 }
 
 /**
@@ -305,7 +306,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
           applyYogaProp(node, "display", nextHidden ? "none" : "flex");
         } else {
           const owner = findMeasureOwner(node);
-          if (owner?.type === "tui-text") markTextDirty(owner);
+          if (owner?.type === "tui-text") markTextContentDirty(owner);
         }
         onCommit();
       },
@@ -381,7 +382,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     // Bubble dirty up to the <Text> that owns the Yoga measure function.
     const owner = findMeasureOwner(node.parent as TuiNode | null);
     if (owner?.type === "tui-text") {
-      markTextDirty(owner);
+      markTextContentDirty(owner);
     }
     onCommit();
   }
@@ -401,7 +402,7 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     for (const child of Array.from(el.children)) remove(child);
     insert(createTextLeaf(text), el, null);
     if (el.type === "tui-text") {
-      markTextDirty(el);
+      markTextContentDirty(el);
     }
   }
 
@@ -582,11 +583,11 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
         // paint disagree (stale blank rows on wrap→truncate; overflow / overwritten
         // siblings on truncate→wrap). markTextDirty forces a re-measure. Every other
         // STYLE_PROP here (color/bold/border colors/…) is paint-only and never alters
-        // measured dimensions, so `wrap` is the sole case.
+        // measured dimensions, so `wrap` is the sole case. None of them touches the
+        // content revision either: paint reads the current props over the runs the
+        // node already holds.
         if (key === "wrap" && el.type === "tui-text") {
           markTextDirty(el);
-        } else if (el.type === "tui-text") {
-          el.textRevision++;
         }
       } else if (key === "key" || key === "ref" || key.startsWith("on")) {
         // Reserved by Vue / event keys, ignore.
@@ -600,8 +601,6 @@ export function buildNodeOps(options: TtyRendererOptions): RendererOptions<TuiNo
     if (el.type === "tui-virtual-text" && STYLE_PROPS.has(key)) {
       // Same removed-key normalization as the top-level Text host above.
       (el.props as Record<string, unknown>)[key] = next === null ? undefined : next;
-      const owner = findMeasureOwner(el);
-      if (owner?.type === "tui-text") owner.textRevision++;
       onCommit();
     }
   }
