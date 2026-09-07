@@ -144,4 +144,26 @@ describe("parse-keypress", () => {
     expect(key.shift).toBe(true);
     expect(key.ctrl).toBe(false);
   });
+
+  test("delivers Alt on a letter the shifted form distinguishes", () => {
+    const key = parseKeypress("\x1bO");
+    expect(key.name).toBe("o");
+    expect(key.meta).toBe(true);
+    expect(key.shift).toBe(true);
+    expect(key.ctrl).toBe(false);
+  });
+
+  test("delivers Alt on punctuation", () => {
+    for (const character of ["[", "\\", "]", "^", "_", "-", ".", "🙂"]) {
+      const key = parseKeypress(`\x1b${character}`);
+      expect(key.name).toBe(character);
+      expect(key.meta).toBe(true);
+      expect(key.ctrl).toBe(false);
+    }
+  });
+
+  test("a complete SS3 function key still wins over the Alt reading", () => {
+    expect(parseKeypress("\x1bOP").name).toBe("f1");
+    expect(parseKeypress("\x1bOP").meta).toBe(false);
+  });
 });

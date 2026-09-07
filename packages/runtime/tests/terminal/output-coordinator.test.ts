@@ -284,4 +284,62 @@ describe("output coordinator", () => {
     expect(chunks(terminal, "stderr")).toEqual([]);
     expect(coordinator.isBlocked()).toBe(false);
   });
+
+  test("a settlement observer that throws on the drain path still settles the transaction", async () => {
+    const deferredErrors: unknown[] = [];
+    const terminal = createTestTerminalBackend({
+      writeResults: { stdout: [false], stderr: [true] },
+    });
+    const coordinator = createOutputCoordinator({
+      terminal,
+      onDeferredError: (error) => deferredErrors.push(error),
+    });
+    const failure = new Error("settlement observer threw");
+
+    const result = coordinator.run(
+      () => {
+        coordinator.write("stdout", "a");
+        coordinator.write("stderr", "b");
+      },
+      {
+        onFullyHanded: () => {
+          throw failure;
+        },
+      },
+    );
+    expect(coordinator.isBlocked()).toBe(true);
+
+    terminal.emitOutput("stdout", "drain");
+    await Promise.resolve();
+
+    expect(deferredErrors).toEqual([failure]);
+    expect(coordinator.isBlocked()).toBe(false);
+    await expect(readyOf(result)).rejects.toThrow(failure);
+  });
+
+  test("a settlement observer that throws inside the body reaches the caller", () => {
+    const deferredErrors: unknown[] = [];
+    const terminal = createTestTerminalBackend();
+    const coordinator = createOutputCoordinator({
+      terminal,
+      onDeferredError: (error) => deferredErrors.push(error),
+    });
+    const failure = new Error("settlement observer threw");
+
+    expect(() =>
+      coordinator.run(
+        () => {
+          coordinator.write("stdout", "a");
+        },
+        {
+          onFullyHanded: () => {
+            throw failure;
+          },
+        },
+      ),
+    ).toThrow(failure);
+
+    expect(deferredErrors).toEqual([]);
+    expect(coordinator.isBlocked()).toBe(false);
+  });
 });

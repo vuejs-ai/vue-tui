@@ -786,12 +786,10 @@ export function getTextTerminalCellWidth(text: TuiText): number {
   const parentLayout = parent.getComputedLayout();
   const rightInset =
     parent.getComputedBorder(Yoga.EDGE_RIGHT) + parent.getComputedPadding(Yoga.EDGE_RIGHT);
-  // Paint places Text at floor(left), so clamp against the parent's integral
-  // right content edge in that same coordinate system. Flooring the fractional
-  // remainder as one value would lose the last valid cell for a Text spanning
-  // 9.23..10: it paints from cell 9 and owns that cell.
+  // Match the painted Text origin when counting cells before the parent's
+  // integral right content edge, so fractional siblings cannot overwrite it.
   const parentRight = Math.floor(parentLayout.width - rightInset);
-  const parentRemainder = Math.max(0, parentRight - Math.floor(layout.left));
+  const parentRemainder = Math.max(0, parentRight - Math.round(layout.left));
   width = Math.min(width, parentRemainder);
   return width;
 }

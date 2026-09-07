@@ -12,6 +12,8 @@ import {
 } from "../../../../packages/runtime/dist/internal.mjs";
 import { createInternalMountOptions } from "../../../../packages/runtime/dist/internal.mjs";
 import { INTERNAL_TERMINAL_SIZE_PROBE } from "../../../../packages/runtime/dist/internal.mjs";
+import { useStdout } from "../../../../packages/runtime/dist/internal.mjs";
+import type { CoordinatedWriteResult } from "../../../../packages/runtime/dist/internal.mjs";
 
 function makeWritable(): NodeJS.WriteStream {
   const stream = new PassThrough() as unknown as NodeJS.WriteStream;
@@ -509,3 +511,51 @@ test.sequential.each(["inline", "fullscreen"] as const)(
     }
   },
 );
+
+test.sequential("a write blocked by suspension settles its ready only once the gate reopens", async () => {
+  const stdout = makeWritable();
+  const stderr = makeWritable();
+  const stdin = makeRawTrackingStdin();
+  const suspensionHost = createManualSuspensionHost();
+  let write!: (data: string) => CoordinatedWriteResult;
+  const App = defineComponent(() => {
+    write = useStdout().write;
+    return () => <Text>frame</Text>;
+  });
+  const app = createApp(App);
+
+  try {
+    app.mount(
+      createInternalMountOptions({
+        stdout,
+        stderr,
+        stdin,
+        maxFps: 0,
+        patchConsole: false,
+        [INTERNAL_SUSPENSION_HOST]: suspensionHost,
+      }),
+    );
+    await app.waitUntilRenderFlush();
+    await suspensionHost.suspend();
+
+    const blocked = write("while-suspended\n");
+    if (blocked.status !== "blocked") throw new Error("expected a blocked write");
+
+    let settled = false;
+    void blocked.ready.then(() => {
+      settled = true;
+    });
+    // A retry loop that re-reads this result must not spin: draining the microtask
+    // queue and one macrotask leaves the write just as blocked as it was.
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    expect(settled).toBe(false);
+
+    await suspensionHost.resume();
+    await blocked.ready;
+    expect(settled).toBe(true);
+  } finally {
+    app.unmount();
+  }
+});

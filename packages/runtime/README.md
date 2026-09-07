@@ -97,7 +97,7 @@ The six modifier props use a three-state cascade. Omission or `undefined` inheri
 
 `borderStyle` accepts one of the eight named `cli-boxes` frames — `"single"`, `"double"`, `"round"`, `"bold"`, `"singleDouble"`, `"doubleSingle"`, `"classic"`, and `"arrow"` — or a complete frame object. A frame object must supply a string for every one of `topLeft`, `top`, `topRight`, `right`, `bottomRight`, `bottom`, `bottomLeft`, and `left`, and may carry no other key: a partial frame is an error rather than a border that silently loses a side. Each character is one string, since cell width is the renderer's business. The exported `Color` type contains the 16 canonical terminal color names and a `#${string}` arm; Runtime checks that a hex value contains exactly six hexadecimal digits.
 
-Runtime currently has no screen-reader presentation and no `ariaLabel`, `ariaHidden`, `ariaRole`, or `ariaState` component contract. It also has no environment-variable or internal-helper path that enables the removed experiment. A future accessibility design must provide a complete semantic and terminal-output model rather than making unsupported ARIA-shaped props look effective.
+Runtime has no screen-reader presentation and no `ariaLabel`, `ariaHidden`, `ariaRole`, or `ariaState` component contract, and no environment variable or helper turns one on. A future accessibility design must provide a complete semantic and terminal-output model rather than making unsupported ARIA-shaped props look effective.
 
 Cell counts are integers from 0 through 65,535. Margins and numeric offsets use the signed range from -65,535 through 65,535; padding, gaps, dimensions, and numeric flex basis are non-negative. Flex factors are finite values from 0 through 65,535. Width and flex-basis percentages use canonical decimal text from 0% through 100%, while percentage offsets use the same grammar with an optional minus sign and a bounded absolute value. Before allocating a visual grid, Runtime also limits the final surface to 1,048,576 cells, so individually valid width and height values are not a promise that every pair can be painted.
 
@@ -263,13 +263,13 @@ During suspension, layout refs and same-target accepted Box metrics keep their l
 
 These hooks intentionally do not expose Runtime's full render-session resolution, paint fragments, surface coordinates, clipping provenance, or renderer nodes.
 
-The earlier public focus-bound `useCaret()` experiment and its semantic caret controller are removed. Runtime still owns generic terminal-cursor visibility and restoration, but a future public caret primitive must first define a Text-position contract that an editor can use without depending on renderer coordinates. No current public caret API should be inferred from the generic cursor cleanup.
+Runtime owns generic terminal-cursor visibility and restoration and exposes no public caret API. A future public caret primitive must first define a Text-position contract that an editor can use without depending on renderer coordinates.
 
 ### Interaction capabilities outside this foundation
 
 Physical caret placement, targeted pointer routing, arbitrary-Text selection, and Runtime-owned clipboard transport are not public Runtime APIs in this foundation. Basic editable text and keyboard scrolling can be built from `useInput()`, Vue state, rendered glyphs, and component methods. A custom clipboard adapter is ordinary application dependency injection.
 
-Exact terminal-caret placement, pointer hit testing and capture, and arbitrary existing Text selection need final-paint facts that application code cannot derive. Their previous speculative controllers and services are removed, not retained as hidden policy. A future feature must first prove and add a smaller stable Runtime-only primitive. OSC 52 support is also deferred; no public `/fullscreen` interaction subpath or `MountOptions.clipboard` contract exists.
+Exact terminal-caret placement, pointer hit testing and capture, and arbitrary existing Text selection need final-paint facts that application code cannot derive, and Runtime provides none of them, publicly or privately. A future feature must first prove and add a smaller stable Runtime-only primitive. OSC 52 support is also deferred; no public `/fullscreen` interaction subpath or `MountOptions.clipboard` contract exists.
 
 ## App Lifecycle
 
