@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vite-plus/test";
 import type { TerminalBackend } from "../../src/terminal/backend.ts";
-import { createTestTerminalBackend } from "../../src/terminal/test/backend.ts";
+import { createTestTerminalBackend } from "./fixtures/test-terminal-backend.ts";
 import { createMountedStreamLifecycle } from "../../src/terminal/stream-lifecycle.ts";
 
 test("shared terminal observers fan a failed stderr write out to every mounted app", () => {

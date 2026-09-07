@@ -1,21 +1,20 @@
 import ansiEscapes from "ansi-escapes";
 import { describe, expect, test } from "vite-plus/test";
-import { createTestTerminalBackend } from "../../src/terminal/test/backend.ts";
+import { createTestTerminalBackend } from "../terminal/fixtures/test-terminal-backend.ts";
 import { createFrameWriter } from "../../src/surface/frame-writer.ts";
-import logUpdate from "../../src/surface/log-update.ts";
 
 function chunks(terminal: ReturnType<typeof createTestTerminalBackend>): string[] {
   return terminal.writes.map((write) => write.data);
 }
 
-describe("standard log updates", () => {
+describe("frame writer", () => {
   test("renders and replaces every requested frame", () => {
     const terminal = createTestTerminalBackend();
-    const render = logUpdate.create(terminal);
+    const writer = createFrameWriter(terminal);
 
-    expect(render("Hello\n")).toBe(true);
-    expect(render("Hello\n")).toBe(true);
-    expect(render("World\n")).toBe(true);
+    writer.write("Hello\n");
+    writer.write("Hello\n");
+    writer.write("World\n");
 
     expect(chunks(terminal)).toEqual([
       "Hello\n",
@@ -26,40 +25,18 @@ describe("standard log updates", () => {
 
   test("clear erases the current frame and reset only forgets it", () => {
     const terminal = createTestTerminalBackend();
-    const render = logUpdate.create(terminal);
-
-    render("Hello\n");
-    render.clear();
-    expect(chunks(terminal).at(-1)).toBe(ansiEscapes.eraseLines(2));
-
-    const count = chunks(terminal).length;
-    render("Hello\n");
-    render.reset();
-    expect(chunks(terminal)).toHaveLength(count + 1);
-    render("Hello\n");
-    expect(chunks(terminal)).toHaveLength(count + 2);
-  });
-});
-
-describe("frame writer", () => {
-  test("writes each requested frame and resets its physical region", () => {
-    const terminal = createTestTerminalBackend();
     const writer = createFrameWriter(terminal);
 
     writer.write("Hello\n");
-    const afterFirst = chunks(terminal).length;
-    writer.write("Hello\n");
-    expect(chunks(terminal).length).toBeGreaterThan(afterFirst);
-
     writer.clear();
-    const afterClear = chunks(terminal).length;
-    writer.write("Hello\n");
-    expect(chunks(terminal).length).toBeGreaterThan(afterClear);
+    expect(chunks(terminal).at(-1)).toBe(ansiEscapes.eraseLines(2));
 
-    writer.reset();
-    const afterReset = chunks(terminal).length;
     writer.write("Hello\n");
-    expect(chunks(terminal).length).toBeGreaterThan(afterReset);
+    const beforeReset = chunks(terminal).length;
+    writer.reset();
+    expect(chunks(terminal)).toHaveLength(beforeReset);
+    writer.write("Hello\n");
+    expect(chunks(terminal).at(-1)).toBe("Hello\n");
   });
 
   test("retries a write that throws", () => {
@@ -90,7 +67,7 @@ describe("frame writer", () => {
 
     writer.write("OLD\n");
     const rollback = writer.createRollback();
-    writer.write("NEXT\n");
+    writer.write("NEXT\nSECOND LINE\n");
     rollback();
     rollback();
     writer.write("FINAL\n");

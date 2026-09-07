@@ -1620,7 +1620,7 @@ export function createSessionApp(
   const preparedRoot = extension.prepareRoot?.(root, rootProps, captureUserRoot);
   const baseApp = renderer.createApp(
     preparedRoot?.root ?? root,
-    preparedRoot?.rootProps ?? rootProps,
+    preparedRoot ? preparedRoot.rootProps : rootProps,
   );
   const originalMount = baseApp.mount.bind(baseApp);
   const originalUnmount = baseApp.unmount.bind(baseApp);

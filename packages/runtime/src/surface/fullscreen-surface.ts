@@ -56,12 +56,6 @@ export class FullscreenSurface extends SurfaceBase {
     runtime.setSurfaceAvailable(false);
     this.releaseAlternateScreen(true);
     this.releaseCursorVisibility(true);
-    try {
-      this.getAttachedWriter()?.reset();
-    } catch {
-      // Continue the release sequence when log-update has already lost its
-      // physical baseline to a failed terminal transaction.
-    }
     this.forgetFrame();
     runtime.reportTerminalReleased();
   }
@@ -70,23 +64,9 @@ export class FullscreenSurface extends SurfaceBase {
     return this.ensureTerminalLease();
   }
 
-  dispose(runtime: SurfaceRuntime, options: SurfaceDisposeOptions): void {
-    const writer = this.getAttachedWriter();
-    // Each release stands alone: a throw here must not cost the terminal its
-    // main screen or its cursor, which the two releases below restore. The
-    // failure is still the teardown's, so it is raised once they have run.
-    let releaseFailure: { readonly error: unknown } | undefined;
-    if (writer && runtime.isStdoutWritable) {
-      try {
-        if (options.sync) writer.reset();
-        else writer.done();
-      } catch (error) {
-        releaseFailure = { error };
-      }
-    }
+  dispose(_runtime: SurfaceRuntime, options: SurfaceDisposeOptions): void {
     this.releaseAlternateScreen(options.sync);
     this.releaseCursorVisibility(options.sync);
-    if (releaseFailure) throw releaseFailure.error;
   }
 
   resize(_runtime: SurfaceRuntime, resize: SurfaceResize): void {

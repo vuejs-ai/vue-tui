@@ -5,8 +5,11 @@ import type {
   TerminalOutput,
   TerminalOutputEvent,
   TerminalSize,
-} from "../backend.ts";
-import { createTerminalModeLeases, type TerminalModeLeases } from "../mode-leases.ts";
+} from "../../../src/terminal/backend.ts";
+import {
+  createTerminalModeLeases,
+  type TerminalModeLeases,
+} from "../../../src/terminal/mode-leases.ts";
 
 export interface TestTerminalBackendOptions {
   readonly capabilities?: Partial<{
@@ -15,7 +18,6 @@ export interface TestTerminalBackendOptions {
     readonly stderr: Partial<TerminalCapabilities["stderr"]>;
     readonly environment: Readonly<Record<string, string | undefined>>;
   }>;
-  readonly size?: Partial<TerminalSize>;
   readonly writeResults?: Partial<Readonly<Record<TerminalOutput, readonly (boolean | Error)[]>>>;
   readonly onWrite?: (output: TerminalOutput, data: string) => void;
 }
@@ -26,7 +28,6 @@ export interface TestTerminalBackend extends TerminalBackend {
   emitData(data: string | Uint8Array): void;
   emitInput(event: TerminalInputEvent, error?: unknown): void;
   emitOutput(output: TerminalOutput, event: TerminalOutputEvent, error?: unknown): void;
-  emitResize(): void;
 }
 
 const defaultCapabilities: TerminalCapabilities = Object.freeze({
@@ -47,8 +48,8 @@ export function createTestTerminalBackend(
     environment: options.capabilities?.environment ?? defaultCapabilities.environment,
   });
   const size: TerminalSize = Object.freeze({
-    columns: options.size?.columns === undefined ? 80 : options.size.columns,
-    rows: options.size?.rows === undefined ? 24 : options.size.rows,
+    columns: 80,
+    rows: 24,
   });
   const writes: Array<{ output: TerminalOutput; data: string }> = [];
   const writeResultIndexes = new Map<TerminalOutput, number>();
@@ -58,7 +59,6 @@ export function createTestTerminalBackend(
     TerminalOutput,
     Map<TerminalOutputEvent, Set<(error?: unknown) => void>>
   >();
-  const resizeListeners = new Set<() => void>();
   // The controller writes through the backend below, which is complete before
   // any mode can be acquired.
   let modes!: TerminalModeLeases;
@@ -76,9 +76,6 @@ export function createTestTerminalBackend(
       active = false;
       listeners.delete(listener);
     };
-  };
-  const emit = (listeners: ReadonlySet<() => void>): void => {
-    for (const listener of Array.from(listeners)) listener();
   };
 
   const backend: TestTerminalBackend = {
@@ -173,8 +170,8 @@ export function createTestTerminalBackend(
       }
       return subscribe(listeners, listener);
     },
-    onResize(listener) {
-      return subscribe(resizeListeners, listener);
+    onResize() {
+      return () => {};
     },
     emitData(data) {
       for (const listener of Array.from(dataListeners)) listener(data);
@@ -186,9 +183,6 @@ export function createTestTerminalBackend(
       for (const listener of Array.from(outputListeners.get(output)?.get(event) ?? [])) {
         listener(error);
       }
-    },
-    emitResize() {
-      emit(resizeListeners);
     },
   };
   modes = createTerminalModeLeases(backend);

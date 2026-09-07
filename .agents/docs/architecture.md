@@ -78,14 +78,14 @@ Each directory may import only what its row lists, and the direction is strictly
 
 The render and input stages, in pipeline order:
 
-| Directory   | Owns                                                                                                                                               | May import                                     |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| `host/`     | Node types. No engine handle on the node, no Vue import                                                                                            | —                                              |
-| `layout/`   | `LayoutEngine`, `ComputedLayout`, `Rect`                                                                                                           | `host/`, `text/`, `frame/`                     |
-| `paint/`    | `Painter`: tree + `ComputedLayout` + viewport → `Frame`                                                                                            | `host/`, `layout/`, `text/`, `frame/`          |
-| `surface/`  | `InlineSurface`, `FullscreenSurface`, `DocumentSurface`, each holding its own previous frame; the Frame → ANSI encoder                             | `terminal/`, `frame/`                          |
-| `input/`    | Shared byte ingress, `InputParser`, `InputSequence`, `InputEvent`, `InputDispatcher`                                                               | `terminal/`                                    |
-| `terminal/` | The `TerminalBackend` interface plus its node and test implementations, mode leases, capabilities, size, backpressure, the output transaction gate | nothing (`terminal/node/` may import `node:*`) |
+| Directory   | Owns                                                                                                                                | May import                                     |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `host/`     | Node types. No engine handle on the node, no Vue import                                                                             | —                                              |
+| `layout/`   | `LayoutEngine`, `ComputedLayout`, `Rect`                                                                                            | `host/`, `text/`, `frame/`                     |
+| `paint/`    | `Painter`: tree + `ComputedLayout` + viewport → `Frame`                                                                             | `host/`, `layout/`, `text/`, `frame/`          |
+| `surface/`  | `InlineSurface`, `FullscreenSurface`, `DocumentSurface`, each holding its own previous frame; the Frame → ANSI encoder              | `terminal/`, `frame/`                          |
+| `input/`    | Shared byte ingress, `InputParser`, `InputSequence`, `InputEvent`, `InputDispatcher`                                                | `terminal/`                                    |
+| `terminal/` | The `TerminalBackend` interface and Node implementation, mode leases, capabilities, size, backpressure, the output transaction gate | nothing (`terminal/node/` may import `node:*`) |
 
 Shared data and utilities, on no stage of their own:
 

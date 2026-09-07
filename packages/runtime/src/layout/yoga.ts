@@ -806,11 +806,9 @@ export function getComputedTextMeasure(text: TuiText): ComputedTextMeasure {
   const content = ensureTextContent(text);
   const state = textYogaMeasureStates.get(text);
   const cached = state?.cache;
-  // The measure ran against Yoga's budget for this node, which a row parent
-  // sets wider than the width the node finally takes. Greedy wrapping at any
-  // width between the widest measured line and that budget yields the same
-  // lines, so the measured array is reused and paint sees one identity per
-  // revision rather than a fresh copy every commit.
+  // A row parent may measure with a wider budget than the node's final width.
+  // Greedy wrapping yields the same lines at any width between the widest
+  // measured line and that budget, so the cached wrapping remains valid.
   if (
     cached?.revision === text.contentRevision &&
     cached.wrap === text.props.wrap &&

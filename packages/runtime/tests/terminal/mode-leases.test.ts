@@ -1,6 +1,6 @@
 import { expect, test } from "vite-plus/test";
 import type { TerminalBackend } from "../../src/terminal/backend.ts";
-import { createTestTerminalBackend } from "../../src/terminal/test/backend.ts";
+import { createTestTerminalBackend } from "./fixtures/test-terminal-backend.ts";
 
 /** A gate that captures each mode write and hands it off only when asked. */
 function createCapturingGate(terminal: TerminalBackend): {

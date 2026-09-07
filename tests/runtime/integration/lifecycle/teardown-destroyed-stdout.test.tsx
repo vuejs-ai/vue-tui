@@ -117,8 +117,6 @@ describe("teardown stdout writes on destroyed stdout", () => {
     // Terminal torn down underneath us BEFORE teardown. isTTY stays truthy.
     stdout.hardDestroy();
 
-    // Teardown must not even ATTEMPT the show-cursor write on a dead stdout
-    // (via mountedWriter.done() -> log-update showCursor), and must not throw.
     expect(() => app.unmount()).not.toThrow();
     expect(
       stdout.showCursorWhileDead,

@@ -4,7 +4,7 @@ import {
   createStdinController,
   type ManagedInputSession,
 } from "../../src/session/stdin-controller.ts";
-import { createTestTerminalBackend } from "../../src/terminal/test/backend.ts";
+import { createTestTerminalBackend } from "../terminal/fixtures/test-terminal-backend.ts";
 
 test("bracketed paste is disabled when its enable write may have succeeded", () => {
   const terminal = createTestTerminalBackend();
