@@ -66,6 +66,7 @@ export interface Surface {
   readonly kind: ResolvedLiveSurface["kind"];
   /** Whether a rendered frame can be shown before teardown. */
   readonly isLive: boolean;
+  readonly frameAnchor: "leading" | "trailing";
   /** Whether `Static` and coordinated output become terminal history here. */
   readonly acceptsHistory: boolean;
   /** Whether Fullscreen's terminal lease is currently ready for managed input. */
@@ -87,6 +88,7 @@ export interface Surface {
 export abstract class SurfaceBase implements Surface {
   abstract readonly kind: ResolvedLiveSurface["kind"];
   abstract readonly isLive: boolean;
+  readonly frameAnchor: "leading" | "trailing" = "leading";
 
   readonly acceptsHistory: boolean = true;
 

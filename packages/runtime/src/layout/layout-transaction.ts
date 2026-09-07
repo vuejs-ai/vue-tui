@@ -16,6 +16,7 @@ import {
   getAttachedYogaNode,
   getComputedTextMeasure,
   getYogaNode,
+  hasAuthoredFlexShrink,
 } from "./yoga.ts";
 
 type ContainerWithChildren = TuiRoot | TuiBox | TuiText | TuiStatic;
@@ -251,6 +252,33 @@ function applyZeroContentGuards(node: TuiNode, guarded: Map<YogaNode, number>): 
   return changed;
 }
 
+// Yoga has no content-based automatic minimum height. Preserve vertical content
+// by default while leaving authored flexShrink and horizontal allocation intact.
+function pinVerticalAxisAgainstShrinking(node: TuiNode, pinned: Array<[YogaNode, number]>): void {
+  if (!hasChildren(node)) return;
+  const parentYoga = getAttachedYogaNode(node);
+  const direction = parentYoga?.getFlexDirection();
+  const stacksVertically =
+    direction === Yoga.FLEX_DIRECTION_COLUMN || direction === Yoga.FLEX_DIRECTION_COLUMN_REVERSE;
+
+  for (const child of node.children) {
+    const yoga = getAttachedYogaNode(child);
+    if (stacksVertically && yoga) {
+      // Text's shrink value is assigned internally for horizontal wrapping.
+      const authored = child.type !== "tui-text" && hasAuthoredFlexShrink(yoga);
+      if (
+        yoga.getPositionType() !== Yoga.POSITION_TYPE_ABSOLUTE &&
+        yoga.getFlexShrink() !== 0 &&
+        !authored
+      ) {
+        pinned.push([yoga, yoga.getFlexShrink()]);
+        yoga.setFlexShrink(0);
+      }
+    }
+    pinVerticalAxisAgainstShrinking(child, pinned);
+  }
+}
+
 /** Calculates geometry while suppressing flow descendants of zero-content boxes. */
 function calculateLayoutWithContentGuards(
   root: TuiRoot,
@@ -258,11 +286,15 @@ function calculateLayoutWithContentGuards(
   height?: number,
 ): () => void {
   const guarded = new Map<YogaNode, number>();
+  const pinned: Array<[YogaNode, number]> = [];
+  pinVerticalAxisAgainstShrinking(root, pinned);
   const restore = () => {
     for (const [node, display] of [...guarded].reverse()) {
       node.setDisplay(display);
       activeContentGuards.delete(node);
     }
+    for (const [node, flexShrink] of pinned) node.setFlexShrink(flexShrink);
+    pinned.length = 0;
   };
 
   try {

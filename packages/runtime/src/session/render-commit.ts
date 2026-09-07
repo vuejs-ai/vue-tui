@@ -17,12 +17,10 @@ export interface RenderCommitRequest {
   readonly columns: number;
   readonly dynamicHeight: LayoutHeightConstraint;
   /**
-   * `"height-constraint"` paints the dynamic frame into `columns` by the rows
-   * the constraint resolved to, so a host that owns a fixed terminal region
-   * gets a frame clipped and padded to it. `"none"` paints the laid-out
-   * picture, leaving any bound on the result to the caller.
+   * Mounted surfaces paint a leading or trailing window bounded by the height
+   * constraint. `"none"` paints the laid-out picture for string encoding.
    */
-  readonly paintViewport: "height-constraint" | "none";
+  readonly paintViewport: "leading" | "trailing" | "none";
   /** Reconciles rendered availability once the transaction has landed. */
   readonly focusController: InternalFocusController | null;
   /** Frame-local geometry collector; the caller commits or discards it. */
@@ -61,7 +59,10 @@ export function runRenderCommit(request: RenderCommitRequest): RenderCommitResul
     dynamicRoot: request.dynamicRoot,
     staticRoots: request.staticRoots,
     columns: request.columns,
-    dynamicHeight: request.dynamicHeight,
+    dynamicHeight:
+      request.paintViewport === "trailing" && request.dynamicHeight.mode === "at-most"
+        ? { mode: "unbounded" }
+        : request.dynamicHeight,
   });
   try {
     request.focusController?.reconcileAfterLayout();
@@ -73,7 +74,16 @@ export function runRenderCommit(request: RenderCommitRequest): RenderCommitResul
     const frame = paint(request.dynamicRoot, {
       layout: layout.computed,
       viewport:
-        viewportRows === undefined ? undefined : { width: request.columns, height: viewportRows },
+        viewportRows === undefined
+          ? undefined
+          : {
+              width: request.columns,
+              height: viewportRows,
+              top:
+                request.paintViewport === "trailing"
+                  ? Math.max(0, layout.dynamicHeight - viewportRows)
+                  : 0,
+            },
       geometry: request.geometry,
     });
     return {

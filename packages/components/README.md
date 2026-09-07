@@ -114,6 +114,8 @@ useInput((event) => {
 </template>
 ```
 
+`ScrollBox` is `flex: 1 1 0` — it takes its height from its parent and keeps none of its own. The `<Box :height="6">` above is what gives it one; inside a content-sized parent it is zero rows tall and paints nothing.
+
 ### Imperative handle (`ScrollBoxExpose`)
 
 `ScrollBox` has no props; grab its handle with a template ref and drive scrolling:

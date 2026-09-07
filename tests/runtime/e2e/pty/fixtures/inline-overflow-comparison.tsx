@@ -17,6 +17,7 @@ import {
 type Scenario =
   | "current-full"
   | "current-shrink"
+  | "overflow-window"
   | "bounded"
   | "bounded-tail"
   | "static-tail"
@@ -114,6 +115,18 @@ const App = defineComponent(() => {
         ),
         h(Text, null, () => `TAIL ${revision.value}`),
       ]);
+    }
+
+    if (scenario === "overflow-window") {
+      // Four rows taller than the terminal, with only the last row changing. The
+      // window is the trailing terminal-sized part of the document.
+      return h(Box, { flexDirection: "column" }, () =>
+        Array.from({ length: rows + 4 }, (_, index) =>
+          h(Text, { key: index }, () =>
+            index === rows + 3 ? `LAST ${revision.value}` : `ROW ${index}`,
+          ),
+        ),
+      );
     }
 
     if (scenario === "bounded" || scenario === "bounded-tail" || scenario === "explicit-preclear") {

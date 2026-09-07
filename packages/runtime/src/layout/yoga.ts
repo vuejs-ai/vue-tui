@@ -55,6 +55,11 @@ let textYogaConfig: YogaConfig | undefined;
 let textYogaConfigUsers = 0;
 const textYogaMeasureStates = new WeakMap<TuiText, TextMeasureState>();
 const yogaNodes = new WeakMap<YogaCarrier, YogaNode>();
+const authoredFlexShrink = new WeakSet<YogaNode>();
+
+export function hasAuthoredFlexShrink(node: YogaNode): boolean {
+  return authoredFlexShrink.has(node);
+}
 
 function acquireTextYogaConfig(): YogaConfig {
   if (!textYogaConfig) {
@@ -235,7 +240,11 @@ const YOGA_PROP_SETTERS: Record<string, (n: YogaNode, v: unknown) => void> = {
       : n.setMinHeight(v == null ? 0 : (v as number)),
   // Flex removals restore the Box defaults established by attachYoga().
   flexGrow: (n, v) => n.setFlexGrow(v == null ? 0 : (v as number)),
-  flexShrink: (n, v) => n.setFlexShrink(v == null ? 1 : (v as number)),
+  flexShrink: (n, v) => {
+    if (v == null) authoredFlexShrink.delete(n);
+    else authoredFlexShrink.add(n);
+    n.setFlexShrink(v == null ? 1 : (v as number));
+  },
   // flexBasis accepts cell numbers and percentage strings:
   //   number → setFlexBasis (absolute cells)
   //   string → setFlexBasisPercent(Number(v without "%")) — the public
