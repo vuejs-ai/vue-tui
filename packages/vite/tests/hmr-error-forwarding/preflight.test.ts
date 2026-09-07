@@ -2,6 +2,7 @@ import { expect, test, vi } from "vite-plus/test";
 import type { DevEnvironment, EnvironmentModuleNode, Plugin } from "vite";
 import { hmrErrorForwardingPlugin } from "../../src/hmr-error-forwarding.ts";
 import type { WatcherUpdateTracker } from "../../src/watcher-update.ts";
+import { createWatcherUpdateTracker } from "../../src/watcher-update.ts";
 
 type PreflightContext = {
   environment: Pick<DevEnvironment, "name" | "transformRequest">;
@@ -38,7 +39,7 @@ function moduleNode(url: string): EnvironmentModuleNode {
 }
 
 test("preflights every changed SSR source module in the forwarding plugin's post hook", async () => {
-  const plugin = hmrErrorForwardingPlugin();
+  const plugin = hmrErrorForwardingPlugin({ watcherUpdates: createWatcherUpdateTracker() });
   const hook = preflightHook(plugin);
 
   expect(plugin.name).toBe("vue-tui:hmr-error-forwarding");
@@ -63,7 +64,9 @@ test("preflights every changed SSR source module in the forwarding plugin's post
 });
 
 test("preflight covers modules the runner evaluates and skips the rest", async () => {
-  const handler = preflightHook(hmrErrorForwardingPlugin()).handler;
+  const handler = preflightHook(
+    hmrErrorForwardingPlugin({ watcherUpdates: createWatcherUpdateTracker() }),
+  ).handler;
   const nonSsrTransform = vi.fn();
   const ssrTransform = vi.fn(async () => undefined);
 
@@ -111,7 +114,7 @@ test("a pre-classified duplicate is removed before SSR preflight and runner deli
 });
 
 test("preflight stops at the first failed module and preserves the original rejection", async () => {
-  const plugin = hmrErrorForwardingPlugin();
+  const plugin = hmrErrorForwardingPlugin({ watcherUpdates: createWatcherUpdateTracker() });
   const original = new Error("compiler failed");
   const transformRequest = vi
     .fn()

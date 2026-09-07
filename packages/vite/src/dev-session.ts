@@ -9,15 +9,8 @@
  * first step. So on every `vite.config.ts` edit the incoming session claims while
  * the outgoing one still holds.
  *
- * Rejecting that overlap made an ordinary config edit abort the restart, leaving
- * the developer's change unapplied. It only looked correct because the test
- * fixtures imported the plugin by relative path, which Vite's config loader
- * bundles INLINE — giving each reload a fresh copy of this module and silently
- * resetting the singleton. A published consumer imports the bare specifier, which
- * is externalized, and hit the failure every time.
- *
- * So an overlap is a handover: wait for the outgoing session to let go. A genuine
- * second concurrent server never does, and still fails.
+ * An overlap is therefore a handover: wait for the outgoing session to let go. A
+ * genuine second concurrent server never does, and still fails.
  */
 
 interface ActiveSession {

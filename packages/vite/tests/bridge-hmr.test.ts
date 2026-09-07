@@ -238,10 +238,10 @@ test("the same failure arriving from both environments is delivered once", () =>
   ]);
 });
 
-// Captured from one real unplugin-vue syntax error. Vite's client payload uses
-// an empty frame while the SSR preflight supplies source context plus plugin/id;
-// treating only `undefined` as absent left this production pair unmatched even
-// though symmetric hand-written unit payloads passed.
+// Captured from one real unplugin-vue syntax error. Vite's client payload uses an
+// empty frame while the SSR preflight supplies source context plus plugin/id, so
+// an absent frame is `""` here, not `undefined`, and matching on `undefined` alone
+// leaves this production pair unmatched.
 test("the measured client and SSR payload shapes are paired", () => {
   const { server, ssrSend } = bridged(1785293748167);
   const message = "[vue/compiler-sfc] Unexpected token (7:33)";
