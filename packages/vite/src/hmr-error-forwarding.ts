@@ -9,7 +9,7 @@ import {
 import { ESModulesEvaluator, type HMRLogger, type ModuleEvaluator } from "vite/module-runner";
 import { invalidateDevHmrUpdate } from "@vue-tui/runtime/internal/devtools";
 import { stripModuleIdQuery } from "./entry-match.ts";
-import { createWatcherUpdateTracker, type WatcherUpdateTracker } from "./watcher-update.ts";
+import type { WatcherUpdateTracker } from "./watcher-update.ts";
 
 const SOURCE_MODULE_RE = /\.(?:[cm]?[jt]sx?|vue)$/;
 
@@ -73,7 +73,9 @@ export interface HmrErrorForwardingDependencies {
 
 interface HmrErrorForwardingOptions {
   readonly dependencies?: HmrErrorForwardingDependencies;
-  readonly watcherUpdates?: WatcherUpdateTracker;
+  // Shared with devPlugin, which writes it in the `pre` hot-update hook; see the
+  // note on that option.
+  readonly watcherUpdates: WatcherUpdateTracker;
 }
 
 const defaultDependencies: HmrErrorForwardingDependencies = {
@@ -124,8 +126,8 @@ export class VueTuiViteHmrCompatibilityError extends Error {
 
 export function hmrErrorForwardingPlugin({
   dependencies = defaultDependencies,
-  watcherUpdates = createWatcherUpdateTracker(),
-}: HmrErrorForwardingOptions = {}): Plugin {
+  watcherUpdates,
+}: HmrErrorForwardingOptions): Plugin {
   let installedFactory: SsrEnvironmentFactory | undefined;
   const createdEnvironments = new WeakSet<object>();
   // Set by the environment factory below. The hot-update preflight and the
@@ -159,11 +161,6 @@ export function hmrErrorForwardingPlugin({
     //    environment and once for the SSR environment, and no code here sees
     //    both. That pair is collapsed where they meet instead — `bridge-hmr.ts`.
     //
-    // Three reviews have now called this loop redundant by checking whether the
-    // four hot-update failure shapes still report at all. They do. "Reports at
-    // least once" and "reports once" are different properties, and only the
-    // second is what a developer experiences. The ~2-8ms of duplicate transform
-    // per hot update buys the second.
     hotUpdate: {
       order: "post",
       async handler(options) {
@@ -316,26 +313,9 @@ export function hmrErrorForwardingPlugin({
         });
         createdEnvironments.add(environment);
 
-        // Vite invokes accept callbacks inside a try/finally with no catch (the
-        // closure `fetchUpdate` returns), so a throw from ANY of them — the
-        // shapes a compiler generates, and the ones an application writes by
-        // hand — escapes as an unhandled rejection and Node ends the dev
-        // process. This is the one compiler-independent choke point, so guard
-        // the mechanism here instead of pattern-matching generated source text.
-        //
-        // Guarded at `fetchUpdate`, NOT at `queueUpdate`, because queueUpdate is
-        // a BATCH and not an update. It pushes `fetchUpdate(payload)` onto a
-        // queue, and only the first call in a microtask drains that queue and
-        // invokes EVERY queued update's accept callback inside itself. Scoping
-        // there put concurrent updates in one scope, so a fetch failure in the
-        // first update silently swallowed an unrelated accept-callback error in
-        // the second — reproduced against a real HMRClient in the spec.
-        //
-        // fetchUpdate is the per-update unit: it performs that one update's
-        // import, so the evaluator's and the logger's reports land in its scope,
-        // and it RETURNS that update's accept callback. Capturing the scope in
-        // the returned closure is what carries the attribution across into the
-        // batch that eventually invokes it.
+        // Vite leaves accept-callback throws uncaught. Each fetchUpdate owns one
+        // diagnostic scope; its returned callback retains that scope when
+        // queueUpdate invokes the batch, keeping unrelated failures independent.
         const client = environment.runner.hmrClient;
         if (client === undefined) {
           throw new VueTuiViteHmrCompatibilityError();
@@ -414,7 +394,7 @@ export function hmrErrorForwardingPlugin({
             }
             // Swallowed, not rethrown, for a second reason: Vite runs the
             // batch as `callbacks.forEach(fn => fn())`, so one module's throw
-            // used to skip every later module's update as well.
+            // would otherwise skip every later module's update as well.
           };
         };
         const queueUpdate = client.queueUpdate.bind(client);
@@ -452,10 +432,10 @@ export function hmrErrorForwardingPlugin({
         },
       });
     },
-    // Not redundant with configureServer below: an environment factory replaced
-    // INDIRECTLY (a plugin rewriting `dev` wholesale after ours resolved) is only
-    // observable here, and deleting this turns that e2e case green while the
-    // defect ships. Verified by removing it and running the suite.
+    // This runs during resolveConfig, before _createServer calls the factory, so
+    // a replacement installed after ours resolved is caught before the replaced
+    // factory can run. The configureServer guard below makes the same comparison
+    // but only after that call would already have happened.
     applyToEnvironment(environment) {
       if (
         environment.name === "ssr" &&
@@ -466,16 +446,8 @@ export function hmrErrorForwardingPlugin({
       }
       return true;
     },
-    // The only guard of the four with no test, and kept deliberately. A review
-    // argued it is unreachable because every path that rewrites
-    // `config.environments.ssr.dev` closes before resolveConfig returns — true,
-    // but that is the FIRST check here. The second one is about a different
-    // window: `server.environments.ssr` itself being swapped after Vite built
-    // it. Measured that window rather than reasoning about it — the property is
-    // writable and an assignment from another plugin's configureServer takes
-    // effect — so this stays until someone shows our hook cannot observe it.
-    // Deleting it leaves the whole suite green, which is why the measurement is
-    // recorded here instead of as a test.
+    // Another configureServer hook can replace the writable SSR environment
+    // after the factory checks have completed.
     configureServer(server) {
       if (
         installedFactory !== undefined &&

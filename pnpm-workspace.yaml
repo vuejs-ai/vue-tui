@@ -31,6 +31,7 @@ catalog:
   string-width: ^8.0.0
   unplugin-vue: ^7.2.0
   vue-tsc: ^3.3.4
+  magic-string: 0.30.21
 overrides:
   # Pin vite's version spec tree-wide (incl. third-party peer ranges) to the catalog version.
   # "catalog:" tracks catalog.vite — vanilla 8.2.1 now, NOT Vite+ core (core is the commented

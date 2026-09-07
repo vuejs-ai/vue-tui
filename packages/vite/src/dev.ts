@@ -20,7 +20,8 @@ import {
   normalizeDevEntry,
   resolveConfiguredEntry,
 } from "./entry-match.ts";
-import { createWatcherUpdateTracker, type WatcherUpdateTracker } from "./watcher-update.ts";
+import type { WatcherUpdateTracker } from "./watcher-update.ts";
+import MagicString from "magic-string";
 
 class UnsupportedVueCompilerError extends Error {
   override readonly name = "VueTuiUnsupportedCompilerError";
@@ -37,7 +38,9 @@ async function closeLosingServer(server: ViteDevServer, error: unknown): Promise
 
 export function devPlugin(opts: {
   session: DevSessionRef;
-  watcherUpdates?: WatcherUpdateTracker;
+  // Written here in the `pre` hot-update hook and read by hmrErrorForwardingPlugin
+  // in the `post` one, so both plugins must be given the same tracker.
+  watcherUpdates: WatcherUpdateTracker;
 }): Plugin {
   // `entry` becomes the rooted form devEntryFromViteInput() produces (leading
   // "/" or a drive-letter path) once Vite resolves the top-level `input`. The SSR
@@ -45,7 +48,7 @@ export function devPlugin(opts: {
   // from config.root in configResolved.
   let entry = normalizeDevEntry();
   const session = opts.session;
-  const watcherUpdates = opts.watcherUpdates ?? createWatcherUpdateTracker();
+  const watcherUpdates = opts.watcherUpdates;
   let resolvedEntryAbs = entry;
   let preserveSymlinks = false;
   let closing = false;
@@ -119,7 +122,12 @@ export function devPlugin(opts: {
       // absolute module path EXACTLY against the entry resolved from the Vite root —
       // never a suffix match that could hit an unrelated file ending in the same path.
       if (moduleIdMatchesConfiguredEntry(id, resolvedEntryAbs, preserveSymlinks)) {
-        return { code: `import ${JSON.stringify(DEV_VMOD_ID)};\n` + code, map: null };
+        const transformed = new MagicString(code);
+        transformed.prepend(`import ${JSON.stringify(DEV_VMOD_ID)};\n`);
+        return {
+          code: transformed.toString(),
+          map: transformed.generateMap({ source: id, includeContent: true, hires: true }),
+        };
       }
     },
     hotUpdate: {
