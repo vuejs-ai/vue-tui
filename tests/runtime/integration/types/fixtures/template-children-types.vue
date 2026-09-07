@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Type-only fixture (not run): pins that consumer TEMPLATES type-check vue-tui
 // components under vue-tsc — props validated, slot children accepted — with the
-// components exported as WithChildren-wrapped defineComponents.
+// components exported through the `PublicComponent` shim.
 //
 // Scope note: Vue templates allow undeclared component attributes as possible
 // fallthrough input, so a fat-fingered `<Box :bogusprop="1">` is not reliably a

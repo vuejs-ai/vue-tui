@@ -158,10 +158,12 @@ class CellGrid {
       const row = top + offsetY;
 
       // A row can fall outside the picture when text is taller than the
-      // computed layout. `offsetY` deliberately does not advance here: a write
-      // that begins above the surface keeps every later row on that same
-      // out-of-range index rather than sliding up into view.
-      if (row < 0 || row >= this.height) continue;
+      // computed layout. Advance with the write so later rows retain their
+      // position and can still land inside the picture.
+      if (row < 0 || row >= this.height) {
+        offsetY++;
+        continue;
+      }
 
       let cells = line;
       let lineX = x;
@@ -555,9 +557,11 @@ export interface PaintOptions {
   /** Private frame-local geometry collector. Publication happens after paint succeeds. */
   readonly geometry?: PaintGeometryFrame;
   /**
-   * Clip paint and semantic geometry to an app-owned viewport. Fullscreen
-   * rendering uses this to keep off-screen layout from wrapping or scrolling
-   * the alternate screen and to exclude cells outside the addressable surface.
+   * Clip painted cells to an app-owned viewport. Fullscreen rendering uses this
+   * to keep off-screen layout from wrapping or scrolling the alternate screen
+   * and to exclude cells outside the addressable surface. Semantic geometry is
+   * recorded from accepted layout and is not clipped: a Box lying entirely
+   * outside the viewport still reports its rectangle to `useBoxMetrics()`.
    */
   readonly viewport?: { readonly width: number; readonly height: number };
 }
@@ -726,12 +730,13 @@ function paintNode(
     }
     case "tui-text": {
       if (!computed) return;
-      // Text keeps its pre-pixel-grid fractional geometry so measurement and
-      // paint can quantize the same width without a feedback layout. Terminal
-      // writes still need integral cell coordinates; floor matches the
-      // conservative start edge used for its complete-cell budget.
-      const left = Math.floor(computed.rect.left);
-      const top = Math.floor(computed.rect.top);
+      // Text keeps its pre-pixel-grid fractional geometry so measurement and paint
+      // can quantize the same width without a feedback layout. Its origin still has
+      // to land on the grid line the layout engine handed its siblings, which it
+      // reaches by rounding — flooring a half-cell offset starts the write one cell
+      // inside the preceding Box and overwrites that Box's last painted column or row.
+      const left = Math.round(computed.rect.left);
+      const top = Math.round(computed.rect.top);
       const y = y0 + top;
       // This span is only an early-clip bound. Text geometry can retain a
       // positive fractional height, so round outward here; the grid remains the

@@ -94,6 +94,7 @@ This is not a general target API. Focus keeps a component-boundary availability 
 
 ```ts
 import type { Ref } from "vue";
+import type { PublicBoxInstance } from "@vue-tui/runtime";
 
 export interface UseBoxMetricsReturn {
   readonly width: Readonly<Ref<number>>;
@@ -103,8 +104,8 @@ export interface UseBoxMetricsReturn {
   readonly hasMeasured: Readonly<Ref<boolean>>;
 }
 
-export function useBoxMetrics(
-  target: Readonly<Ref<InstanceType<typeof Box> | null | undefined>>,
+export function useBoxMetrics<T extends PublicBoxInstance>(
+  target: Readonly<Ref<T | null | undefined>>,
 ): UseBoxMetricsReturn;
 ```
 

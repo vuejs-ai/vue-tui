@@ -96,19 +96,19 @@ interface RenderOptions {
 | `patchConsole` | `false`    | Whether `console.*` output uses Runtime's modeled frame-safe writer                           |
 | `exitOnCtrlC`  | `false`    | Whether exact Ctrl+C exits before reaching managed input subscriptions                        |
 | `retainFrames` | `true`     | Whether `frames` and `lastFrame()` retain renderer commits                                    |
-| `columns`      | `100`      | Layout and emulator width                                                                     |
-| `rows`         | `100`      | Emulator height and TTY height                                                                |
+| `columns`      | `100`      | Emulator width, and layout width when `stdout` is `"tty"`                                     |
+| `rows`         | `100`      | Emulator height, and TTY height when `stdout` is `"tty"`                                      |
 | `props`        | —          | Props passed to the root component                                                            |
 
-`columns` and `rows` must be positive safe integers no greater than 65535. They set both the modeled output dimensions and the emulator dimensions. Because the xterm test emulator allocates the complete viewport, their product must also be no greater than 1048576 cells; use direct Runtime streams when testing a larger Inline terminal whose rendered region is small. `rows` still controls the emulator when `host.stdout` is `"stream"`, while the Runtime layout remains row-unbounded because a stream does not own a finite visual viewport.
+`columns` and `rows` must be positive safe integers no greater than 65535. They set the emulator dimensions, and on a TTY `stdout` they also set the modeled output dimensions. Because the xterm test emulator allocates the complete viewport, their product must also be no greater than 1048576 cells; use direct Runtime streams when testing a larger Inline terminal whose rendered region is small. When `stdout` is `"stream"`, `columns` and `rows` size only the emulator: the mounted Runtime lays out the fixed 80x24 document every non-TTY host gets, because a stream owns no terminal to measure.
 
-For an Inline TTY, `rows` is the production maximum live-region height: short content is not padded, while naturally taller layout is recalculated within that height and hard-clipped to the modeled columns and rows. Stream output remains row-unbounded. The emulated Inline screen also includes production's initial fresh-row boundary, immutable coordinated output, and snapshot-on-resize behavior; content frames exclude those writer controls.
+For an Inline TTY, `rows` is the production maximum live-region height: short content is not padded, while naturally taller layout is recalculated within that height and hard-clipped to the modeled columns and rows. The emulated Inline screen also includes production's initial fresh-row boundary, immutable coordinated output, and snapshot-on-resize behavior; content frames exclude those writer controls.
 
 ### What the modeled host does
 
 The first five options above model production facts rather than setting unrelated internal booleans. In particular:
 
-- a Fullscreen request on stream stdout is rejected before component setup or terminal mutation;
+- a Fullscreen request on stream stdout mounts the document host instead, exactly as production does when stdout is not a TTY;
 - TTY output updates live, while stream output follows Runtime's monotonic document policy.
 
 The test host has no screen-reader presentation selector. It models only supported Runtime hosts; the removed ARIA and transcript experiment is not available here.
@@ -227,8 +227,8 @@ interface ScreenSnapshot {
 | `stdin.write(data)`                  | Emits string or `Uint8Array` bytes through the production input stream and parser, settles finite Escape ambiguity, then waits for resulting rendering and emulator writes |
 | `terminal.columns` / `terminal.rows` | Current emulator dimensions                                                                                                                                                |
 | `terminal.resize(columns, rows)`     | Validates the same axis and emulator-cell limits as `render()`, resizes the modeled streams and emulator, emits resize, and waits for rendering                            |
-| `terminal.suspend()`                 | Releases modeled input modes; Inline and transcript output remain on the normal buffer, Fullscreen restores the normal buffer, and stream hosts emit no final frame        |
-| `terminal.resume()`                  | Refreshes dimensions, then establishes and repaints a fresh Inline/transcript region or Fullscreen viewport before reacquiring requested input modes                       |
+| `terminal.suspend()`                 | Releases modeled input modes; Inline output remains on the normal buffer, Fullscreen restores the normal buffer, and stream hosts emit no final frame                      |
+| `terminal.resume()`                  | Refreshes dimensions, then establishes and repaints a fresh Inline region or Fullscreen viewport before reacquiring requested input modes                                  |
 | `terminal.rawMode`                   | Runtime-readonly live view of the current raw-mode state and transition history                                                                                            |
 
 The deterministic suspension control drives the production lifecycle boundary but does not pause the JavaScript event loop. While suspended, `terminal.resize()` changes the emulator dimensions immediately; `terminal.resume()` refreshes Runtime layout facts before repainting a live terminal surface and then reacquires requested input modes. Stream hosts have no live frame to repaint.

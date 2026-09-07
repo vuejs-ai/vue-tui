@@ -110,10 +110,13 @@ const normalizeSequence = (sequence: string): InputEvent | undefined => {
   if (!isEncodedKey) return undefined;
 
   const protocol = keypress.isKittyProtocol ? "kitty" : "legacy";
+  const characterLength = (keypress.name.codePointAt(0) ?? 0) > 0xff_ff ? 2 : 1;
   const printable =
     keypress.isPrintable ??
     (!nonAlphanumericKeys.includes(keypress.name) &&
-      (keypress.name.length === 1 || keypress.name === "number" || keypress.name === "space"));
+      (keypress.name.length === characterLength ||
+        keypress.name === "number" ||
+        keypress.name === "space"));
   const key: InternalKeyDetail = Object.freeze({
     protocol,
     name: keypress.name || undefined,

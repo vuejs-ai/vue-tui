@@ -303,16 +303,16 @@ export function createOutputCoordinator(options: {
           return current.fullyHanded;
         }
       }
+      current.fullyHanded = true;
+      reportFullyHanded(current);
+      if (!current.bodyActive) finish(current);
+      return true;
     } catch (error) {
       const deferred = !current.bodyActive;
       fail(current, error, deferred);
       if (!deferred) throw error;
       return false;
     }
-    current.fullyHanded = true;
-    reportFullyHanded(current);
-    if (!current.bodyActive) finish(current);
-    return true;
   }
 
   function handoff(): boolean {
