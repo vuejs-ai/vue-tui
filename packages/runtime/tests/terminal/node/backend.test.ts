@@ -294,7 +294,7 @@ test("an external listener added during pause keeps input flowing", () => {
   stdin.off("data", external);
 });
 
-test("the node backend counts mode ownership like the test backend does", () => {
+test("the node backend restores a mode after its last holder releases it", () => {
   const stdout = createWritable();
   const backend = new NodeTerminalBackend({
     stdin: createReadable(),

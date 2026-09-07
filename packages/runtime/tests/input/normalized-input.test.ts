@@ -3,7 +3,7 @@ import { PassThrough } from "node:stream";
 import { normalizeInputSequence, type InputEvent } from "../../src/input/normalized-input.ts";
 import { getSharedInputIngress } from "../../src/input/shared-input-ingress.ts";
 import { createNodeTerminalBackend } from "../../src/terminal/node/backend.ts";
-import { createTestTerminalBackend } from "../../src/terminal/test/backend.ts";
+import { createTestTerminalBackend } from "../terminal/fixtures/test-terminal-backend.ts";
 
 function getIngress(stdin: NodeJS.ReadStream) {
   return getSharedInputIngress(

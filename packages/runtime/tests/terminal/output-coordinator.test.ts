@@ -3,7 +3,7 @@ import type { TerminalBackend, TerminalOutput } from "../../src/terminal/backend
 import {
   createTestTerminalBackend,
   type TestTerminalBackend,
-} from "../../src/terminal/test/backend.ts";
+} from "./fixtures/test-terminal-backend.ts";
 import {
   createOutputCoordinator,
   type CoordinatedWriteResult,

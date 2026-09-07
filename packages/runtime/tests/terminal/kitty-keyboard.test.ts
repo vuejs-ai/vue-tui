@@ -7,7 +7,7 @@ import {
 import {
   createTestTerminalBackend,
   type TestTerminalBackend,
-} from "../../src/terminal/test/backend.ts";
+} from "./fixtures/test-terminal-backend.ts";
 
 const noQueryDetection: StartKittyQueryResponseDetection = () => () => {};
 

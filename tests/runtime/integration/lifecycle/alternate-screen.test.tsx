@@ -150,11 +150,8 @@ test("alternate screen - enters before setup-owned input modes", async () => {
   await exited;
 });
 
-// Port of Ink ink.tsx:970-976 (setAlternateScreen): when entering the alternate
-// screen, Ink writes enterAlternativeScreen IMMEDIATELY followed by the hide-cursor
-// escape — a hide that is part of the ENTER sequence, distinct from log-update's
-// own writer-side hide on the first frame. Lock that the hide byte (\x1b[?25l)
-// appears at/after the enterAlternativeScreen index but BEFORE any rendered content.
+// Fullscreen hides the cursor after entering the alternate screen and before
+// writing the first frame.
 test("alternate screen - hides cursor as part of the enter sequence", async () => {
   const stdout = makeTtyStream();
   const stdin = makeFakeStdin();

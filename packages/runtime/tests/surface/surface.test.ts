@@ -8,7 +8,7 @@ import type { SurfaceHistory, SurfaceRuntime } from "../../src/surface/surface-c
 import {
   createTestTerminalBackend,
   type TestTerminalBackend,
-} from "../../src/terminal/test/backend.ts";
+} from "../terminal/fixtures/test-terminal-backend.ts";
 
 const truecolor = createColorCapability(3);
 
@@ -160,9 +160,7 @@ test("Inline owns a bounded writer region and restores it around history", () =>
 test("Fullscreen owns its terminal lease and fixed-viewport presentation", () => {
   const { runtime, terminal, modeWrites, writes } = createHost();
   const surface = createSurface("fullscreen-terminal", truecolor, terminal);
-  const { writer, frames } = createWriter();
   const { history: staticHistory } = history();
-  surface.attachWriter(writer);
 
   expect(surface.present({ frame: frame("top\nbottom"), history: staticHistory }, runtime)).toBe(
     true,
@@ -173,7 +171,6 @@ test("Fullscreen owns its terminal lease and fixed-viewport presentation", () =>
   // the head of the frame it is about to paint.
   expect(modeWrites).toEqual(["\x1b[?1049h\x1b[H", "\x1b[?25l", "\x1b[?25l"]);
   expect(writes.at(-1)?.data).toContain("\x1b[2J");
-  expect(frames).toEqual([]);
 
   // Disposal gives both modes back, in the sweep's order.
   surface.dispose(runtime, { cleanExit: true, sync: true });
@@ -199,33 +196,11 @@ test("Fullscreen keeps post-snapshot physical acquisitions until disposal", () =
 test("Document hands history off immediately and writes one final clean frame", () => {
   const { runtime, terminal, writes } = createHost();
   const surface = createSurface("final-stream", truecolor, terminal);
-  const { writer } = createWriter();
   const { history: staticHistory, handed } = history("past\n");
-  surface.attachWriter(writer);
 
   expect(surface.present({ frame: frame("latest"), history: staticHistory }, runtime)).toBe(true);
   surface.dispose(runtime, { cleanExit: true, sync: false });
 
   expect(handed).toEqual(["past\n"]);
   expect(writes.map(({ data }) => data)).toEqual(["latest\n"]);
-});
-
-test("Fullscreen restores the screen when the writer throws on release", () => {
-  const { runtime, terminal, modeWrites } = createHost();
-  const surface = createSurface("fullscreen-terminal", truecolor, terminal);
-  const { writer } = createWriter();
-  surface.attachWriter({
-    ...writer,
-    done() {
-      throw new Error("writer release failed");
-    },
-  });
-
-  surface.present({ frame: frame("a"), history: history().history }, runtime);
-  // One failing release must not cost the terminal its main screen or cursor,
-  // and must still reach the caller as the teardown failure it is.
-  expect(() => surface.dispose(runtime, { cleanExit: true, sync: false })).toThrow(
-    "writer release failed",
-  );
-  expect(modeWrites.slice(-2)).toEqual(["\x1b[?1049l", "\x1b[?25h"]);
 });

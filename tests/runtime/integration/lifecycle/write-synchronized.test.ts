@@ -1,6 +1,6 @@
 import { test, expect } from "vite-plus/test";
 import { bsu, esu, shouldSynchronize } from "../../../../packages/runtime/dist/internal.mjs";
-import { createTestTerminalBackend } from "../../../../packages/runtime/src/terminal/test/backend.ts";
+import { createTestTerminalBackend } from "../../../../packages/runtime/tests/terminal/fixtures/test-terminal-backend.ts";
 
 test("bsu is the expected synchronized update sequence", () => {
   expect(bsu).toBe("\x1b[?2026h");
