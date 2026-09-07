@@ -2740,7 +2740,7 @@ export function createSessionApp(
           staticRoots: staticNodes,
           columns: w,
           dynamicHeight,
-          paintViewport: "height-constraint",
+          paintViewport: outputSurface.frameAnchor,
           focusController: session!.focusController,
           geometry: geometryFrame,
         });

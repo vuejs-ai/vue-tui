@@ -562,8 +562,16 @@ export interface PaintOptions {
    * and to exclude cells outside the addressable surface. Semantic geometry is
    * recorded from accepted layout and is not clipped: a Box lying entirely
    * outside the viewport still reports its rectangle to `useBoxMetrics()`.
+   *
+   * `top` is the first document row the surface shows, so a caller can paint a
+   * window further down a taller document with a viewport-sized cell grid.
+   * It defaults to zero, which paints from the top of the document.
    */
-  readonly viewport?: { readonly width: number; readonly height: number };
+  readonly viewport?: {
+    readonly width: number;
+    readonly height: number;
+    readonly top?: number;
+  };
 }
 
 function intersectPaintRect(rect: PaintRect, clip: PaintRect | undefined): PaintRect | undefined {
@@ -605,9 +613,10 @@ export function paint(root: TuiNode, options: PaintOptions): Frame {
   if (!rootLayout) throw new Error("paint requires the root ComputedLayout");
   const width = Math.max(1, Math.floor(options.viewport?.width ?? rootLayout.rect.width));
   const height = Math.max(1, Math.floor(options.viewport?.height ?? rootLayout.rect.height));
+  const top = Math.max(0, Math.floor(options.viewport?.top ?? 0));
   const grid = new CellGrid(width, height, options.viewport !== undefined);
   const viewportClip = options.viewport ? { x: 0, y: 0, width, height } : undefined;
-  paintNode(root, options.layout, grid, 0, 0, undefined, viewportClip, options.geometry);
+  paintNode(root, options.layout, grid, 0, -top, undefined, viewportClip, options.geometry);
   return grid.toFrame();
 }
 

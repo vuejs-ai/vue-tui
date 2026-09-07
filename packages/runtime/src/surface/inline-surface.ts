@@ -15,6 +15,7 @@ import {
 export class InlineSurface extends SurfaceBase {
   readonly kind = "inline-terminal";
   readonly isLive = true;
+  readonly frameAnchor = "trailing";
 
   private regionStarted = false;
   private cursorVisibilityLease: TerminalLease<"cursor-visibility"> | undefined;

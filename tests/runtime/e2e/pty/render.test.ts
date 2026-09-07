@@ -156,7 +156,7 @@ it("#450: full-height rerenders should not repeatedly clear terminal", async () 
   expect(eraseLineCount).toBeGreaterThan(0);
 });
 
-it("#450: initial over-height tree is top-clipped without a terminal reset", async () => {
+it("#450: an initial over-height tree shows its newest rows without a terminal reset", async () => {
   const renderedMarker = "__INITIAL_OVERFLOW_FRAME_RENDERED__";
   const outputBeforeMarker = await runIssue450FixtureBeforeMarker(
     "issue-450-initial-overflow",
@@ -165,9 +165,12 @@ it("#450: initial over-height tree is top-clipped without a terminal reset", asy
   );
 
   expectNoMainScreenReset(outputBeforeMarker);
-  expect(outputBeforeMarker).toContain("#450 initial overflow line 1");
-  expect(outputBeforeMarker).toContain("#450 initial overflow line 3");
-  expect(outputBeforeMarker).not.toContain("#450 initial overflow line 4");
+  // Four lines into three rows: the window is the trailing three, contiguous, so
+  // the newest line is visible and the first one is never written.
+  expect(outputBeforeMarker).not.toContain("#450 initial overflow line 1");
+  for (const line of [2, 3, 4]) {
+    expect(outputBeforeMarker).toContain(`#450 initial overflow line ${line}`);
+  }
 });
 
 it("#450: initial full-height frame should not clear terminal", async () => {

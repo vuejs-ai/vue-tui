@@ -102,7 +102,7 @@ interface RenderOptions {
 
 `columns` and `rows` must be positive safe integers no greater than 65535. They set the emulator dimensions, and on a TTY `stdout` they also set the modeled output dimensions. Because the xterm test emulator allocates the complete viewport, their product must also be no greater than 1048576 cells; use direct Runtime streams when testing a larger Inline terminal whose rendered region is small. When `stdout` is `"stream"`, `columns` and `rows` size only the emulator: the mounted Runtime lays out the fixed 80x24 document every non-TTY host gets, because a stream owns no terminal to measure.
 
-For an Inline TTY, `rows` is the production maximum live-region height: short content is not padded, while naturally taller layout is recalculated within that height and hard-clipped to the modeled columns and rows. The emulated Inline screen also includes production's initial fresh-row boundary, immutable coordinated output, and snapshot-on-resize behavior; content frames exclude those writer controls.
+For an Inline TTY, `rows` is the production maximum live-region height: short content is not padded, while taller content keeps its natural layout height and displays the trailing window, hard-clipped to the modeled columns and rows. The emulated Inline screen also includes production's initial fresh-row boundary, immutable coordinated output, and snapshot-on-resize behavior; content frames exclude those writer controls.
 
 ### What the modeled host does
 

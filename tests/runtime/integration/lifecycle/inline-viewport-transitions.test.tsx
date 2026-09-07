@@ -60,7 +60,7 @@ it("#450: non-TTY overflow transitions should never clear terminal", async () =>
   expect(clearCount).toBe(0);
 });
 
-it("#450: viewport shrink commits the old snapshot and paints a fresh bounded region", async () => {
+it("#450: viewport shrink commits the old snapshot and paints a fresh window", async () => {
   const stdout = makeFakeWritable({ rows: 10 });
   const stderr = makeFakeWritable();
   const { stream: stdin } = makeFakeStdin();
@@ -86,8 +86,10 @@ it("#450: viewport shrink commits the old snapshot and paints a fresh bounded re
   expect(resizeOutput).not.toContain("\x1b[H");
   expect(resizeOutput).not.toContain("\x1b[2K");
   expect(resizeOutput).toContain(ansiEscapes.cursorDown(4) + nextLineEscape);
-  for (let line = 1; line <= 4; line++) expect(resizeOutput).toContain(`line${line}`);
-  for (let line = 5; line <= 8; line++) expect(resizeOutput).not.toContain(`line${line}`);
+  // Eight rows into four: the fresh region is the trailing window, contiguous, so
+  // the newest rows are the ones repainted after the resize.
+  for (let line = 1; line <= 4; line++) expect(resizeOutput).not.toContain(`line${line}`);
+  for (let line = 5; line <= 8; line++) expect(resizeOutput).toContain(`line${line}`);
 
   app.unmount();
 });
