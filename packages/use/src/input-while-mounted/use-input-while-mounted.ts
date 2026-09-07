@@ -1,9 +1,18 @@
-import { isRef, shallowRef, type MaybeRef } from "vue";
+import { shallowRef, type MaybeRef } from "vue";
 import { useInput, type TuiInputEvent } from "@vue-tui/runtime";
+import { resolveHandlerSource } from "../input/handler-source.ts";
 
 type InputType = TuiInputEvent["type"];
 type InputEventOf<Type extends InputType> = Extract<TuiInputEvent, { readonly type: Type }>;
 type InputHandler<Event extends TuiInputEvent = TuiInputEvent> = (event: Event) => void;
+
+export function assertInputType(
+  value: unknown,
+  apiName = "useInputWhileMounted()",
+): asserts value is InputType {
+  if (value === "text" || value === "key" || value === "paste") return;
+  throw new TypeError(`${apiName} type must be "text", "key", or "paste"`);
+}
 
 function readInputType(options: unknown): InputType {
   if (
@@ -15,12 +24,10 @@ function readInputType(options: unknown): InputType {
   }
   const keys = Reflect.ownKeys(options);
   if (keys.length !== 1 || keys[0] !== "type") {
-    throw new TypeError('useInputWhileMounted() options only supports the "type" property');
+    throw new TypeError('useInputWhileMounted() options requires exactly the "type" property');
   }
   const type: unknown = Reflect.get(options, "type");
-  if (type !== "text" && type !== "key" && type !== "paste") {
-    throw new TypeError('useInputWhileMounted() type must be "text", "key", or "paste"');
-  }
+  assertInputType(type);
   return type;
 }
 
@@ -65,28 +72,15 @@ export function useInputWhileMounted(
   options?: unknown,
 ): InputWhileMountedTargetRef {
   const mounted = shallowRef(false);
+  const selectedType = options === undefined ? undefined : readInputType(options);
+  const callHandler = resolveHandlerSource<TuiInputEvent>(
+    "useInputWhileMounted()",
+    handler as MaybeRef<InputHandler>,
+  );
 
-  if (options === undefined) {
-    useInput(handler as MaybeRef<InputHandler>, { isActive: mounted });
+  if (selectedType === undefined) {
+    useInput(callHandler, { isActive: mounted });
   } else {
-    const selectedType = readInputType(options);
-    if (typeof handler !== "function" && !isRef(handler)) {
-      throw new TypeError("useInputWhileMounted() handler must be a function");
-    }
-
-    const callHandler =
-      typeof handler === "function"
-        ? (event: TuiInputEvent) => handler(event)
-        : (event: TuiInputEvent) => {
-            const currentHandler: unknown = handler.value;
-
-            if (typeof currentHandler !== "function") {
-              throw new TypeError("useInputWhileMounted() handler must be a function");
-            }
-
-            currentHandler(event);
-          };
-
     useInput(
       (event) => {
         if (event.type !== selectedType) return;

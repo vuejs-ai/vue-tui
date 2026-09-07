@@ -1,4 +1,5 @@
-import { isRef, type MaybeRef, type MaybeRefOrGetter } from "vue";
+import { type MaybeRef, type MaybeRefOrGetter } from "vue";
+import { resolveHandlerSource } from "./handler-source.ts";
 import { useInput, type TuiInputEvent } from "@vue-tui/runtime";
 
 type PasteInputEvent = Extract<TuiInputEvent, { readonly type: "paste" }>;
@@ -26,22 +27,7 @@ export function usePasteInput(
   handler: MaybeRef<(event: PasteInputEvent) => void>,
   options?: { readonly isActive?: MaybeRefOrGetter<boolean> },
 ): void {
-  if (typeof handler !== "function" && !isRef(handler)) {
-    throw new TypeError("usePasteInput() handler must be a function");
-  }
-
-  const callHandler =
-    typeof handler === "function"
-      ? handler
-      : (event: PasteInputEvent) => {
-          const currentHandler: unknown = handler.value;
-
-          if (typeof currentHandler !== "function") {
-            throw new TypeError("usePasteInput() handler must be a function");
-          }
-
-          currentHandler(event);
-        };
+  const callHandler = resolveHandlerSource("usePasteInput()", handler);
 
   useInput((event) => {
     if (event.type === "paste") {

@@ -194,7 +194,7 @@ test.each([
   [
     "an unknown field",
     { type: "key", active: true },
-    'useInputWhileMounted() options only supports the "type" property',
+    'useInputWhileMounted() options requires exactly the "type" property',
   ],
   [
     "an unknown type",
@@ -213,6 +213,26 @@ test.each([
 test("rejects a non-function filtered handler before subscribing", async () => {
   const App = defineComponent(() => {
     useInputWhileMounted(null as never, { type: "key" });
+    return () => <Text>unreachable</Text>;
+  });
+
+  await expect(render(App)).rejects.toThrow("useInputWhileMounted() handler must be a function");
+});
+
+test("reports a malformed selector before a malformed handler", async () => {
+  const App = defineComponent(() => {
+    useInputWhileMounted(null as never, { type: "bogus" } as never);
+    return () => <Text>unreachable</Text>;
+  });
+
+  await expect(render(App)).rejects.toThrow(
+    'useInputWhileMounted() type must be "text", "key", or "paste"',
+  );
+});
+
+test("rejects a non-function unfiltered handler under its own name", async () => {
+  const App = defineComponent(() => {
+    useInputWhileMounted(null as never);
     return () => <Text>unreachable</Text>;
   });
 

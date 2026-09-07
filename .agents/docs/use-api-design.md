@@ -33,6 +33,8 @@ The return value is one stable Vue function ref that the caller binds directly t
 
 The paired `<UseInputWhileMounted>` component is exported from `@vue-tui/use/components`. It renders only its default slot, emits `input` during its own mounted lifetime, and accepts a reactive optional `type` prop that narrows the emitted event. Changing or hiding only the slot content does not deactivate the wrapper.
 
+The component validates `type` before subscribing and on each delivered event. An invalid reactive value fails through Runtime's input-error path, which releases the subscription and raw-mode demand.
+
 The root stays composable-only. A renderless companion belongs on `/components`, not in the visual `@vue-tui/components` catalog, because it is another authoring form of independent headless behavior. The general entry-point ruling is vouched in [package architecture](./package-architecture.md#renderless-companions-of-independent-hooks).
 
 ## Vue and public types
